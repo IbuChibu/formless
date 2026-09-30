@@ -32,7 +32,7 @@ Required technology:
 
 # Milestone 1 — Foundation
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 React frontend and FastAPI backend can communicate.
