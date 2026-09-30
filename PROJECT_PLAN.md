@@ -53,7 +53,7 @@ Do not implement:
 
 # Milestone 2 — PDF extraction
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Upload fillable PDF and extract fields.
