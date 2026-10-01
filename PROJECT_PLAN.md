@@ -70,7 +70,7 @@ Acceptance criteria:
 
 # Milestone 3 — PDF filling
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Programmatically populate a PDF.
