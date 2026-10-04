@@ -86,7 +86,48 @@ Acceptance criteria:
 
 # Milestone 4 — Basic UI
 
-...
+Status: COMPLETE
+
+Goal:
+Provide a basic manual form-filling UI using the existing PDF APIs.
+
+User flow:
+- select a local fillable PDF
+- display the selected PDF in the browser
+- upload the PDF to POST /pdf/extract
+- display the extracted fields
+- render text, dropdown, and checkbox inputs
+- submit the current field/value mapping to POST /pdf/fill
+- display the returned filled PDF as the latest preview
+- download the latest completed PDF
+
+Live preview behavior:
+- the original PDF is displayed immediately using the browser's native PDF rendering
+- field changes are sent to POST /pdf/fill after a short debounce
+- the latest successful filled PDF automatically replaces the previous preview
+- the frontend displays returned PDF bytes but does not manipulate PDF contents
+
+Acceptance criteria:
+- a local PDF can be selected
+- the selected PDF is visible in the UI
+- extracted fields are displayed
+- text fields can be edited
+- dropdown options can be selected
+- checkboxes can be toggled
+- field changes update the visible PDF preview without a separate preview action
+- the latest completed PDF can be downloaded
+- extraction, filling, loading, and error states are visible
+- frontend production build passes
+- existing backend tests pass
+
+Do not implement:
+- client-side PDF manipulation
+- custom or advanced PDF viewer
+- AI or Nemotron integration
+- voice input or output
+- authentication
+- persistence or database
+- online/browser form support
 
 # Milestone 5 — Nemotron integration
 
