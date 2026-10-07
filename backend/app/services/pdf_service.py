@@ -31,6 +31,9 @@ def extract_acroform_fields(pdf_data: bytes) -> list[PdfField]:
 
     extracted_fields = []
     for field_id, field in fields.items():
+        if _is_structural_field(field):
+            continue
+
         field_type = _field_type(field)
         extracted_fields.append(
             PdfField(
@@ -92,7 +95,7 @@ def _field_type(field: dict[str, Any]) -> str:
     flags = int(field.get("/Ff", 0))
 
     if pdf_type == "/Tx":
-        return "text"
+        return "textarea" if flags & (1 << 12) else "text"
     if pdf_type == "/Ch":
         return "dropdown" if flags & (1 << 17) else "list"
     if pdf_type == "/Btn":
@@ -114,7 +117,7 @@ def _normalize_fill_value(
 ) -> str:
     field_type = _field_type(field)
 
-    if field_type == "text":
+    if field_type in {"text", "textarea"}:
         if not isinstance(value, str):
             raise PdfFillingError(f"Field '{field_id}' requires a string value")
         return value
@@ -161,3 +164,7 @@ def _field_options(field: dict[str, Any], field_type: str) -> Optional[list[str]
         options.append(option.removeprefix("/") if field_type == "radio" else option)
 
     return options or None
+
+
+def _is_structural_field(field: dict[str, Any]) -> bool:
+    return field.get("/FT") is None and bool(field.get("/Kids"))

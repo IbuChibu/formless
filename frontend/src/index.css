@@ -546,7 +546,8 @@ h1 {
 }
 
 .field-control input,
-.field-control select {
+.field-control select,
+.field-control textarea {
   width: 100%;
   min-height: 45px;
   padding: 0 12px;
@@ -560,8 +561,15 @@ h1 {
     box-shadow 120ms ease;
 }
 
+.field-control textarea {
+  min-height: 110px;
+  padding: 12px;
+  resize: vertical;
+}
+
 .field-control input:focus,
 .field-control select:focus,
+.field-control textarea:focus,
 .checkbox-control:has(input:focus-visible) {
   border-color: #4c9166;
   box-shadow: 0 0 0 3px rgb(60 126 83 / 14%);

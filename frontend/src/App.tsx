@@ -483,6 +483,20 @@ function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
     );
   }
 
+  if (field.type === "textarea") {
+    return (
+      <label className="field-control" htmlFor={inputId}>
+        <span className="field-label">{label}</span>
+        <textarea
+          id={inputId}
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <code>{field.id}</code>
+      </label>
+    );
+  }
+
   if (field.type === "dropdown") {
     return (
       <label className="field-control" htmlFor={inputId}>

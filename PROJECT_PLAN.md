@@ -129,6 +129,37 @@ Do not implement:
 - persistence or database
 - online/browser form support
 
+---
+
+# Milestone 4.5 — USCIS I-9 compatibility
+
+Status: COMPLETE
+
+Goal:
+Reliably extract, edit, preview, and download the bundled USCIS I-9 AcroForm
+through the existing PDF workflow.
+
+Acceptance criteria:
+- extraction returns the I-9's 128 terminal form fields
+- non-fillable structural field groups are not returned as user inputs
+- text, multiline text, dropdown, and checkbox fields have appropriate UI controls
+- all supported I-9 fields can be submitted in one fill request
+- nested and repeated-widget fields store the submitted values
+- updated widgets contain usable appearance streams
+- the generated PDF remains interactive
+- the original I-9 fixture remains unchanged
+- a rendered populated application page is visually legible
+- existing backend tests pass
+- frontend production build passes
+
+Do not implement:
+- I-9-specific business rules or legal guidance
+- execution of PDF JavaScript, calculations, or validation actions
+- electronic or cryptographic signatures
+- flattening completed PDFs
+- compatibility changes for the other real-world PDF fixtures
+- AI, Nemotron, voice, authentication, persistence, or database functionality
+
 # Milestone 5 — Nemotron integration
 
 ...
