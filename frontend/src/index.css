@@ -531,6 +531,27 @@ h1 {
 
 .field-list {
   display: grid;
+  gap: 26px;
+}
+
+.field-page-group {
+  display: grid;
+  gap: 16px;
+}
+
+.field-page-heading {
+  margin: 0;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #dfe5df;
+  color: #2f744b;
+  font-size: 0.74rem;
+  font-weight: 850;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.page-field-list {
+  display: grid;
   gap: 18px;
 }
 

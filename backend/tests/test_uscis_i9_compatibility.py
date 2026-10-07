@@ -47,6 +47,13 @@ def test_extract_uscis_i9_returns_only_terminal_fields() -> None:
     assert fields_by_id["Additional Information"]["type"] == "textarea"
     assert fields_by_id["CB_1"]["type"] == "checkbox"
     assert "CA" in fields_by_id["State"]["options"]
+    assert fields_by_id["Last Name (Family Name)"]["label"] == (
+        "Employee Last Name (Family Name)"
+    )
+    assert fields_by_id["Document Title 1"]["page"] == 1
+    assert [field["page"] for field in fields] == sorted(
+        field["page"] for field in fields
+    )
 
 
 def test_fill_uscis_i9_updates_all_supported_fields_and_preserves_source() -> None:

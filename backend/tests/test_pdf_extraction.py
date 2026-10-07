@@ -22,16 +22,26 @@ def test_extract_pdf_returns_acroform_fields() -> None:
     assert fields == {
         "accept_terms": {
             "id": "accept_terms",
+            "label": "Accept terms",
             "type": "checkbox",
+            "page": 1,
             "value": False,
         },
         "country": {
             "id": "country",
+            "label": "Country",
             "type": "dropdown",
+            "page": 1,
             "options": ["United Kingdom", "United States", "Other"],
             "value": "United Kingdom",
         },
-        "full_name": {"id": "full_name", "type": "text", "value": ""},
+        "full_name": {
+            "id": "full_name",
+            "label": "Full name",
+            "type": "text",
+            "page": 1,
+            "value": "",
+        },
     }
 
 

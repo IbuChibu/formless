@@ -57,12 +57,16 @@ def test_extract_sba_worksheet_returns_editable_fields_with_values() -> None:
     )
     assert fields_by_id["One-time budget cost 1"] == {
         "id": "One-time budget cost 1",
+        "label": "Rent Budget amount 1, edit to change amount",
         "type": "number",
+        "page": 1,
         "value": "1200",
     }
     assert fields_by_id["One-time actual cost 1"] == {
         "id": "One-time actual cost 1",
+        "label": "Rent Actual amount 1, edit to change amount",
         "type": "number",
+        "page": 1,
     }
 
 

@@ -25,9 +25,25 @@ class PdfFillingError(ValueError):
 @dataclass(frozen=True)
 class PdfField:
     id: str
+    label: str
     type: str
+    page: Optional[int] = None
     options: Optional[list[str]] = None
     value: Optional[PdfFieldValue] = None
+
+
+@dataclass(frozen=True)
+class _WidgetLocation:
+    page: int
+    order: int
+
+
+@dataclass(frozen=True)
+class _WidgetPosition:
+    field_id: str
+    top: float
+    left: float
+    annotation_order: int
 
 
 _SIMPLE_SUM_PATTERN = re.compile(
@@ -42,27 +58,44 @@ _NUMBER_PATTERN = re.compile(
 _GROUPED_NUMBER_PATTERN = re.compile(
     r"^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d*)?$"
 )
+_PLACEHOLDER_FIELD_LABELS = {"-", "n/a", "na", "none", "null", "undefined"}
+_VISUAL_ROW_TOLERANCE = 8
 
 
 def extract_acroform_fields(pdf_data: bytes) -> list[PdfField]:
-    fields = _read_pdf(pdf_data).get_fields() or {}
+    reader = _read_pdf(pdf_data)
+    fields = reader.get_fields() or {}
+    widget_locations = _field_widget_locations(reader)
+    fallback_order = max(
+        (location.order for location in widget_locations.values()),
+        default=-1,
+    ) + 1
 
     extracted_fields = []
-    for field_id, field in fields.items():
+    for source_order, (field_id, field) in enumerate(fields.items()):
         if _is_structural_field(field) or _is_calculated_field(field):
             continue
 
         field_type = _field_type(field)
+        location = widget_locations.get(field_id)
         extracted_fields.append(
-            PdfField(
-                id=field_id,
-                type=field_type,
-                options=_field_options(field, field_type),
-                value=_field_value(field, field_type),
+            (
+                location.order if location is not None else fallback_order + source_order,
+                PdfField(
+                    id=field_id,
+                    label=_field_label(field_id, field),
+                    type=field_type,
+                    page=location.page if location is not None else None,
+                    options=_field_options(field, field_type),
+                    value=_field_value(field, field_type),
+                ),
             )
         )
 
-    return sorted(extracted_fields, key=lambda field: field.id)
+    return [
+        field
+        for _, field in sorted(extracted_fields, key=lambda item: item[0])
+    ]
 
 
 def fill_acroform_fields(
@@ -215,6 +248,91 @@ def _field_options(field: dict[str, Any], field_type: str) -> Optional[list[str]
 
 def _is_structural_field(field: dict[str, Any]) -> bool:
     return field.get("/FT") is None and bool(field.get("/Kids"))
+
+
+def _field_label(field_id: str, field: dict[str, Any]) -> str:
+    alternate_name = field.get("/TU")
+    if alternate_name is not None:
+        label = " ".join(str(alternate_name).split())
+        if label and label.casefold() not in _PLACEHOLDER_FIELD_LABELS:
+            return label
+
+    humanized_id = " ".join(re.sub(r"[._-]+", " ", field_id).split())
+    return humanized_id[:1].upper() + humanized_id[1:]
+
+
+def _field_widget_locations(reader: PdfReader) -> dict[str, _WidgetLocation]:
+    locations: dict[str, _WidgetLocation] = {}
+    visual_order = 0
+
+    for page_number, page in enumerate(reader.pages, start=1):
+        positions = []
+        for annotation_order, annotation in enumerate(page.get("/Annots", [])):
+            widget = annotation.get_object()
+            if str(widget.get("/Subtype")) != "/Widget":
+                continue
+
+            field_id = _qualified_field_name(widget)
+            rectangle = widget.get("/Rect")
+            if not field_id or rectangle is None or len(rectangle) < 4:
+                continue
+
+            coordinates = [float(coordinate) for coordinate in rectangle[:4]]
+            positions.append(
+                _WidgetPosition(
+                    field_id=field_id,
+                    top=max(coordinates[1], coordinates[3]),
+                    left=min(coordinates[0], coordinates[2]),
+                    annotation_order=annotation_order,
+                )
+            )
+
+        for row in _visual_rows(positions):
+            for position in sorted(
+                row,
+                key=lambda item: (item.left, item.annotation_order),
+            ):
+                locations.setdefault(
+                    position.field_id,
+                    _WidgetLocation(page=page_number, order=visual_order),
+                )
+                visual_order += 1
+
+    return locations
+
+
+def _visual_rows(
+    positions: list[_WidgetPosition],
+) -> list[list[_WidgetPosition]]:
+    rows: list[list[_WidgetPosition]] = []
+    row_tops: list[float] = []
+
+    for position in sorted(
+        positions,
+        key=lambda item: (-item.top, item.left, item.annotation_order),
+    ):
+        if (
+            not rows
+            or abs(row_tops[-1] - position.top) > _VISUAL_ROW_TOLERANCE
+        ):
+            rows.append([position])
+            row_tops.append(position.top)
+        else:
+            rows[-1].append(position)
+
+    return rows
+
+
+def _qualified_field_name(widget: dict[str, Any]) -> str:
+    names = []
+    current: Optional[dict[str, Any]] = widget
+    while current is not None:
+        partial_name = current.get("/T")
+        if partial_name is not None:
+            names.append(str(partial_name))
+        parent_reference = current.get("/Parent")
+        current = parent_reference.get_object() if parent_reference else None
+    return ".".join(reversed(names))
 
 
 def _field_value(

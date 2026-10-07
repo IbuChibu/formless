@@ -192,6 +192,37 @@ Do not implement:
 - compatibility changes for the other real-world PDF fixtures
 - AI, Nemotron, voice, authentication, persistence, or database functionality
 
+---
+
+# Milestone 4.7 — Question-aligned field UI
+
+Status: COMPLETE
+
+Goal:
+Make the manual input controls correspond clearly to the questions and visual
+order of the uploaded PDF.
+
+Acceptance criteria:
+- extraction returns a user-facing label and one-based page number for each field
+- a meaningful AcroForm alternate name (`/TU`) is used as the field label
+- blank or placeholder alternate names such as `undefined` fall back to a humanized field ID
+- fields are returned in page order and approximately top-to-bottom, left-to-right order
+- fields on the same visual row are ordered left-to-right
+- a field with repeated widgets appears once at its earliest visual position
+- the frontend groups controls by PDF page
+- the frontend displays the extracted label while retaining the internal field ID as secondary text
+- the synthetic household-support fixture's controls follow its visible question order
+- existing extraction and filling behavior remains unchanged
+- backend tests pass
+- frontend production build passes
+
+Do not implement:
+- OCR or coordinate-based extraction of nearby page text
+- custom PDF viewing or automatic preview scrolling
+- AI-generated labels or question interpretation
+- changes to PDF filling behavior
+- AI, Nemotron, voice, authentication, persistence, or database functionality
+
 # Milestone 5 — Nemotron integration
 
 ...

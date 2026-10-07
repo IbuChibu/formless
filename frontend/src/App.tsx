@@ -13,9 +13,16 @@ type HealthResponse = {
 
 type PdfField = {
   id: string;
+  label: string;
   type: string;
+  page?: number;
   options?: string[];
   value?: FieldValue;
+};
+
+type PageFieldGroup = {
+  page: number | null;
+  fields: Array<{ field: PdfField; index: number }>;
 };
 
 type PdfExtractionResponse = {
@@ -253,6 +260,7 @@ function App() {
   const completedFilename = selectedFile
     ? `completed-${selectedFile.name}`
     : "completed-form.pdf";
+  const fieldGroups = groupFieldsByPage(fields);
 
   return (
     <div className="app-shell">
@@ -417,14 +425,26 @@ function App() {
 
                 {extractionStatus === "ready" ? (
                   <form className="field-list" onSubmit={(event) => event.preventDefault()}>
-                    {fields.map((field, index) => (
-                      <FieldControl
-                        key={field.id}
-                        field={field}
-                        inputId={`pdf-field-${index}`}
-                        value={formValues[field.id]}
-                        onChange={(value) => updateField(field.id, value)}
-                      />
+                    {fieldGroups.map((group) => (
+                      <section
+                        className="field-page-group"
+                        key={group.page ?? "other"}
+                      >
+                        <h3 className="field-page-heading">
+                          {group.page ? `Page ${group.page}` : "Other fields"}
+                        </h3>
+                        <div className="page-field-list">
+                          {group.fields.map(({ field, index }) => (
+                            <FieldControl
+                              key={field.id}
+                              field={field}
+                              inputId={`pdf-field-${index}`}
+                              value={formValues[field.id]}
+                              onChange={(value) => updateField(field.id, value)}
+                            />
+                          ))}
+                        </div>
+                      </section>
                     ))}
                   </form>
                 ) : null}
@@ -466,7 +486,7 @@ type FieldControlProps = {
 };
 
 function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
-  const label = humanizeFieldId(field.id);
+  const label = field.label || humanizeFieldId(field.id);
 
   if (field.type === "text") {
     return (
@@ -591,6 +611,22 @@ function isAbortError(error: unknown): boolean {
 function humanizeFieldId(fieldId: string): string {
   const words = fieldId.replace(/[._-]+/g, " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function groupFieldsByPage(fields: PdfField[]): PageFieldGroup[] {
+  const groups: PageFieldGroup[] = [];
+
+  fields.forEach((field, index) => {
+    const page = field.page ?? null;
+    const currentGroup = groups[groups.length - 1];
+    if (!currentGroup || currentGroup.page !== page) {
+      groups.push({ page, fields: [{ field, index }] });
+      return;
+    }
+    currentGroup.fields.push({ field, index });
+  });
+
+  return groups;
 }
 
 function formatFileSize(bytes: number): string {

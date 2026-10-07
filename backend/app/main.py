@@ -27,7 +27,9 @@ class HealthResponse(BaseModel):
 
 class PdfFieldResponse(BaseModel):
     id: str
+    label: str
     type: str
+    page: Optional[int] = None
     options: Optional[list[str]] = None
     value: Optional[PdfFieldValue] = None
 
@@ -69,7 +71,9 @@ async def extract_pdf_fields(file: UploadFile = File(...)) -> PdfExtractionRespo
         fields=[
             PdfFieldResponse(
                 id=field.id,
+                label=field.label,
                 type=field.type,
+                page=field.page,
                 options=field.options,
                 value=field.value,
             )
