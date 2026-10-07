@@ -29,6 +29,7 @@ class PdfFieldResponse(BaseModel):
     id: str
     type: str
     options: Optional[list[str]] = None
+    value: Optional[PdfFieldValue] = None
 
 
 class PdfExtractionResponse(BaseModel):
@@ -66,7 +67,12 @@ async def extract_pdf_fields(file: UploadFile = File(...)) -> PdfExtractionRespo
 
     return PdfExtractionResponse(
         fields=[
-            PdfFieldResponse(id=field.id, type=field.type, options=field.options)
+            PdfFieldResponse(
+                id=field.id,
+                type=field.type,
+                options=field.options,
+                value=field.value,
+            )
             for field in fields
         ]
     )

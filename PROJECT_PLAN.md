@@ -160,6 +160,38 @@ Do not implement:
 - compatibility changes for the other real-world PDF fixtures
 - AI, Nemotron, voice, authentication, persistence, or database functionality
 
+---
+
+# Milestone 4.6 — SBA startup-cost worksheet compatibility
+
+Status: COMPLETE
+
+Goal:
+Reliably extract, edit, preview, and download the bundled SBA Startup Costs
+Worksheet through the existing PDF workflow.
+
+Acceptance criteria:
+- extraction returns the worksheet's 93 user-editable fields
+- the 31 expense-description fields retain their existing text values
+- the 62 editable currency fields retain their existing values and use numeric UI controls
+- the five calculated total fields are not exposed as user-editable inputs
+- all 93 editable fields can be submitted in one fill request
+- submitted currency values are validated without executing PDF JavaScript
+- the worksheet's five standard sum totals are recalculated by the PDF service
+- updated currency and total appearances use the worksheet's two-decimal formatting
+- the generated PDF remains interactive and retains its form actions
+- the original SBA fixture remains unchanged
+- a rendered populated worksheet is visually legible and shows correct totals
+- existing backend tests pass
+- frontend production build passes
+
+Do not implement:
+- arbitrary PDF JavaScript execution
+- SBA-specific business advice or financial guidance
+- flattening completed PDFs
+- compatibility changes for the other real-world PDF fixtures
+- AI, Nemotron, voice, authentication, persistence, or database functionality
+
 # Milestone 5 — Nemotron integration
 
 ...

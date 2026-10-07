@@ -15,6 +15,7 @@ type PdfField = {
   id: string;
   type: string;
   options?: string[];
+  value?: FieldValue;
 };
 
 type PdfExtractionResponse = {
@@ -211,7 +212,7 @@ function App() {
       const initialValues = Object.fromEntries(
         extraction.fields.map((field) => [
           field.id,
-          field.type === "checkbox" ? false : "",
+          field.value ?? (field.type === "checkbox" ? false : ""),
         ]),
       );
 
@@ -491,6 +492,24 @@ function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
           id={inputId}
           value={typeof value === "string" ? value : ""}
           onChange={(event) => onChange(event.target.value)}
+        />
+        <code>{field.id}</code>
+      </label>
+    );
+  }
+
+  if (field.type === "number") {
+    return (
+      <label className="field-control" htmlFor={inputId}>
+        <span className="field-label">{label}</span>
+        <input
+          id={inputId}
+          type="number"
+          inputMode="decimal"
+          step="0.01"
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => onChange(event.target.value)}
+          autoComplete="off"
         />
         <code>{field.id}</code>
       </label>

@@ -20,13 +20,18 @@ def test_extract_pdf_returns_acroform_fields() -> None:
 
     fields = {field["id"]: field for field in response.json()["fields"]}
     assert fields == {
-        "accept_terms": {"id": "accept_terms", "type": "checkbox"},
+        "accept_terms": {
+            "id": "accept_terms",
+            "type": "checkbox",
+            "value": False,
+        },
         "country": {
             "id": "country",
             "type": "dropdown",
             "options": ["United Kingdom", "United States", "Other"],
+            "value": "United Kingdom",
         },
-        "full_name": {"id": "full_name", "type": "text"},
+        "full_name": {"id": "full_name", "type": "text", "value": ""},
     }
 
 
