@@ -4,11 +4,16 @@ import json
 from json import JSONDecodeError
 from typing import Optional, Union
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from app.services.nemotron_service import (
+    NemotronConfigurationError,
+    NemotronService,
+    NemotronServiceError,
+)
 from app.services.pdf_service import (
     PdfExtractionError,
     PdfFillingError,
@@ -38,6 +43,20 @@ class PdfExtractionResponse(BaseModel):
     fields: list[PdfFieldResponse]
 
 
+class FieldExplanationRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=500)
+    label: str = Field(min_length=1, max_length=1000)
+    type: str = Field(min_length=1, max_length=50)
+    options: Optional[list[str]] = Field(default=None, max_length=100)
+    form_context: Optional[str] = Field(default=None, max_length=2000)
+
+
+class FieldExplanationResponse(BaseModel):
+    field_id: str
+    explanation: str
+    model: str
+
+
 app = FastAPI(title="Formless API")
 
 app.add_middleware(
@@ -51,6 +70,39 @@ app.add_middleware(
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok", service="formless-api")
+
+
+def get_nemotron_service() -> NemotronService:
+    try:
+        return NemotronService.from_environment()
+    except NemotronConfigurationError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="AI explanation service is not configured",
+        ) from error
+
+
+@app.post("/ai/explain", response_model=FieldExplanationResponse)
+async def explain_field(
+    field: FieldExplanationRequest,
+    service: NemotronService = Depends(get_nemotron_service),
+) -> FieldExplanationResponse:
+    try:
+        explanation = await service.explain_field(
+            field_id=field.id,
+            label=field.label,
+            field_type=field.type,
+            options=field.options,
+            form_context=field.form_context,
+        )
+    except NemotronServiceError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    return FieldExplanationResponse(
+        field_id=field.id,
+        explanation=explanation,
+        model=service.model,
+    )
 
 
 @app.post(
