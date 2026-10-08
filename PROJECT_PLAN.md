@@ -315,7 +315,7 @@ Do not implement:
 
 # Milestone 5.1 — In-app AI field explainer
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Make the existing Nemotron field-explanation capability visible and usable in

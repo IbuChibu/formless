@@ -627,6 +627,145 @@ h1 {
   flex: 0 0 auto;
 }
 
+.ai-explanation-panel {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 13px;
+  padding: 17px 20px 18px;
+  border-bottom: 1px solid #dfe6df;
+  background:
+    radial-gradient(circle at 100% 0%, rgb(93 160 112 / 13%), transparent 13rem),
+    #f4f8f4;
+}
+
+.ai-explanation-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-explanation-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.ai-explanation-heading strong {
+  color: #203328;
+  font-size: 0.84rem;
+}
+
+.ai-explanation-heading span:last-child {
+  overflow: hidden;
+  color: #69766d;
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #a9cdb5;
+  border-radius: 10px;
+  color: #f7fff8;
+  background: #226d43;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  box-shadow: 0 7px 18px rgb(28 103 61 / 17%);
+}
+
+.ai-explanation-empty,
+.ai-explanation-response p,
+.ai-explanation-error p {
+  margin: 0;
+  color: #536157;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.ai-selected-field {
+  display: grid;
+  gap: 3px;
+  padding-left: 10px;
+  border-left: 3px solid #65a77c;
+}
+
+.ai-selected-field span {
+  color: #718077;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ai-selected-field strong {
+  color: #27382d;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.ai-explanation-state {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #52645a;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.ai-explanation-state .spinner {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+}
+
+.ai-explanation-response {
+  padding: 12px 13px;
+  border: 1px solid #cfe2d4;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 78%);
+}
+
+.ai-explanation-response p {
+  color: #2e4034;
+}
+
+.ai-explanation-response small {
+  display: block;
+  margin-top: 8px;
+  color: #77837b;
+  font-size: 0.64rem;
+}
+
+.ai-explanation-error {
+  padding: 11px 12px;
+  border: 1px solid #edc5c1;
+  border-radius: 10px;
+  background: #fff2f0;
+}
+
+.ai-explanation-error p {
+  color: #8c342f;
+}
+
+.ai-explanation-error button {
+  margin-top: 9px;
+  padding: 0;
+  border: 0;
+  color: #17633b;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .field-count {
   display: grid;
   width: 32px;
@@ -694,6 +833,62 @@ h1 {
 .page-field-list {
   display: grid;
   gap: 18px;
+}
+
+.field-item {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  transition:
+    border-color 130ms ease,
+    background 130ms ease,
+    box-shadow 130ms ease;
+}
+
+.field-item.selected-for-explanation {
+  border-color: #b7d7c1;
+  background: #f5faf6;
+  box-shadow: 0 7px 20px rgb(32 91 52 / 7%);
+}
+
+.explain-field-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid #bad3c1;
+  border-radius: 9px;
+  color: #22633b;
+  background: #f3f9f4;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 850;
+  transition:
+    border-color 130ms ease,
+    background 130ms ease,
+    transform 130ms ease;
+}
+
+.explain-field-button:hover:not(:disabled) {
+  border-color: #7daf8c;
+  background: #e8f4eb;
+  transform: translateY(-1px);
+}
+
+.explain-field-button:focus-visible,
+.ai-explanation-error button:focus-visible {
+  outline: 3px solid rgb(52 133 83 / 22%);
+  outline-offset: 2px;
+}
+
+.explain-field-button:disabled {
+  cursor: wait;
+  color: #718078;
+  background: #edf2ee;
 }
 
 .field-control {
@@ -927,6 +1122,10 @@ h1 {
   }
 
   .fields-content {
+    padding: 16px;
+  }
+
+  .ai-explanation-panel {
     padding: 16px;
   }
 }

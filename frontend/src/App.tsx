@@ -6,6 +6,7 @@ import PdfViewer from "./PdfViewer";
 type ConnectionStatus = "checking" | "connected" | "disconnected";
 type ExtractionStatus = "idle" | "loading" | "ready" | "empty" | "error";
 type PreviewStatus = "idle" | "pending" | "updating" | "ready" | "error";
+type ExplanationStatus = "idle" | "loading" | "success" | "error";
 type FieldValue = string | boolean;
 
 type HealthResponse = {
@@ -31,6 +32,12 @@ type PdfExtractionResponse = {
   fields: PdfField[];
 };
 
+type FieldExplanationResponse = {
+  field_id: string;
+  explanation: string;
+  model: string;
+};
+
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const previewDebounceMs = 600;
 
@@ -51,10 +58,19 @@ function App() {
     useState<PreviewStatus>("idle");
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [explanationStatus, setExplanationStatus] =
+    useState<ExplanationStatus>("idle");
+  const [explanationFieldId, setExplanationFieldId] = useState<string | null>(
+    null,
+  );
+  const [explanation, setExplanation] = useState<string | null>(null);
+  const [explanationModel, setExplanationModel] = useState<string | null>(null);
+  const [explanationError, setExplanationError] = useState<string | null>(null);
 
   const originalUrlRef = useRef<string | null>(null);
   const filledUrlRef = useRef<string | null>(null);
   const extractionControllerRef = useRef<AbortController | null>(null);
+  const explanationControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -152,6 +168,7 @@ function App() {
   useEffect(() => {
     return () => {
       extractionControllerRef.current?.abort();
+      explanationControllerRef.current?.abort();
       if (originalUrlRef.current) {
         URL.revokeObjectURL(originalUrlRef.current);
       }
@@ -174,6 +191,7 @@ function App() {
     }
 
     extractionControllerRef.current?.abort();
+    explanationControllerRef.current?.abort();
     const controller = new AbortController();
     extractionControllerRef.current = controller;
 
@@ -196,6 +214,11 @@ function App() {
     setChangedValues({});
     setExtractionError(null);
     setPreviewError(null);
+    setExplanationStatus("idle");
+    setExplanationFieldId(null);
+    setExplanation(null);
+    setExplanationModel(null);
+    setExplanationError(null);
     setExtractionStatus("loading");
     setPreviewStatus("idle");
 
@@ -245,6 +268,70 @@ function App() {
     setPreviewStatus("pending");
   }
 
+  async function explainField(field: PdfField) {
+    explanationControllerRef.current?.abort();
+    const controller = new AbortController();
+    explanationControllerRef.current = controller;
+
+    setExplanationFieldId(field.id);
+    setExplanationStatus("loading");
+    setExplanation(null);
+    setExplanationModel(null);
+    setExplanationError(null);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/ai/explain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: field.id,
+          label: field.label || humanizeFieldId(field.id),
+          type: field.type,
+          options: field.options,
+          form_context: field.page
+            ? `This field appears on page ${field.page} of the uploaded form.`
+            : "This field appears in the uploaded form.",
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const result = (await response.json()) as Partial<FieldExplanationResponse> | null;
+      if (
+        !result ||
+        result.field_id !== field.id ||
+        typeof result.explanation !== "string" ||
+        !result.explanation.trim() ||
+        typeof result.model !== "string" ||
+        !result.model.trim()
+      ) {
+        throw new Error("The API returned an invalid AI explanation.");
+      }
+
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      setExplanation(result.explanation.trim());
+      setExplanationModel(result.model);
+      setExplanationStatus("success");
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+
+      setExplanationError(getErrorMessage(error));
+      setExplanationStatus("error");
+    } finally {
+      if (explanationControllerRef.current === controller) {
+        explanationControllerRef.current = null;
+      }
+    }
+  }
+
   const connectionCopy = {
     checking: "Checking API",
     connected: "API connected",
@@ -263,6 +350,9 @@ function App() {
     ? `completed-${selectedFile.name}`
     : "completed-form.pdf";
   const fieldGroups = groupFieldsByPage(fields);
+  const explanationField = fields.find(
+    (field) => field.id === explanationFieldId,
+  );
 
   return (
     <div className="app-shell">
@@ -273,7 +363,7 @@ function App() {
           </span>
           <div>
             <p className="brand-name">Formless</p>
-            <p className="brand-tagline">Manual PDF workspace</p>
+            <p className="brand-tagline">AI-assisted PDF workspace</p>
           </div>
         </div>
 
@@ -287,10 +377,11 @@ function App() {
         <section className="intro-panel">
           <div className="intro-copy">
             <p className="eyebrow">Fill with confidence</p>
-            <h1>See your form update as you type.</h1>
+            <h1>Understand your form as you fill it.</h1>
             <p>
-              Choose a fillable PDF, complete its fields, and download a new
-              copy. Your original file stays unchanged.
+              Choose a fillable PDF, ask the assistant to explain confusing
+              fields, and download a completed copy. Your original stays
+              unchanged.
             </p>
           </div>
 
@@ -385,6 +476,69 @@ function App() {
                 ) : null}
               </div>
 
+              <section
+                className={`ai-explanation-panel ${explanationStatus}`}
+                aria-busy={explanationStatus === "loading"}
+                aria-live="polite"
+              >
+                <div className="ai-explanation-heading">
+                  <span className="ai-mark" aria-hidden="true">
+                    AI
+                  </span>
+                  <div>
+                    <strong>Form assistant</strong>
+                    <span>NVIDIA Nemotron via Nebius Token Factory</span>
+                  </div>
+                </div>
+
+                {explanationStatus === "idle" ? (
+                  <p className="ai-explanation-empty">
+                    Choose <strong>Explain with AI</strong> on any field for a
+                    plain-language explanation.
+                  </p>
+                ) : null}
+
+                {explanationField && explanationStatus !== "idle" ? (
+                  <div className="ai-selected-field">
+                    <span>Selected field</span>
+                    <strong>
+                      {explanationField.label ||
+                        humanizeFieldId(explanationField.id)}
+                    </strong>
+                  </div>
+                ) : null}
+
+                {explanationStatus === "loading" ? (
+                  <div className="ai-explanation-state">
+                    <span className="spinner" aria-hidden="true" />
+                    <span>Asking Nemotron to explain this field…</span>
+                  </div>
+                ) : null}
+
+                {explanationStatus === "success" && explanation ? (
+                  <div className="ai-explanation-response">
+                    <p>{explanation}</p>
+                    {explanationModel ? (
+                      <small>Response from {explanationModel}</small>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {explanationStatus === "error" && explanationError ? (
+                  <div className="ai-explanation-error" role="alert">
+                    <p>{explanationError}</p>
+                    {explanationField ? (
+                      <button
+                        type="button"
+                        onClick={() => void explainField(explanationField)}
+                      >
+                        Retry explanation
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+
               <div className="fields-content">
                 {extractionStatus === "loading" ? (
                   <div className="loading-state" aria-live="polite">
@@ -421,15 +575,49 @@ function App() {
                           {group.page ? `Page ${group.page}` : "Other fields"}
                         </h3>
                         <div className="page-field-list">
-                          {group.fields.map(({ field, index }) => (
-                            <FieldControl
-                              key={field.id}
-                              field={field}
-                              inputId={`pdf-field-${index}`}
-                              value={formValues[field.id]}
-                              onChange={(value) => updateField(field.id, value)}
-                            />
-                          ))}
+                          {group.fields.map(({ field, index }) => {
+                            const isSelectedForExplanation =
+                              explanationFieldId === field.id;
+                            const isExplaining =
+                              isSelectedForExplanation &&
+                              explanationStatus === "loading";
+
+                            return (
+                              <div
+                                className={`field-item${
+                                  isSelectedForExplanation
+                                    ? " selected-for-explanation"
+                                    : ""
+                                }`}
+                                key={field.id}
+                              >
+                                <FieldControl
+                                  field={field}
+                                  inputId={`pdf-field-${index}`}
+                                  value={formValues[field.id]}
+                                  onChange={(value) =>
+                                    updateField(field.id, value)
+                                  }
+                                />
+                                {isExplainableField(field) ? (
+                                  <button
+                                    className="explain-field-button"
+                                    type="button"
+                                    disabled={isExplaining}
+                                    aria-label={`Explain ${
+                                      field.label || humanizeFieldId(field.id)
+                                    } with AI`}
+                                    onClick={() => void explainField(field)}
+                                  >
+                                    <span aria-hidden="true">✦</span>
+                                    {isExplaining
+                                      ? "Explaining…"
+                                      : "Explain with AI"}
+                                  </button>
+                                ) : null}
+                              </div>
+                            );
+                          })}
                         </div>
                       </section>
                     ))}
@@ -598,6 +786,12 @@ function isAbortError(error: unknown): boolean {
 function humanizeFieldId(fieldId: string): string {
   const words = fieldId.replace(/[._-]+/g, " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function isExplainableField(field: PdfField): boolean {
+  return ["text", "textarea", "number", "dropdown", "checkbox"].includes(
+    field.type,
+  );
 }
 
 function groupFieldsByPage(fields: PdfField[]): PageFieldGroup[] {
