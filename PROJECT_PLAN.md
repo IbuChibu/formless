@@ -14,6 +14,39 @@ The AI helps them:
 - review answers
 - fill the final form
 
+## North star experience
+
+The finished product is conversation-first, not a traditional form builder.
+
+The intended user experience is:
+1. The user uploads a fillable PDF.
+2. The PDF remains the main visual surface.
+3. A voice-first assistant guides the user through one relevant question at a time.
+4. The user can speak or type, ask for an explanation, skip a question, or correct an answer.
+5. The assistant converts the user's own answer into a structured proposed field update.
+6. The user confirms or edits every AI-proposed factual value before it is applied.
+7. The confirmed value updates the same live PDF preview used by manual editing.
+8. The user reviews unanswered and completed fields before downloading the final PDF.
+
+Final interface hierarchy:
+- primary: voice and text conversation with the form assistant
+- secondary: click a field on the displayed PDF to inspect or edit it directly
+- fallback: an "Edit all fields" drawer containing the existing manual controls
+
+The manual controls remain valuable as a fallback, accessibility option, review
+surface, and development tool. They must not be the mechanism the AI operates.
+Voice, text, direct PDF edits, and manual controls must all update the same
+canonical field state through stable field IDs.
+
+Core safety and state rules:
+- the user is the source of factual information
+- the AI may explain, clarify, format, and propose; it must not invent facts
+- AI-proposed field changes require explicit user confirmation
+- an explicit manual or direct-on-form edit counts as user confirmation
+- only confirmed values are sent to the PDF filling service
+- the Form Agent returns structured proposals and never edits PDF bytes directly
+- the PDF Service remains independent from AI and voice functionality
+
 ## Hackathon
 
 Nebius x NVIDIA Global AI Hackathon
@@ -257,26 +290,148 @@ Do not implement:
 
 # Milestone 5 — Nemotron integration
 
-...
+Status: NOT STARTED
+
+Goal:
+Connect the backend to NVIDIA Nemotron through Nebius Token Factory and use it
+to explain one known PDF field in plain language.
+
+Acceptance criteria:
+- Nebius credentials are read from environment variables and never exposed to the frontend
+- the Nemotron Service is the only component that communicates with Nebius
+- a backend endpoint accepts a known field's label, type, options, and limited form context
+- the response explains the question without proposing or applying a field value
+- the prompt explicitly prohibits invented personal facts and unsupported legal or financial advice
+- provider failures return a controlled API error
+- backend tests mock the Nemotron Service and require no network access
+- existing PDF tests and frontend production build pass
+
+Do not implement:
+- multi-turn agent orchestration
+- field updates or automatic PDF filling
+- voice input or output
+- direct-on-form editing
+- authentication, persistence, or a database
 
 # Milestone 6 — Form agent
 
-...
+Status: NOT STARTED
+
+Goal:
+Add a guided typed conversation that can move through the form and produce
+structured, user-confirmed field proposals.
+
+Acceptance criteria:
+- the Form Agent receives the extracted field schema, confirmed values, and bounded conversation context
+- the agent can choose the next unanswered supported field
+- the agent can explain, ask a clarification, skip, or propose a field update
+- every proposal contains a real field ID and a value compatible with that field's type and options
+- unknown field IDs and invalid values are rejected outside the model
+- proposed values remain separate from confirmed values
+- the user can confirm, edit, reject, or skip a proposal
+- confirmed proposals update the shared frontend field state and existing live PDF preview
+- the conversation becomes the primary workspace and the manual field panel becomes a collapsible fallback
+- backend tests use a mocked Nemotron Service
+
+Do not implement:
+- voice input or output
+- direct editing on the rendered PDF page
+- autonomous submission or download
+- long-term conversation storage, authentication, persistence, or a database
 
 # Milestone 7 — Voice
 
-...
+Status: NOT STARTED
+
+Goal:
+Add speech as an interface around the working typed Form Agent without creating
+a separate voice-specific reasoning path.
+
+Acceptance criteria:
+- the user can deliberately start and stop voice capture
+- recognized speech is displayed as an editable transcript before or while it is submitted
+- the transcript uses the same Form Agent endpoint and confirmation flow as typed text
+- assistant responses can be spoken while remaining visible as text
+- microphone permission, listening, processing, retry, and failure states are clear
+- the user can always fall back to typing
+- stopping or cancelling voice input does not change a form field
+
+Do not implement:
+- always-on recording or wake-word detection
+- voice-controlled confirmation without a visible confirmation state
+- a separate voice agent or duplicate form state
+- authentication, persistence, or a database
 
 # Milestone 8 — Full workflow
 
-...
+Status: NOT STARTED
+
+Goal:
+Connect conversation, direct PDF interaction, review, filling, and download into
+the north star experience.
+
+Acceptance criteria:
+- extraction exposes the widget geometry required to associate visible PDF fields with stable field IDs
+- the active assistant question navigates to and highlights its PDF page and field when geometry is available
+- clicking a supported field on the PDF opens a focused edit control for that field
+- direct edits, manual edits, and confirmed agent proposals use the same canonical frontend field state
+- the manual "Edit all fields" drawer is closed by default but remains available
+- the user can move between conversation, direct editing, and manual editing without losing values
+- the user can review completed, unanswered, skipped, and proposed fields
+- only confirmed values are included in generated PDFs
+- the final reviewed PDF can be downloaded through the existing backend filling flow
+
+Do not implement:
+- client-side PDF mutation
+- free-form annotation or drawing
+- support for non-AcroForm PDFs, XFA, OCR, or online forms
+- autonomous form submission
+- authentication, persistence, or a database
 
 # Milestone 9 — Polish and reliability
 
-...
+Status: NOT STARTED
+
+Goal:
+Make the complete hackathon workflow reliable, accessible, understandable, and
+demo-ready across the supported fixtures.
+
+Acceptance criteria:
+- keyboard and screen-reader flows work for conversation, confirmations, PDF navigation, and the manual drawer
+- responsive layouts work on laptop and mobile-sized screens
+- users can undo or correct confirmed answers before download
+- loading, retry, offline, microphone, model, extraction, and filling errors have clear recovery paths
+- unsupported fields and documents are explained without losing the uploaded PDF
+- the supported demo fixtures complete successfully from upload through download
+- frontend and backend automated checks pass
 
 # Milestone 10 — Deployment
 
-...
+Status: NOT STARTED
+
+Goal:
+Deploy the frontend and backend with secure configuration suitable for the
+hackathon demonstration.
+
+Acceptance criteria:
+- frontend and backend are reachable over HTTPS
+- production CORS is restricted to the deployed frontend
+- Nebius credentials remain server-side
+- health checks and essential logs are available
+- file-size and request-time limits fail clearly
+- no user document persistence is introduced without an explicit decision
 
 # Milestone 11 — Hackathon submission
+
+Status: NOT STARTED
+
+Goal:
+Package a clear, repeatable demonstration of the conversation-first form
+assistant and its required NVIDIA/Nebius technology.
+
+Acceptance criteria:
+- the demo shows upload, explanation, voice or typed guidance, confirmation, live PDF update, review, and download
+- the submission clearly identifies Nemotron and Nebius Token Factory usage
+- setup and local-run documentation is current
+- architecture and safety boundaries are explained
+- the demo has a tested fallback path if microphone access or an external API is unavailable
