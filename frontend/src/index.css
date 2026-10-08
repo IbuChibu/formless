@@ -735,11 +735,118 @@ h1 {
   color: #2e4034;
 }
 
+.ai-response-label,
+.ai-user-question > span,
+.ai-question-answer > span {
+  display: block;
+  margin-bottom: 5px;
+  color: #5c7865;
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .ai-explanation-response small {
   display: block;
   margin-top: 8px;
   color: #77837b;
   font-size: 0.64rem;
+}
+
+.ai-question-exchange {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-user-question,
+.ai-question-answer {
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.ai-user-question {
+  margin-left: 22px;
+  background: #e4eee7;
+}
+
+.ai-question-answer {
+  margin-right: 22px;
+  border: 1px solid #cfe2d4;
+  background: rgb(255 255 255 / 82%);
+}
+
+.ai-user-question p,
+.ai-question-answer p {
+  margin: 0;
+  color: #304037;
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.ai-question-form {
+  display: grid;
+  gap: 7px;
+  padding-top: 2px;
+}
+
+.ai-question-form > label {
+  color: #34483b;
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.ai-question-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+}
+
+.ai-question-controls input {
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 11px;
+  border: 1px solid #bfcec3;
+  border-radius: 9px;
+  outline: none;
+  color: #223128;
+  background: #fff;
+  font-size: 0.75rem;
+}
+
+.ai-question-controls input:focus {
+  border-color: #4c9166;
+  box-shadow: 0 0 0 3px rgb(60 126 83 / 14%);
+}
+
+.ai-question-controls button {
+  min-width: 58px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  color: #f7fff8;
+  background: #17633b;
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.ai-question-controls button:disabled {
+  cursor: not-allowed;
+  color: #8d9890;
+  background: #dfe6e0;
+}
+
+.ai-question-controls button:focus-visible {
+  outline: 3px solid rgb(52 133 83 / 22%);
+  outline-offset: 2px;
+}
+
+.ai-question-form > small {
+  color: #758178;
+  font-size: 0.63rem;
+  line-height: 1.4;
 }
 
 .ai-explanation-error {

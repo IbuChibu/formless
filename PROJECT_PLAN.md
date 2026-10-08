@@ -352,7 +352,7 @@ Do not implement:
 
 # Milestone 5.2 — Typed questions about a field
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Let the user ask one typed explanatory question about the currently selected
@@ -392,17 +392,23 @@ Do not implement:
 Status: NOT STARTED
 
 Goal:
-Add a guided typed conversation that can move through the form and produce
-structured, user-confirmed field proposals.
+Add a guided typed conversation with bounded follow-up memory that can move
+through the form and produce structured, user-confirmed field proposals.
 
 Acceptance criteria:
 - the Form Agent receives the extracted field schema, confirmed values, and bounded conversation context
+- recent user and assistant messages are kept ephemerally and trimmed to a documented bound before each request
+- follow-up questions can refer to the recent conversation about the active field
+- explanations and clarifications keep the same field active until the user resolves, rejects, or skips it
 - the agent can choose the next unanswered supported field
+- after a field is confirmed or skipped, the agent can guide the user to the next unanswered supported field
 - the agent can explain, ask a clarification, skip, or propose a field update
 - every proposal contains a real field ID and a value compatible with that field's type and options
 - unknown field IDs and invalid values are rejected outside the model
 - proposed values remain separate from confirmed values
+- the proposal UI clearly displays the target field and proposed value before confirmation
 - the user can confirm, edit, reject, or skip a proposal
+- only an explicit confirmation or user edit can move a proposed value into confirmed field state
 - confirmed proposals update the shared frontend field state and existing live PDF preview
 - the conversation becomes the primary workspace and the manual field panel becomes a collapsible fallback
 - backend tests use a mocked Nemotron Service
@@ -411,6 +417,7 @@ Do not implement:
 - voice input or output
 - direct editing on the rendered PDF page
 - autonomous submission or download
+- unbounded conversation history or implicit confirmation from ambiguous replies
 - long-term conversation storage, authentication, persistence, or a database
 
 # Milestone 7 — Voice

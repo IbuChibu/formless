@@ -49,6 +49,7 @@ class FieldExplanationRequest(BaseModel):
     type: str = Field(min_length=1, max_length=50)
     options: Optional[list[str]] = Field(default=None, max_length=100)
     form_context: Optional[str] = Field(default=None, max_length=2000)
+    question: Optional[str] = Field(default=None, min_length=1, max_length=1000)
 
 
 class FieldExplanationResponse(BaseModel):
@@ -94,6 +95,7 @@ async def explain_field(
             field_type=field.type,
             options=field.options,
             form_context=field.form_context,
+            question=field.question,
         )
     except NemotronServiceError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error

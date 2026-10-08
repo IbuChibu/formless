@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 
 import PdfViewer from "./PdfViewer";
 
@@ -66,6 +66,11 @@ function App() {
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explanationModel, setExplanationModel] = useState<string | null>(null);
   const [explanationError, setExplanationError] = useState<string | null>(null);
+  const [questionInput, setQuestionInput] = useState("");
+  const [submittedQuestion, setSubmittedQuestion] = useState<string | null>(
+    null,
+  );
+  const [questionAnswer, setQuestionAnswer] = useState<string | null>(null);
 
   const originalUrlRef = useRef<string | null>(null);
   const filledUrlRef = useRef<string | null>(null);
@@ -219,6 +224,9 @@ function App() {
     setExplanation(null);
     setExplanationModel(null);
     setExplanationError(null);
+    setQuestionInput("");
+    setSubmittedQuestion(null);
+    setQuestionAnswer(null);
     setExtractionStatus("loading");
     setPreviewStatus("idle");
 
@@ -268,16 +276,26 @@ function App() {
     setPreviewStatus("pending");
   }
 
-  async function explainField(field: PdfField) {
+  async function explainField(field: PdfField, question?: string) {
     explanationControllerRef.current?.abort();
     const controller = new AbortController();
     explanationControllerRef.current = controller;
+    const normalizedQuestion = question?.trim() || null;
 
     setExplanationFieldId(field.id);
     setExplanationStatus("loading");
-    setExplanation(null);
-    setExplanationModel(null);
     setExplanationError(null);
+
+    if (normalizedQuestion) {
+      setSubmittedQuestion(normalizedQuestion);
+      setQuestionAnswer(null);
+    } else {
+      setExplanation(null);
+      setExplanationModel(null);
+      setQuestionInput("");
+      setSubmittedQuestion(null);
+      setQuestionAnswer(null);
+    }
 
     try {
       const response = await fetch(`${apiBaseUrl}/ai/explain`, {
@@ -291,6 +309,7 @@ function App() {
           form_context: field.page
             ? `This field appears on page ${field.page} of the uploaded form.`
             : "This field appears in the uploaded form.",
+          ...(normalizedQuestion ? { question: normalizedQuestion } : {}),
         }),
         signal: controller.signal,
       });
@@ -299,7 +318,9 @@ function App() {
         throw new Error(await readApiError(response));
       }
 
-      const result = (await response.json()) as Partial<FieldExplanationResponse> | null;
+      const result = (await response.json()) as
+        | Partial<FieldExplanationResponse>
+        | null;
       if (
         !result ||
         result.field_id !== field.id ||
@@ -315,7 +336,11 @@ function App() {
         return;
       }
 
-      setExplanation(result.explanation.trim());
+      if (normalizedQuestion) {
+        setQuestionAnswer(result.explanation.trim());
+      } else {
+        setExplanation(result.explanation.trim());
+      }
       setExplanationModel(result.model);
       setExplanationStatus("success");
     } catch (error) {
@@ -330,6 +355,17 @@ function App() {
         explanationControllerRef.current = null;
       }
     }
+  }
+
+  function askFieldQuestion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const question = questionInput.trim();
+    if (!explanationField || !question) {
+      return;
+    }
+
+    setQuestionInput("");
+    void explainField(explanationField, question);
   }
 
   const connectionCopy = {
@@ -508,19 +544,39 @@ function App() {
                   </div>
                 ) : null}
 
-                {explanationStatus === "loading" ? (
-                  <div className="ai-explanation-state">
-                    <span className="spinner" aria-hidden="true" />
-                    <span>Asking Nemotron to explain this field…</span>
-                  </div>
-                ) : null}
-
-                {explanationStatus === "success" && explanation ? (
+                {explanation ? (
                   <div className="ai-explanation-response">
+                    <span className="ai-response-label">Explanation</span>
                     <p>{explanation}</p>
                     {explanationModel ? (
                       <small>Response from {explanationModel}</small>
                     ) : null}
+                  </div>
+                ) : null}
+
+                {submittedQuestion ? (
+                  <div className="ai-question-exchange">
+                    <div className="ai-user-question">
+                      <span>Your question</span>
+                      <p>{submittedQuestion}</p>
+                    </div>
+                    {questionAnswer ? (
+                      <div className="ai-question-answer">
+                        <span>Nemotron</span>
+                        <p>{questionAnswer}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {explanationStatus === "loading" ? (
+                  <div className="ai-explanation-state">
+                    <span className="spinner" aria-hidden="true" />
+                    <span>
+                      {submittedQuestion
+                        ? "Asking Nemotron about this field…"
+                        : "Asking Nemotron to explain this field…"}
+                    </span>
                   </div>
                 ) : null}
 
@@ -530,12 +586,50 @@ function App() {
                     {explanationField ? (
                       <button
                         type="button"
-                        onClick={() => void explainField(explanationField)}
+                        onClick={() =>
+                          void explainField(
+                            explanationField,
+                            submittedQuestion ?? undefined,
+                          )
+                        }
                       >
-                        Retry explanation
+                        {submittedQuestion
+                          ? "Retry question"
+                          : "Retry explanation"}
                       </button>
                     ) : null}
                   </div>
+                ) : null}
+
+                {explanationField && explanation ? (
+                  <form className="ai-question-form" onSubmit={askFieldQuestion}>
+                    <label htmlFor="field-question">Ask about this field</label>
+                    <div className="ai-question-controls">
+                      <input
+                        id="field-question"
+                        type="text"
+                        maxLength={1000}
+                        placeholder="What would you like clarified?"
+                        value={questionInput}
+                        disabled={explanationStatus === "loading"}
+                        onChange={(event) =>
+                          setQuestionInput(event.target.value)
+                        }
+                      />
+                      <button
+                        type="submit"
+                        disabled={
+                          explanationStatus === "loading" ||
+                          !questionInput.trim()
+                        }
+                      >
+                        Ask
+                      </button>
+                    </div>
+                    <small>
+                      Each question is independent and does not change the PDF.
+                    </small>
+                  </form>
                 ) : null}
               </section>
 
