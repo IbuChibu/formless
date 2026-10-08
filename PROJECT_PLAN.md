@@ -387,38 +387,117 @@ Do not implement:
 - direct-on-form editing
 - authentication, persistence, or a database
 
-# Milestone 6 — Form agent
+# Milestone 6.1 — Agent contract and validation
 
 Status: NOT STARTED
 
 Goal:
-Add a guided typed conversation with bounded follow-up memory that can move
-through the form and produce structured, user-confirmed field proposals.
+Create the backend Form Agent boundary and a validated structured action
+contract without changing the frontend workflow.
 
 Acceptance criteria:
-- the Form Agent receives the extracted field schema, confirmed values, and bounded conversation context
-- recent user and assistant messages are kept ephemerally and trimmed to a documented bound before each request
-- follow-up questions can refer to the recent conversation about the active field
-- explanations and clarifications keep the same field active until the user resolves, rejects, or skips it
-- the agent can choose the next unanswered supported field
-- after a field is confirmed or skipped, the agent can guide the user to the next unanswered supported field
-- the agent can explain, ask a clarification, skip, or propose a field update
-- every proposal contains a real field ID and a value compatible with that field's type and options
-- unknown field IDs and invalid values are rejected outside the model
+- Form Agent logic lives in a separate service from the PDF Service and Nemotron Service
+- a backend endpoint accepts the extracted field schema, confirmed field state, optional active field, current user message, and bounded conversation context
+- the Form Agent can return a structured explain, clarify, propose, skip, or next action
+- every action follows a documented response schema
+- every proposal contains a field ID and a value compatible with that field's type and available options
+- backend code rejects unknown field IDs, unsupported field types, invalid option values, and malformed model output
 - proposed values remain separate from confirmed values
-- the proposal UI clearly displays the target field and proposed value before confirmation
-- the user can confirm, edit, reject, or skip a proposal
-- only an explicit confirmation or user edit can move a proposed value into confirmed field state
-- confirmed proposals update the shared frontend field state and existing live PDF preview
-- the conversation becomes the primary workspace and the manual field panel becomes a collapsible fallback
+- the Form Agent never edits PDF bytes or calls the PDF Service
+- provider and validation failures return controlled API errors
+- backend tests mock the Nemotron Service and require no network access
+- existing PDF tests pass
+
+Do not implement:
+- frontend conversation UI
+- applying or confirming proposed values
+- voice input or output
+- direct editing on the rendered PDF page
+- authentication, persistence, or a database
+
+# Milestone 6.2 — Conversation and guided progression
+
+Status: NOT STARTED
+
+Goal:
+Add a typed conversation that remembers a bounded recent exchange, keeps an
+active field, and guides the user through unanswered fields.
+
+Acceptance criteria:
+- the frontend provides a typed conversation interface for the Form Agent
+- conversation state remains ephemeral in the browser
+- at most the eight most recent user and assistant messages are sent with each request
+- follow-up questions can refer to recent messages about the active field
+- explanations and clarifications keep the same field active
+- the agent can select the first unanswered supported field
+- skipping or resolving a field allows the agent to select the next unanswered supported field
+- explain, clarify, skip, next, and proposal responses are visibly distinguished
+- any proposal returned during this milestone remains unconfirmed and cannot update a field or PDF
+- conversation loading, retry, and controlled error states are visible
+- changing forms clears the active field and conversation state
 - backend tests use a mocked Nemotron Service
+- frontend production build and existing backend tests pass
+
+Do not implement:
+- proposal confirmation or AI-assisted PDF filling
+- voice input or output
+- direct editing on the rendered PDF page
+- unbounded or server-persisted conversation history
+- authentication, persistence, or a database
+
+# Milestone 6.3 — Proposal and confirmation
+
+Status: NOT STARTED
+
+Goal:
+Allow the Form Agent to propose a field value and let the user explicitly
+confirm, edit, reject, or skip it before any PDF update occurs.
+
+Acceptance criteria:
+- the proposal UI clearly displays the target field and proposed value
+- proposed values remain separate from confirmed values in canonical frontend state
+- unknown field IDs and values incompatible with the field type or options are rejected outside the model
+- the user can confirm, edit, reject, or skip each proposal
+- ambiguous conversational replies never count as confirmation
+- only an explicit confirmation or user edit moves a proposal into confirmed field state
+- rejecting a proposal leaves the confirmed field value unchanged
+- skipping a field records it as skipped without assigning a value
+- confirmed proposals update the shared field state used by the existing manual controls
+- confirmed proposals trigger the existing PDF filling flow and visible live preview
+- backend tests use a mocked Nemotron Service
+- frontend production build and existing backend tests pass
 
 Do not implement:
 - voice input or output
 - direct editing on the rendered PDF page
 - autonomous submission or download
-- unbounded conversation history or implicit confirmation from ambiguous replies
-- long-term conversation storage, authentication, persistence, or a database
+- authentication, persistence, or a database
+
+# Milestone 6.4 — Conversation-first UI
+
+Status: NOT STARTED
+
+Goal:
+Make the typed Form Agent the primary workspace while preserving manual editing
+as an accessible fallback.
+
+Acceptance criteria:
+- the conversation is the primary interface beside the PDF preview
+- the currently active field and progress through supported fields are visible
+- the existing manual field controls move into an "Edit all fields" drawer
+- the manual drawer is collapsed by default and can be opened at any time
+- conversation proposals, confirmed agent values, and manual edits use the same canonical field state
+- moving between conversation and manual editing does not lose values or conversation state
+- manual edits continue to count as explicit user confirmation
+- the existing live PDF preview and download workflow remain available
+- loading and error states remain visible when the manual drawer is closed
+- frontend production build and existing backend tests pass
+
+Do not implement:
+- voice input or output
+- direct editing on the rendered PDF page
+- autonomous submission
+- authentication, persistence, or a database
 
 # Milestone 7 — Voice
 
