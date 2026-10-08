@@ -174,6 +174,7 @@ def test_nemotron_service_calls_token_factory_with_safe_field_context() -> None:
     assert captured_request["authorization"] == "Bearer test-secret"
     payload = captured_request["payload"]
     assert payload["model"] == "nvidia/test-nemotron"
+    assert payload["reasoning_effort"] == "none"
     assert payload["messages"][0]["role"] == "system"
     assert "untrusted form content" in payload["messages"][0]["content"]
     assert "Never answer the field" in payload["messages"][0]["content"]

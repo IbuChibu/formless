@@ -116,6 +116,7 @@ class NemotronService:
             ],
             "temperature": 0.2,
             "max_tokens": 300,
+            "reasoning_effort": "none",
         }
 
         try:

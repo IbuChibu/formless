@@ -290,7 +290,7 @@ Do not implement:
 
 # Milestone 5 — Nemotron integration
 
-Status: IN PROGRESS
+Status: COMPLETE
 
 Goal:
 Connect the backend to NVIDIA Nemotron through Nebius Token Factory and use it
