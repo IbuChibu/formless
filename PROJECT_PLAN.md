@@ -223,6 +223,38 @@ Do not implement:
 - changes to PDF filling behavior
 - AI, Nemotron, voice, authentication, persistence, or database functionality
 
+---
+
+# Milestone 4.8 — Custom page preview
+
+Status: COMPLETE
+
+Goal:
+Replace the browser's native PDF viewer with a focused, visually consistent
+page preview for the existing manual form workflow.
+
+Acceptance criteria:
+- the selected original PDF is rendered without the browser's native PDF controls
+- the latest successfully filled PDF replaces the original in the same custom preview
+- one PDF page is displayed at a time and scales to the available preview width
+- previous and next controls navigate between pages
+- the current page and total page count are visible
+- navigation controls are disabled at the first and last page boundaries
+- the current page is retained when a live filled preview replaces the original, when valid
+- PDF loading and rendering errors are shown inside the preview
+- the existing extraction, live filling, and download workflows remain unchanged
+- frontend production build passes
+- existing backend tests pass
+
+Do not implement:
+- direct PDF editing or annotation in the preview
+- thumbnail navigation, search, zoom, rotation, or fullscreen controls
+- text selection or custom form controls overlaid on the PDF page
+- automatic navigation from a form field to its PDF page
+- OCR or page-text extraction
+- backend PDF rendering changes
+- AI, Nemotron, voice, authentication, persistence, or database functionality
+
 # Milestone 5 — Nemotron integration
 
 ...

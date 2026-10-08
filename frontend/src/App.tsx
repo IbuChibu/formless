@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
+import PdfViewer from "./PdfViewer";
+
 type ConnectionStatus = "checking" | "connected" | "disconnected";
 type ExtractionStatus = "idle" | "loading" | "ready" | "empty" | "error";
 type PreviewStatus = "idle" | "pending" | "updating" | "ready" | "error";
@@ -356,29 +358,14 @@ function App() {
                 </div>
               </div>
 
-              <div className="pdf-frame">
-                {previewUrl ? (
-                  <object
-                    key={previewUrl}
-                    className="pdf-viewer"
-                    data={previewUrl}
-                    type="application/pdf"
-                    aria-label={`Preview of ${selectedFile.name}`}
-                  >
-                    <div className="pdf-fallback">
-                      <p>This browser could not display the PDF preview.</p>
-                      <a href={previewUrl} target="_blank" rel="noreferrer">
-                        Open the PDF in a new tab
-                      </a>
-                    </div>
-                  </object>
-                ) : null}
-                {previewStatus === "updating" ? (
-                  <div className="preview-overlay" aria-hidden="true">
-                    <span className="spinner" />
-                  </div>
-                ) : null}
-              </div>
+              {previewUrl ? (
+                <PdfViewer
+                  key={originalUrlRef.current ?? selectedFile.name}
+                  fileName={selectedFile.name}
+                  isUpdating={previewStatus === "updating"}
+                  url={previewUrl}
+                />
+              ) : null}
 
               {previewError ? (
                 <p className="inline-error" role="alert">
