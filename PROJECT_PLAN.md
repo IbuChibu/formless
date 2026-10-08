@@ -313,6 +313,80 @@ Do not implement:
 - direct-on-form editing
 - authentication, persistence, or a database
 
+# Milestone 5.1 — In-app AI field explainer
+
+Status: NOT STARTED
+
+Goal:
+Make the existing Nemotron field-explanation capability visible and usable in
+the current PDF workflow.
+
+User flow:
+- upload and extract a fillable PDF through the existing workflow
+- choose "Explain with AI" for one extracted field
+- send that field's ID, label, type, options, and limited page context to POST /ai/explain
+- display the returned explanation in a focused assistant panel beside the PDF
+- choose another field and request a new explanation when needed
+
+Acceptance criteria:
+- every supported extracted field has an "Explain with AI" action
+- only one field is selected for explanation at a time
+- only bounded metadata for the selected field is sent to POST /ai/explain
+- the raw PDF is not sent to Nemotron
+- AI loading, success, retry, and error states are visible
+- the returned explanation is displayed beside the PDF
+- the UI identifies NVIDIA Nemotron via Nebius Token Factory as the AI provider
+- requesting or receiving an explanation does not change any field value
+- requesting or receiving an explanation does not trigger PDF filling
+- the existing manual editing, live preview, and download workflows remain unchanged
+- existing backend tests pass
+- frontend production build passes
+
+Do not implement:
+- free-form questions or conversation
+- answer proposals or AI-applied field values
+- conversation history or agent orchestration
+- voice input or output
+- direct-on-form editing
+- authentication, persistence, or a database
+
+# Milestone 5.2 — Typed questions about a field
+
+Status: NOT STARTED
+
+Goal:
+Let the user ask one typed explanatory question about the currently selected
+PDF field without introducing the full Form Agent.
+
+User flow:
+- select an extracted field in the assistant panel
+- type a question about what that field means or what information to consult
+- send the question with bounded metadata for the selected field to the backend
+- display Nemotron's explanation in the assistant panel
+- ask another independent question when needed
+
+Acceptance criteria:
+- the assistant panel provides a typed question input for the selected field
+- the backend accepts one user question plus the selected field's ID, label, type, options, and limited context
+- the Nemotron Service remains the only component that communicates with Nebius
+- the prompt treats field content and the user's question as untrusted input
+- responses explain the field but never select, propose, or apply a field value
+- each request is independent and does not require server-side conversation state
+- question submission, loading, response, retry, and error states are visible
+- changing the selected field clears or clearly separates the previous field's response
+- no AI response changes the shared field state or triggers PDF filling
+- backend tests use mocked Nemotron responses and require no network access
+- existing PDF tests pass
+- frontend production build passes
+
+Do not implement:
+- multi-turn conversation history
+- guided field progression or selection of the next field
+- structured field proposals, confirmation, or AI-assisted filling
+- voice input or output
+- direct-on-form editing
+- authentication, persistence, or a database
+
 # Milestone 6 — Form agent
 
 Status: NOT STARTED
