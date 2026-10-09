@@ -6,6 +6,7 @@ from io import BytesIO
 import re
 from typing import Any, Mapping, Optional, Union
 
+import pymupdf
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError, PyPdfError
 from pypdf.generic import NameObject, TextStringObject
@@ -27,9 +28,13 @@ class PdfField:
     id: str
     label: str
     type: str
+    question: str
     page: Optional[int] = None
     options: Optional[list[str]] = None
     value: Optional[PdfFieldValue] = None
+    help_text: Optional[str] = None
+    section: Optional[str] = None
+    page_context: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +51,50 @@ class _WidgetPosition:
     annotation_order: int
 
 
+@dataclass(frozen=True)
+class _Rectangle:
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+    @property
+    def width(self) -> float:
+        return max(0.0, self.right - self.left)
+
+    @property
+    def height(self) -> float:
+        return max(0.0, self.bottom - self.top)
+
+
+@dataclass(frozen=True)
+class _NativeTextLine:
+    text: str
+    rectangle: _Rectangle
+    block: int
+    line: int
+    font_size: float
+    is_bold: bool
+
+
+@dataclass(frozen=True)
+class _NativeTextGroup:
+    text: str
+    rectangle: _Rectangle
+    block: int
+    first_line: int
+    font_size: float
+    is_bold: bool
+
+
+@dataclass(frozen=True)
+class _NativeFieldContext:
+    question: Optional[str] = None
+    help_text: Optional[str] = None
+    section: Optional[str] = None
+    page_context: Optional[str] = None
+
+
 _SIMPLE_SUM_PATTERN = re.compile(
     r'^\s*AFSimple_Calculate\(\s*"SUM"\s*,\s*new\s+Array\s*\('
     r'(?P<field_names>(?:\s*"[^"]*"\s*,?)+)'
@@ -60,12 +109,26 @@ _GROUPED_NUMBER_PATTERN = re.compile(
 )
 _PLACEHOLDER_FIELD_LABELS = {"-", "n/a", "na", "none", "null", "undefined"}
 _VISUAL_ROW_TOLERANCE = 8
+_QUESTION_VERTICAL_GAP = 20
+_HELP_VERTICAL_GAP = 48
+_WRAPPED_LINE_GAP = 5
+_MAX_CONTEXT_TEXT_LENGTH = 500
+_HEADING_PATTERN = re.compile(
+    r"^(?:section|part)\s+[a-z0-9]+\b|^[A-Z]\.[ \t]+",
+    re.IGNORECASE,
+)
+_HELP_TEXT_PATTERN = re.compile(
+    r"^(?:for\b|if\b|enter\b|use\b|see\b|note\b|please\b|when\b|"
+    r"do not\b|only\b|this\b)",
+    re.IGNORECASE,
+)
 
 
 def extract_acroform_fields(pdf_data: bytes) -> list[PdfField]:
     reader = _read_pdf(pdf_data)
     fields = reader.get_fields() or {}
     widget_locations = _field_widget_locations(reader)
+    native_context = _extract_native_field_context(pdf_data)
     fallback_order = max(
         (location.order for location in widget_locations.values()),
         default=-1,
@@ -78,16 +141,22 @@ def extract_acroform_fields(pdf_data: bytes) -> list[PdfField]:
 
         field_type = _field_type(field)
         location = widget_locations.get(field_id)
+        label = _field_label(field_id, field)
+        context = native_context.get(field_id, _NativeFieldContext())
         extracted_fields.append(
             (
                 location.order if location is not None else fallback_order + source_order,
                 PdfField(
                     id=field_id,
-                    label=_field_label(field_id, field),
+                    label=label,
                     type=field_type,
+                    question=context.question or label,
                     page=location.page if location is not None else None,
                     options=_field_options(field, field_type),
                     value=_field_value(field, field_type),
+                    help_text=context.help_text,
+                    section=context.section,
+                    page_context=context.page_context,
                 ),
             )
         )
@@ -259,6 +328,432 @@ def _field_label(field_id: str, field: dict[str, Any]) -> str:
 
     humanized_id = " ".join(re.sub(r"[._-]+", " ", field_id).split())
     return humanized_id[:1].upper() + humanized_id[1:]
+
+
+def _extract_native_field_context(
+    pdf_data: bytes,
+) -> dict[str, _NativeFieldContext]:
+    try:
+        document = pymupdf.open(stream=pdf_data, filetype="pdf")
+    except (pymupdf.FileDataError, RuntimeError, ValueError) as error:
+        raise PdfExtractionError("Uploaded file is not a valid PDF") from error
+
+    contexts: dict[str, _NativeFieldContext] = {}
+    try:
+        for page in document:
+            widgets = list(page.widgets() or [])
+            widget_rectangles = [
+                _pymupdf_rectangle(widget.rect) for widget in widgets
+            ]
+            lines = _native_text_lines(page, widget_rectangles)
+            groups = _native_text_groups(lines)
+            page_title = _page_title(groups, page.rect.height)
+
+            for widget in widgets:
+                field_id = widget.field_name
+                if not field_id or field_id in contexts:
+                    continue
+
+                rectangle = _pymupdf_rectangle(widget.rect)
+                question_group = _question_group(rectangle, groups)
+                question = (
+                    _clean_context_text(question_group.text)
+                    if question_group is not None
+                    else None
+                )
+                section = _field_section(rectangle, groups)
+                contexts[field_id] = _NativeFieldContext(
+                    question=question,
+                    help_text=_field_help_text(
+                        rectangle,
+                        groups,
+                        question_group,
+                    ),
+                    section=section,
+                    page_context=_field_page_context(page_title, section),
+                )
+    finally:
+        document.close()
+
+    return contexts
+
+
+def _native_text_lines(
+    page: pymupdf.Page,
+    widget_rectangles: list[_Rectangle],
+) -> list[_NativeTextLine]:
+    lines: list[_NativeTextLine] = []
+    text_dictionary = page.get_text("dict", sort=True)
+
+    for block_number, block in enumerate(text_dictionary.get("blocks", [])):
+        if block.get("type") != 0:
+            continue
+
+        for line_number, line in enumerate(block.get("lines", [])):
+            safe_spans = []
+            for span in line.get("spans", []):
+                text = " ".join(str(span.get("text", "")).split())
+                rectangle = _coordinates_rectangle(span.get("bbox"))
+                if not text or rectangle is None:
+                    continue
+                if any(
+                    _rectangles_intersect(rectangle, widget_rectangle)
+                    for widget_rectangle in widget_rectangles
+                ):
+                    continue
+                safe_spans.append((text, rectangle, span))
+
+            if not safe_spans:
+                continue
+
+            rectangle = _bounding_rectangle(
+                [span_rectangle for _, span_rectangle, _ in safe_spans]
+            )
+            lines.append(
+                _NativeTextLine(
+                    text=" ".join(text for text, _, _ in safe_spans),
+                    rectangle=rectangle,
+                    block=block_number,
+                    line=line_number,
+                    font_size=max(
+                        float(span.get("size", 0))
+                        for _, _, span in safe_spans
+                    ),
+                    is_bold=any(
+                        "bold" in str(span.get("font", "")).casefold()
+                        or "demi" in str(span.get("font", "")).casefold()
+                        for _, _, span in safe_spans
+                    ),
+                )
+            )
+
+    return lines
+
+
+def _native_text_groups(
+    lines: list[_NativeTextLine],
+) -> list[_NativeTextGroup]:
+    groups: list[_NativeTextGroup] = []
+
+    for line in sorted(
+        lines,
+        key=lambda item: (
+            item.block,
+            item.rectangle.top,
+            item.rectangle.left,
+            item.line,
+        ),
+    ):
+        previous = groups[-1] if groups else None
+        if previous is not None and _is_wrapped_line(previous, line):
+            groups[-1] = _NativeTextGroup(
+                text=f"{previous.text} {line.text}",
+                rectangle=_bounding_rectangle(
+                    [previous.rectangle, line.rectangle]
+                ),
+                block=previous.block,
+                first_line=previous.first_line,
+                font_size=max(previous.font_size, line.font_size),
+                is_bold=previous.is_bold or line.is_bold,
+            )
+            continue
+
+        groups.append(
+            _NativeTextGroup(
+                text=line.text,
+                rectangle=line.rectangle,
+                block=line.block,
+                first_line=line.line,
+                font_size=line.font_size,
+                is_bold=line.is_bold,
+            )
+        )
+
+    return sorted(
+        groups,
+        key=lambda item: (
+            item.rectangle.top,
+            item.rectangle.left,
+            item.block,
+            item.first_line,
+        ),
+    )
+
+
+def _is_wrapped_line(
+    group: _NativeTextGroup,
+    line: _NativeTextLine,
+) -> bool:
+    if group.block != line.block:
+        return False
+
+    vertical_gap = line.rectangle.top - group.rectangle.bottom
+    return (
+        -2 <= vertical_gap <= _WRAPPED_LINE_GAP
+        and _horizontal_overlap_ratio(group.rectangle, line.rectangle) >= 0.25
+    )
+
+
+def _question_group(
+    widget: _Rectangle,
+    groups: list[_NativeTextGroup],
+) -> Optional[_NativeTextGroup]:
+    candidates: list[tuple[float, _NativeTextGroup]] = []
+
+    for group in groups:
+        if _is_heading(group):
+            continue
+
+        vertical_gap = widget.top - group.rectangle.bottom
+        if (
+            0 <= vertical_gap <= _QUESTION_VERTICAL_GAP
+            and _horizontal_overlap_ratio(widget, group.rectangle) >= 0.5
+        ):
+            horizontal_offset = abs(widget.left - group.rectangle.left)
+            candidates.append(
+                (vertical_gap + horizontal_offset * 0.02, group)
+            )
+
+        right_gap = group.rectangle.left - widget.right
+        if (
+            0 <= right_gap <= _QUESTION_VERTICAL_GAP
+            and _vertical_overlap_ratio(widget, group.rectangle) >= 0.25
+        ):
+            vertical_offset = abs(
+                _rectangle_center_y(widget)
+                - _rectangle_center_y(group.rectangle)
+            )
+            candidates.append((right_gap + vertical_offset * 0.1, group))
+
+        left_gap = widget.left - group.rectangle.right
+        if (
+            0 <= left_gap <= _QUESTION_VERTICAL_GAP
+            and _vertical_overlap_ratio(widget, group.rectangle) >= 0.25
+        ):
+            vertical_offset = abs(
+                _rectangle_center_y(widget)
+                - _rectangle_center_y(group.rectangle)
+            )
+            candidates.append((left_gap + vertical_offset * 0.1, group))
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: (
+            item[0],
+            item[1].rectangle.top,
+            item[1].rectangle.left,
+        )
+    )
+    best_score, best_group = candidates[0]
+    if (
+        len(candidates) > 1
+        and abs(candidates[1][0] - best_score) < 1.5
+        and candidates[1][1].text != best_group.text
+    ):
+        return None
+    return best_group
+
+
+def _field_help_text(
+    widget: _Rectangle,
+    groups: list[_NativeTextGroup],
+    question_group: Optional[_NativeTextGroup],
+) -> Optional[str]:
+    candidates: list[tuple[float, _NativeTextGroup]] = []
+
+    for group in groups:
+        if group == question_group or _is_heading(group):
+            continue
+        if _HELP_TEXT_PATTERN.search(group.text) is None:
+            continue
+
+        vertical_gap = group.rectangle.top - widget.bottom
+        if not 0 <= vertical_gap <= _HELP_VERTICAL_GAP:
+            continue
+        if _horizontal_overlap_ratio(widget, group.rectangle) < 0.25:
+            continue
+
+        candidates.append(
+            (
+                vertical_gap
+                + abs(widget.left - group.rectangle.left) * 0.01,
+                group,
+            )
+        )
+
+    if not candidates:
+        return None
+
+    _, group = min(
+        candidates,
+        key=lambda item: (
+            item[0],
+            item[1].rectangle.top,
+            item[1].rectangle.left,
+        ),
+    )
+    return _clean_context_text(group.text)
+
+
+def _field_section(
+    widget: _Rectangle,
+    groups: list[_NativeTextGroup],
+) -> Optional[str]:
+    headings = [
+        group
+        for group in groups
+        if group.rectangle.bottom <= widget.top and _is_heading(group)
+    ]
+    if not headings:
+        return None
+
+    heading = max(
+        headings,
+        key=lambda item: (
+            item.rectangle.bottom,
+            item.rectangle.left,
+        ),
+    )
+    return _clean_context_text(heading.text)
+
+
+def _page_title(
+    groups: list[_NativeTextGroup],
+    page_height: float,
+) -> Optional[str]:
+    top_groups = [
+        group
+        for group in groups
+        if group.rectangle.top <= page_height * 0.2
+        and len(group.text.split()) >= 2
+    ]
+    if not top_groups:
+        return None
+
+    prominent_groups = [
+        group for group in top_groups if group.font_size >= 14
+    ]
+    candidates = prominent_groups or top_groups
+    title = min(
+        candidates,
+        key=lambda item: (
+            item.rectangle.top,
+            item.rectangle.left,
+        ),
+    )
+    return _clean_context_text(title.text)
+
+
+def _field_page_context(
+    page_title: Optional[str],
+    section: Optional[str],
+) -> Optional[str]:
+    context_parts = []
+    for part in (page_title, section):
+        if part and part not in context_parts:
+            context_parts.append(part)
+    if not context_parts:
+        return None
+    return _bounded_context_text(" — ".join(context_parts))
+
+
+def _is_heading(group: _NativeTextGroup) -> bool:
+    text = group.text.strip()
+    word_count = len(text.split())
+    return bool(
+        _HEADING_PATTERN.search(text)
+        or (group.font_size >= 14 and word_count <= 20)
+        or (
+            group.is_bold
+            and group.font_size >= 9
+            and word_count <= 18
+            and len(text) <= 200
+        )
+    )
+
+
+def _clean_context_text(text: str) -> str:
+    cleaned = " ".join(text.split())
+    cleaned = re.sub(r"\s+([,.;:?!])", r"\1", cleaned)
+    cleaned = re.sub(r"\s+\*$", "", cleaned).strip()
+    return _bounded_context_text(cleaned)
+
+
+def _bounded_context_text(text: str) -> str:
+    if len(text) <= _MAX_CONTEXT_TEXT_LENGTH:
+        return text
+    return f"{text[:_MAX_CONTEXT_TEXT_LENGTH - 1].rstrip()}…"
+
+
+def _pymupdf_rectangle(rectangle: pymupdf.Rect) -> _Rectangle:
+    return _Rectangle(
+        left=float(rectangle.x0),
+        top=float(rectangle.y0),
+        right=float(rectangle.x1),
+        bottom=float(rectangle.y1),
+    )
+
+
+def _coordinates_rectangle(
+    coordinates: Any,
+) -> Optional[_Rectangle]:
+    if coordinates is None or len(coordinates) < 4:
+        return None
+    return _Rectangle(
+        left=float(coordinates[0]),
+        top=float(coordinates[1]),
+        right=float(coordinates[2]),
+        bottom=float(coordinates[3]),
+    )
+
+
+def _bounding_rectangle(rectangles: list[_Rectangle]) -> _Rectangle:
+    return _Rectangle(
+        left=min(rectangle.left for rectangle in rectangles),
+        top=min(rectangle.top for rectangle in rectangles),
+        right=max(rectangle.right for rectangle in rectangles),
+        bottom=max(rectangle.bottom for rectangle in rectangles),
+    )
+
+
+def _rectangles_intersect(
+    first: _Rectangle,
+    second: _Rectangle,
+) -> bool:
+    return (
+        min(first.right, second.right) > max(first.left, second.left)
+        and min(first.bottom, second.bottom) > max(first.top, second.top)
+    )
+
+
+def _horizontal_overlap_ratio(
+    first: _Rectangle,
+    second: _Rectangle,
+) -> float:
+    overlap = max(
+        0.0,
+        min(first.right, second.right) - max(first.left, second.left),
+    )
+    minimum_width = min(first.width, second.width)
+    return overlap / minimum_width if minimum_width > 0 else 0.0
+
+
+def _vertical_overlap_ratio(
+    first: _Rectangle,
+    second: _Rectangle,
+) -> float:
+    overlap = max(
+        0.0,
+        min(first.bottom, second.bottom) - max(first.top, second.top),
+    )
+    minimum_height = min(first.height, second.height)
+    return overlap / minimum_height if minimum_height > 0 else 0.0
+
+
+def _rectangle_center_y(rectangle: _Rectangle) -> float:
+    return (rectangle.top + rectangle.bottom) / 2
 
 
 def _field_widget_locations(reader: PdfReader) -> dict[str, _WidgetLocation]:

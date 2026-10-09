@@ -26,9 +26,13 @@ type PdfField = {
   id: string;
   label: string;
   type: string;
+  question?: string;
   page?: number;
   options?: string[];
   value?: FieldValue;
+  help_text?: string;
+  section?: string;
+  page_context?: string;
 };
 
 type PageFieldGroup = {

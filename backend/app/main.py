@@ -40,9 +40,13 @@ class PdfFieldResponse(BaseModel):
     id: str
     label: str
     type: str
+    question: str
     page: Optional[int] = None
     options: Optional[list[str]] = None
     value: Optional[PdfFieldValue] = None
+    help_text: Optional[str] = None
+    section: Optional[str] = None
+    page_context: Optional[str] = None
 
 
 class PdfExtractionResponse(BaseModel):
@@ -150,9 +154,13 @@ async def extract_pdf_fields(file: UploadFile = File(...)) -> PdfExtractionRespo
                 id=field.id,
                 label=field.label,
                 type=field.type,
+                question=field.question,
                 page=field.page,
                 options=field.options,
                 value=field.value,
+                help_text=field.help_text,
+                section=field.section,
+                page_context=field.page_context,
             )
             for field in fields
         ]

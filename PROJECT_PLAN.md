@@ -530,7 +530,7 @@ Do not implement:
 
 # Milestone 6.5 — Document-aware field questions
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Ground each supported AcroForm field in the visible question and instructions
