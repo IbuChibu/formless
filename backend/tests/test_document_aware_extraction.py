@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from app.services.pdf_service import PdfField, extract_acroform_fields
+from app.services.pdf_service import (
+    PdfField,
+    extract_acroform,
+    extract_acroform_fields,
+)
 
 
 fixtures_path = Path(__file__).parent / "fixtures"
@@ -143,6 +147,50 @@ def test_ambiguous_question_falls_back_to_existing_field_label() -> None:
 
     field = _field_by_id(fields, "One-time budget cost 1")
     assert field.question == field.label
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "expected_title", "instruction_fragment"),
+    [
+        (
+            "household_support_review_demo.pdf",
+            "Household Stability Support Review",
+            "not connected to a real agency",
+        ),
+        (
+            "real_world/uscis_i9_2025.pdf",
+            (
+                "Employment Eligibility Verification Department of Homeland "
+                "Security U.S. Citizenship and Immigration Services"
+            ),
+            "Employers must ensure the form instructions are available",
+        ),
+        (
+            "real_world/sba_startup_costs_2023.pdf",
+            "Startup costs — Joe’s Pizza Place",
+            "This worksheet is set up for a fictional business",
+        ),
+    ],
+)
+def test_extraction_returns_bounded_form_context(
+    relative_path: str,
+    expected_title: str,
+    instruction_fragment: str,
+) -> None:
+    extraction = extract_acroform(
+        (fixtures_path / relative_path).read_bytes()
+    )
+
+    assert extraction.form_context.title == expected_title
+    assert any(
+        instruction_fragment in instruction
+        for instruction in extraction.form_context.instructions
+    )
+    assert len(extraction.form_context.instructions) <= 8
+    assert all(
+        len(instruction) <= 500
+        for instruction in extraction.form_context.instructions
+    )
 
 
 def _field_by_id(fields: list[PdfField], field_id: str) -> PdfField:

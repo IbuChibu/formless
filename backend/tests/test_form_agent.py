@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+import json
 from typing import Any
 
 import pytest
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app, get_form_agent_service
 from app.services.form_agent_service import (
+    MAX_AGENT_CONTEXT_CHARS,
     FormAgentError,
     FormAgentRequest,
     FormAgentService,
@@ -56,6 +58,12 @@ class StubNemotronService:
 
 def agent_request_payload() -> dict[str, Any]:
     return {
+        "form_context": {
+            "title": "Housing support application",
+            "instructions": [
+                "Answer using information you know to be accurate."
+            ],
+        },
         "fields": [
             {
                 "id": "full_name",
@@ -130,11 +138,14 @@ def test_agent_returns_a_validated_proposal_without_confirming_it() -> None:
     assert call["max_tokens"] == 600
     assert call["json_response"] is True
     assert "Never invent personal facts" in call["system_prompt"]
-    assert "Never invent why a form owner asks" in call["system_prompt"]
-    assert "only form-wide context" in call["system_prompt"]
+    assert "Never infer why the form owner asks" in call["system_prompt"]
+    assert "only form-wide question summary" in call["system_prompt"]
     assert "untrusted data" in call["system_prompt"]
-    assert '"confirmed_value": false' in call["user_prompt"]
-    assert '"active_field_id": "living_arrangement"' in call["user_prompt"]
+    assert "UNTRUSTED_AGENT_CONTEXT" in call["user_prompt"]
+    assert '"title": "Housing support application"' in call["user_prompt"]
+    assert '"ordered_questions"' in call["user_prompt"]
+    assert '"active_field"' in call["user_prompt"]
+    assert '"id": "living_arrangement"' in call["user_prompt"]
 
 
 def test_agent_retries_one_invalid_proposal_schema() -> None:
@@ -192,6 +203,57 @@ def test_agent_correction_retry_explains_an_invalid_proposal_value() -> None:
     assert "Dropdown values must copy one supplied option exactly" in (
         correction_call["system_prompt"]
     )
+
+
+@pytest.mark.parametrize(
+    ("field_id", "field_update", "model_value", "expected_value"),
+    [
+        (
+            "living_arrangement",
+            {},
+            '"rent"',
+            "Rent",
+        ),
+        (
+            "shares_costs",
+            {"status": "unanswered", "confirmed_value": None},
+            '"yes"',
+            True,
+        ),
+        (
+            "full_name",
+            {"type": "number"},
+            "1200.5",
+            "1200.5",
+        ),
+    ],
+)
+def test_agent_canonicalizes_safe_proposal_formatting(
+    field_id: str,
+    field_update: dict[str, Any],
+    model_value: str,
+    expected_value: str | bool,
+) -> None:
+    payload = agent_request_payload()
+    field = next(field for field in payload["fields"] if field["id"] == field_id)
+    field.update(field_update)
+    if field.get("confirmed_value") is None:
+        field.pop("confirmed_value", None)
+    payload["active_field_id"] = field_id
+    payload["message"] = "Use the value I just provided."
+    nemotron = StubNemotronService(
+        '{"action":"propose","message":"Proposal",'
+        f'"field_id":"{field_id}","value":{model_value}}}'
+    )
+
+    action = asyncio.run(
+        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+            FormAgentRequest.model_validate(payload)
+        )
+    )
+
+    assert action.action == "propose"
+    assert action.value == expected_value
 
 
 @pytest.mark.parametrize(
@@ -254,6 +316,34 @@ def test_next_asks_the_selected_field_instead_of_repeating_navigation() -> None:
     }
 
 
+def test_next_prefers_the_grounded_question_over_the_field_label() -> None:
+    payload = agent_request_payload()
+    payload["fields"][0].update(
+        {
+            "label": "Employee name tooltip",
+            "question": "Last Name (Family Name)",
+            "help_text": "Enter the name shown on the employee's records.",
+            "section": "Section 1. Employee information",
+            "page_context": "Employment Eligibility Verification — Section 1",
+        }
+    )
+
+    response = post_with_nemotron(
+        StubNemotronService(
+            '{"action":"next","message":"Continue.",'
+            '"field_id":"full_name"}'
+        ),
+        payload,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "action": "next",
+        "message": "Last Name (Family Name). What should be entered here?",
+        "field_id": "full_name",
+    }
+
+
 def test_next_dropdown_question_omits_placeholder_options() -> None:
     payload = agent_request_payload()
     payload["active_field_id"] = None
@@ -312,7 +402,7 @@ def test_purpose_question_uses_grounded_fallback_without_calling_model() -> None
 
     assert action.action == "explain"
     assert action.field_id == "living_arrangement"
-    assert "does not say why" in action.message
+    assert "does not provide an authoritative reason" in action.message
     assert "official instructions" in action.message
     assert nemotron.calls == []
 
@@ -344,6 +434,51 @@ def test_agent_rejects_invalid_client_context(mutate_payload: Any) -> None:
     assert response.status_code == 422
 
 
+def test_model_context_is_structured_and_size_bounded() -> None:
+    payload = agent_request_payload()
+    payload["form_context"] = {
+        "title": "T" * 500,
+        "instructions": ["I" * 500 for _ in range(8)],
+    }
+    payload["fields"] = [
+        {
+            "id": f"field_{index}",
+            "label": "L" * 1000,
+            "question": "Q" * 1000,
+            "help_text": "H" * 1000,
+            "section": "S" * 500,
+            "page_context": "P" * 500,
+            "type": "text",
+            "status": "unanswered",
+        }
+        for index in range(250)
+    ]
+    payload["active_field_id"] = None
+    payload["message"] = "Start"
+    payload["history"] = [
+        {"role": "user", "content": "H" * 4000}
+        for _ in range(8)
+    ]
+    nemotron = StubNemotronService(
+        '{"action":"next","message":"Start",'
+        '"field_id":"field_0"}'
+    )
+
+    response = post_with_nemotron(nemotron, payload)
+
+    assert response.status_code == 200
+    raw_context = nemotron.calls[0]["user_prompt"].split(
+        "UNTRUSTED_AGENT_CONTEXT\n",
+        maxsplit=1,
+    )[1].split("\nEND_UNTRUSTED_AGENT_CONTEXT", maxsplit=1)[0]
+    context = json.loads(raw_context)
+    assert len(json.dumps(context, ensure_ascii=False)) <= (
+        MAX_AGENT_CONTEXT_CHARS
+    )
+    assert context["omitted_question_count"] > 0
+    assert "raw_pdf" not in context
+
+
 @pytest.mark.parametrize(
     "raw_action, expected_detail",
     [
@@ -352,16 +487,6 @@ def test_agent_rejects_invalid_client_context(mutate_payload: Any) -> None:
             '{"action":"explain","message":"Explanation",'
             '"field_id":"unknown_field"}',
             "Form Agent returned an unknown field ID",
-        ),
-        (
-            '{"action":"propose","message":"Use this?",'
-            '"field_id":"living_arrangement","value":"Lease"}',
-            "Form Agent returned an invalid proposal value",
-        ),
-        (
-            '{"action":"propose","message":"Use this?",'
-            '"field_id":"living_arrangement","value":true}',
-            "Form Agent returned an invalid proposal value",
         ),
     ],
 )
@@ -376,6 +501,32 @@ def test_agent_rejects_invalid_model_output_with_a_controlled_error(
 
     assert response.status_code == 502
     assert response.json() == {"detail": expected_detail}
+
+
+@pytest.mark.parametrize("invalid_value", ['"Lease"', "true"])
+def test_repeated_invalid_proposal_value_becomes_clarification(
+    invalid_value: str,
+) -> None:
+    raw_action = (
+        '{"action":"propose","message":"Use this?",'
+        '"field_id":"living_arrangement","value":'
+        f"{invalid_value}}}"
+    )
+
+    response = post_with_nemotron(
+        StubNemotronService(raw_action),
+        agent_request_payload(),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "action": "clarify",
+        "message": (
+            "I couldn't match that answer to an available option. "
+            "Please choose one of: Rent, Own, Staying with someone."
+        ),
+        "field_id": "living_arrangement",
+    }
 
 
 def test_agent_returns_a_controlled_provider_error() -> None:

@@ -23,7 +23,7 @@ from app.services.nemotron_service import (
 from app.services.pdf_service import (
     PdfExtractionError,
     PdfFillingError,
-    extract_acroform_fields,
+    extract_acroform,
     fill_acroform_fields,
 )
 
@@ -49,8 +49,14 @@ class PdfFieldResponse(BaseModel):
     page_context: Optional[str] = None
 
 
+class PdfFormContextResponse(BaseModel):
+    title: Optional[str] = None
+    instructions: list[str] = Field(default_factory=list)
+
+
 class PdfExtractionResponse(BaseModel):
     fields: list[PdfFieldResponse]
+    form_context: PdfFormContextResponse
 
 
 class FieldExplanationRequest(BaseModel):
@@ -144,7 +150,7 @@ async def extract_pdf_fields(file: UploadFile = File(...)) -> PdfExtractionRespo
         raise HTTPException(status_code=415, detail="File must be a PDF")
 
     try:
-        fields = extract_acroform_fields(await file.read())
+        extraction = extract_acroform(await file.read())
     except PdfExtractionError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -162,8 +168,12 @@ async def extract_pdf_fields(file: UploadFile = File(...)) -> PdfExtractionRespo
                 section=field.section,
                 page_context=field.page_context,
             )
-            for field in fields
-        ]
+            for field in extraction.fields
+        ],
+        form_context=PdfFormContextResponse(
+            title=extraction.form_context.title,
+            instructions=list(extraction.form_context.instructions),
+        ),
     )
 
 

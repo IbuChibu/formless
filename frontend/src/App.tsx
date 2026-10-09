@@ -42,11 +42,21 @@ type PageFieldGroup = {
 
 type PdfExtractionResponse = {
   fields: PdfField[];
+  form_context: FormContext;
+};
+
+type FormContext = {
+  title?: string;
+  instructions: string[];
 };
 
 type AgentRequestField = {
   id: string;
   label: string;
+  question?: string;
+  help_text?: string;
+  section?: string;
+  page_context?: string;
   type: AgentFieldType;
   page?: number;
   options?: string[];
@@ -60,6 +70,7 @@ type AgentHistoryMessage = {
 };
 
 type AgentRequest = {
+  form_context: FormContext;
   fields: AgentRequestField[];
   active_field_id: string | null;
   message: string;
@@ -109,6 +120,9 @@ function App() {
     useState<ConnectionStatus>("checking");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fields, setFields] = useState<PdfField[]>([]);
+  const [formContext, setFormContext] = useState<FormContext>({
+    instructions: [],
+  });
   const [formValues, setFormValues] = useState<Record<string, FieldValue>>({});
   const [changedValues, setChangedValues] = useState<
     Record<string, FieldValue>
@@ -287,6 +301,7 @@ function App() {
     setPreviewUrl(originalUrl);
     setDownloadUrl(null);
     setFields([]);
+    setFormContext({ instructions: [] });
     setFormValues({});
     setChangedValues({});
     setExtractionError(null);
@@ -322,7 +337,10 @@ function App() {
       }
 
       const extraction = (await response.json()) as PdfExtractionResponse;
-      if (!Array.isArray(extraction.fields)) {
+      if (
+        !Array.isArray(extraction.fields) ||
+        !isValidFormContext(extraction.form_context)
+      ) {
         throw new Error("The API returned an invalid field response.");
       }
 
@@ -334,6 +352,7 @@ function App() {
       );
 
       setFields(extraction.fields);
+      setFormContext(extraction.form_context);
       setFormValues(initialValues);
       setConfirmedFieldIds(
         new Set(
@@ -564,6 +583,7 @@ function App() {
     }
 
     const request: AgentRequest = {
+      form_context: formContext,
       fields: requestFields,
       active_field_id:
         activeFieldOverride === undefined
@@ -1572,10 +1592,14 @@ function buildAgentRequestFields(
       const requestField: AgentRequestField = {
         id: field.id,
         label: field.label || humanizeFieldId(field.id),
+        question: field.question || field.label || humanizeFieldId(field.id),
         type: field.type,
         status,
         ...(field.page ? { page: field.page } : {}),
         ...(availableOptions ? { options: availableOptions } : {}),
+        ...(field.help_text ? { help_text: field.help_text } : {}),
+        ...(field.section ? { section: field.section } : {}),
+        ...(field.page_context ? { page_context: field.page_context } : {}),
       };
 
       if (status === "confirmed" && value !== undefined) {
@@ -1693,6 +1717,18 @@ function isAgentActionKind(value: unknown): value is AgentActionKind {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isValidFormContext(value: unknown): value is FormContext {
+  if (!isRecord(value) || !Array.isArray(value.instructions)) {
+    return false;
+  }
+  if (value.title !== undefined && typeof value.title !== "string") {
+    return false;
+  }
+  return value.instructions.every(
+    (instruction) => typeof instruction === "string",
+  );
 }
 
 function getAgentActionLabel(action?: AgentActionKind): string {

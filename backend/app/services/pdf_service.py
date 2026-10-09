@@ -38,6 +38,18 @@ class PdfField:
 
 
 @dataclass(frozen=True)
+class PdfFormContext:
+    title: Optional[str] = None
+    instructions: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PdfExtraction:
+    fields: list[PdfField]
+    form_context: PdfFormContext
+
+
+@dataclass(frozen=True)
 class _WidgetLocation:
     page: int
     order: int
@@ -95,6 +107,12 @@ class _NativeFieldContext:
     page_context: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class _NativePdfContext:
+    fields: dict[str, _NativeFieldContext]
+    form_context: PdfFormContext
+
+
 _SIMPLE_SUM_PATTERN = re.compile(
     r'^\s*AFSimple_Calculate\(\s*"SUM"\s*,\s*new\s+Array\s*\('
     r'(?P<field_names>(?:\s*"[^"]*"\s*,?)+)'
@@ -122,13 +140,23 @@ _HELP_TEXT_PATTERN = re.compile(
     r"do not\b|only\b|this\b)",
     re.IGNORECASE,
 )
+_INSTRUCTION_TEXT_PATTERN = re.compile(
+    r"\b(?:must|should|complete|choose|enter|use|do not|ensure|provide|"
+    r"instructions?|this (?:form|worksheet)|fictional|not connected)\b",
+    re.IGNORECASE,
+)
+_MAX_FORM_INSTRUCTIONS = 8
 
 
 def extract_acroform_fields(pdf_data: bytes) -> list[PdfField]:
+    return extract_acroform(pdf_data).fields
+
+
+def extract_acroform(pdf_data: bytes) -> PdfExtraction:
     reader = _read_pdf(pdf_data)
     fields = reader.get_fields() or {}
     widget_locations = _field_widget_locations(reader)
-    native_context = _extract_native_field_context(pdf_data)
+    native_context = _extract_native_pdf_context(pdf_data)
     fallback_order = max(
         (location.order for location in widget_locations.values()),
         default=-1,
@@ -142,7 +170,7 @@ def extract_acroform_fields(pdf_data: bytes) -> list[PdfField]:
         field_type = _field_type(field)
         location = widget_locations.get(field_id)
         label = _field_label(field_id, field)
-        context = native_context.get(field_id, _NativeFieldContext())
+        context = native_context.fields.get(field_id, _NativeFieldContext())
         extracted_fields.append(
             (
                 location.order if location is not None else fallback_order + source_order,
@@ -161,10 +189,13 @@ def extract_acroform_fields(pdf_data: bytes) -> list[PdfField]:
             )
         )
 
-    return [
-        field
-        for _, field in sorted(extracted_fields, key=lambda item: item[0])
-    ]
+    return PdfExtraction(
+        fields=[
+            field
+            for _, field in sorted(extracted_fields, key=lambda item: item[0])
+        ],
+        form_context=native_context.form_context,
+    )
 
 
 def fill_acroform_fields(
@@ -330,15 +361,17 @@ def _field_label(field_id: str, field: dict[str, Any]) -> str:
     return humanized_id[:1].upper() + humanized_id[1:]
 
 
-def _extract_native_field_context(
+def _extract_native_pdf_context(
     pdf_data: bytes,
-) -> dict[str, _NativeFieldContext]:
+) -> _NativePdfContext:
     try:
         document = pymupdf.open(stream=pdf_data, filetype="pdf")
     except (pymupdf.FileDataError, RuntimeError, ValueError) as error:
         raise PdfExtractionError("Uploaded file is not a valid PDF") from error
 
-    contexts: dict[str, _NativeFieldContext] = {}
+    field_contexts: dict[str, _NativeFieldContext] = {}
+    form_title: Optional[str] = None
+    form_instructions: list[str] = []
     try:
         for page in document:
             widgets = list(page.widgets() or [])
@@ -348,10 +381,23 @@ def _extract_native_field_context(
             lines = _native_text_lines(page, widget_rectangles)
             groups = _native_text_groups(lines)
             page_title = _page_title(groups, page.rect.height)
+            if form_title is None and page_title is not None:
+                form_title = page_title
+            for instruction in _page_instructions(
+                groups,
+                page_title,
+                widget_rectangles,
+                page.rect.height,
+            ):
+                if (
+                    instruction not in form_instructions
+                    and len(form_instructions) < _MAX_FORM_INSTRUCTIONS
+                ):
+                    form_instructions.append(instruction)
 
             for widget in widgets:
                 field_id = widget.field_name
-                if not field_id or field_id in contexts:
+                if not field_id or field_id in field_contexts:
                     continue
 
                 rectangle = _pymupdf_rectangle(widget.rect)
@@ -362,7 +408,7 @@ def _extract_native_field_context(
                     else None
                 )
                 section = _field_section(rectangle, groups)
-                contexts[field_id] = _NativeFieldContext(
+                field_contexts[field_id] = _NativeFieldContext(
                     question=question,
                     help_text=_field_help_text(
                         rectangle,
@@ -375,7 +421,13 @@ def _extract_native_field_context(
     finally:
         document.close()
 
-    return contexts
+    return _NativePdfContext(
+        fields=field_contexts,
+        form_context=PdfFormContext(
+            title=form_title,
+            instructions=tuple(form_instructions),
+        ),
+    )
 
 
 def _native_text_lines(
@@ -644,6 +696,39 @@ def _page_title(
         ),
     )
     return _clean_context_text(title.text)
+
+
+def _page_instructions(
+    groups: list[_NativeTextGroup],
+    page_title: Optional[str],
+    widget_rectangles: list[_Rectangle],
+    page_height: float,
+) -> list[str]:
+    first_widget_top = min(
+        (rectangle.top for rectangle in widget_rectangles),
+        default=page_height * 0.45,
+    )
+    instruction_area_bottom = max(first_widget_top, page_height * 0.25)
+    question_groups = [
+        question_group
+        for rectangle in widget_rectangles
+        if (question_group := _question_group(rectangle, groups)) is not None
+    ]
+    instructions = []
+
+    for group in groups:
+        if group.rectangle.bottom > instruction_area_bottom:
+            continue
+        if _is_heading(group) or group in question_groups:
+            continue
+
+        text = _clean_context_text(group.text)
+        if text == page_title or _INSTRUCTION_TEXT_PATTERN.search(text) is None:
+            continue
+        if text not in instructions:
+            instructions.append(text)
+
+    return instructions
 
 
 def _field_page_context(

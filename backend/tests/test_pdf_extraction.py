@@ -18,7 +18,12 @@ def test_extract_pdf_returns_acroform_fields() -> None:
 
     assert response.status_code == 200
 
-    fields = {field["id"]: field for field in response.json()["fields"]}
+    extraction = response.json()
+    assert extraction["form_context"] == {
+        "title": "Sample application",
+        "instructions": [],
+    }
+    fields = {field["id"]: field for field in extraction["fields"]}
     assert fields == {
         "accept_terms": {
             "id": "accept_terms",
