@@ -49,6 +49,12 @@ Allowed JSON shapes:
 Rules:
 - Return exactly one JSON object and no markdown or surrounding text.
 - Use only field IDs supplied in AGENT_CONTEXT.
+- Use the bounded history only to understand the current conversation.
+- When active_field_id is null and unanswered fields remain, return next for the first unanswered field in the supplied order.
+- A next action must always target the first unanswered field in the supplied order, or null when none remain.
+- Explain and clarify actions must stay on the active field.
+- When the user asks to skip the active unanswered field, return skip for that field; do not advance until later context marks it skipped.
+- When the user supplies an answer for the active field, return a proposal rather than advancing.
 - Never invent personal facts or choose an answer for the user.
 - Propose a value only when the user supplied that factual value.
 - Text, textarea, number, and dropdown proposals use strings; checkbox proposals use booleans.
@@ -218,6 +224,15 @@ def _validate_action_against_request(
             raise FormAgentError("Form Agent returned an invalid action")
         return
 
+    if (
+        request.active_field_id is None
+        and unanswered_fields
+        and not isinstance(action, NextAction)
+    ):
+        raise FormAgentError(
+            "Form Agent returned an action without an active field"
+        )
+
     field = fields_by_id.get(action.field_id)
     if field is None:
         raise FormAgentError("Form Agent returned an unknown field ID")
@@ -234,6 +249,20 @@ def _validate_action_against_request(
     if isinstance(action, NextAction) and field.status != "unanswered":
         raise FormAgentError(
             "Form Agent returned a resolved field as the next field"
+        )
+
+    if (
+        isinstance(action, NextAction)
+        and unanswered_fields
+        and action.field_id != unanswered_fields[0].id
+    ):
+        raise FormAgentError(
+            "Form Agent did not return the first unanswered field"
+        )
+
+    if isinstance(action, SkipAction) and field.status != "unanswered":
+        raise FormAgentError(
+            "Form Agent returned a resolved field to skip"
         )
 
     if isinstance(action, ProposeAction):

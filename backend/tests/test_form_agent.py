@@ -269,6 +269,38 @@ def test_next_can_finish_only_when_no_fields_are_unanswered() -> None:
     }
 
 
+def test_next_must_select_the_first_unanswered_field() -> None:
+    response = post_with_nemotron(
+        StubNemotronService(
+            '{"action":"next","message":"Let us review where you live.",'
+            '"field_id":"living_arrangement"}'
+        ),
+        agent_request_payload(),
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Form Agent did not return the first unanswered field"
+    }
+
+
+def test_agent_cannot_skip_a_confirmed_field() -> None:
+    payload = agent_request_payload()
+    payload["active_field_id"] = "shares_costs"
+    response = post_with_nemotron(
+        StubNemotronService(
+            '{"action":"skip","message":"Skipped.",'
+            '"field_id":"shares_costs"}'
+        ),
+        payload,
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Form Agent returned a resolved field to skip"
+    }
+
+
 def test_form_agent_error_is_a_controlled_service_failure() -> None:
     nemotron = StubNemotronService("not JSON")
     request = FormAgentRequest.model_validate(agent_request_payload())

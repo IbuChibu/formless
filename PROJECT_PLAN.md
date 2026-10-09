@@ -417,7 +417,7 @@ Do not implement:
 
 # Milestone 6.2 — Conversation and guided progression
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Add a typed conversation that remembers a bounded recent exchange, keeps an

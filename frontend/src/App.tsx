@@ -6,8 +6,16 @@ import PdfViewer from "./PdfViewer";
 type ConnectionStatus = "checking" | "connected" | "disconnected";
 type ExtractionStatus = "idle" | "loading" | "ready" | "empty" | "error";
 type PreviewStatus = "idle" | "pending" | "updating" | "ready" | "error";
-type ExplanationStatus = "idle" | "loading" | "success" | "error";
+type AgentStatus = "idle" | "loading" | "error";
 type FieldValue = string | boolean;
+type AgentActionKind = "explain" | "clarify" | "propose" | "skip" | "next";
+type AgentFieldStatus = "unanswered" | "confirmed" | "skipped";
+type AgentFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "dropdown"
+  | "checkbox";
 
 type HealthResponse = {
   status: string;
@@ -32,14 +40,58 @@ type PdfExtractionResponse = {
   fields: PdfField[];
 };
 
-type FieldExplanationResponse = {
-  field_id: string;
-  explanation: string;
-  model: string;
+type AgentRequestField = {
+  id: string;
+  label: string;
+  type: AgentFieldType;
+  page?: number;
+  options?: string[];
+  status: AgentFieldStatus;
+  confirmed_value?: FieldValue;
+};
+
+type AgentHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+type AgentRequest = {
+  fields: AgentRequestField[];
+  active_field_id: string | null;
+  message: string;
+  history: AgentHistoryMessage[];
+};
+
+type AgentAction =
+  | {
+      action: Exclude<AgentActionKind, "propose" | "next">;
+      message: string;
+      field_id: string;
+    }
+  | {
+      action: "propose";
+      message: string;
+      field_id: string;
+      value: FieldValue;
+    }
+  | {
+      action: "next";
+      message: string;
+      field_id: string | null;
+    };
+
+type ConversationMessage = AgentHistoryMessage & {
+  id: number;
+  action?: AgentActionKind;
+  fieldId?: string | null;
+  proposedValue?: FieldValue;
 };
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const previewDebounceMs = 600;
+const maxAgentHistoryMessages = 8;
+const numberPattern = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
+const groupedNumberPattern = /^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d*)?$/;
 
 function App() {
   const [connectionStatus, setConnectionStatus] =
@@ -58,24 +110,27 @@ function App() {
     useState<PreviewStatus>("idle");
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [explanationStatus, setExplanationStatus] =
-    useState<ExplanationStatus>("idle");
-  const [explanationFieldId, setExplanationFieldId] = useState<string | null>(
+  const [confirmedFieldIds, setConfirmedFieldIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [skippedFieldIds, setSkippedFieldIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [agentActiveFieldId, setAgentActiveFieldId] = useState<string | null>(
     null,
   );
-  const [explanation, setExplanation] = useState<string | null>(null);
-  const [explanationModel, setExplanationModel] = useState<string | null>(null);
-  const [explanationError, setExplanationError] = useState<string | null>(null);
-  const [questionInput, setQuestionInput] = useState("");
-  const [submittedQuestion, setSubmittedQuestion] = useState<string | null>(
-    null,
-  );
-  const [questionAnswer, setQuestionAnswer] = useState<string | null>(null);
+  const [agentMessages, setAgentMessages] = useState<ConversationMessage[]>([]);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
+  const [agentInput, setAgentInput] = useState("");
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [failedAgentRequest, setFailedAgentRequest] =
+    useState<AgentRequest | null>(null);
 
   const originalUrlRef = useRef<string | null>(null);
   const filledUrlRef = useRef<string | null>(null);
   const extractionControllerRef = useRef<AbortController | null>(null);
-  const explanationControllerRef = useRef<AbortController | null>(null);
+  const agentControllerRef = useRef<AbortController | null>(null);
+  const agentMessageIdRef = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -173,7 +228,7 @@ function App() {
   useEffect(() => {
     return () => {
       extractionControllerRef.current?.abort();
-      explanationControllerRef.current?.abort();
+      agentControllerRef.current?.abort();
       if (originalUrlRef.current) {
         URL.revokeObjectURL(originalUrlRef.current);
       }
@@ -196,7 +251,7 @@ function App() {
     }
 
     extractionControllerRef.current?.abort();
-    explanationControllerRef.current?.abort();
+    agentControllerRef.current?.abort();
     const controller = new AbortController();
     extractionControllerRef.current = controller;
 
@@ -219,14 +274,15 @@ function App() {
     setChangedValues({});
     setExtractionError(null);
     setPreviewError(null);
-    setExplanationStatus("idle");
-    setExplanationFieldId(null);
-    setExplanation(null);
-    setExplanationModel(null);
-    setExplanationError(null);
-    setQuestionInput("");
-    setSubmittedQuestion(null);
-    setQuestionAnswer(null);
+    setConfirmedFieldIds(new Set());
+    setSkippedFieldIds(new Set());
+    setAgentActiveFieldId(null);
+    setAgentMessages([]);
+    setAgentStatus("idle");
+    setAgentInput("");
+    setAgentError(null);
+    setFailedAgentRequest(null);
+    agentMessageIdRef.current = 0;
     setExtractionStatus("loading");
     setPreviewStatus("idle");
 
@@ -258,6 +314,13 @@ function App() {
 
       setFields(extraction.fields);
       setFormValues(initialValues);
+      setConfirmedFieldIds(
+        new Set(
+          extraction.fields
+            .filter((field) => hasInitialConfirmedValue(field))
+            .map((field) => field.id),
+        ),
+      );
       setExtractionStatus(extraction.fields.length > 0 ? "ready" : "empty");
     } catch (error) {
       if (isAbortError(error)) {
@@ -270,47 +333,55 @@ function App() {
   }
 
   function updateField(fieldId: string, value: FieldValue) {
+    const field = fields.find((candidate) => candidate.id === fieldId);
+    const isConfirmed = field
+      ? isManuallyConfirmedValue(field, value)
+      : false;
+
     setFormValues((current) => ({ ...current, [fieldId]: value }));
     setChangedValues((current) => ({ ...current, [fieldId]: value }));
+    setConfirmedFieldIds((current) => {
+      const next = new Set(current);
+      if (isConfirmed) {
+        next.add(fieldId);
+      } else {
+        next.delete(fieldId);
+      }
+      return next;
+    });
+    setSkippedFieldIds((current) => {
+      const next = new Set(current);
+      next.delete(fieldId);
+      return next;
+    });
+    if (isConfirmed && agentActiveFieldId === fieldId) {
+      setAgentActiveFieldId(null);
+    }
     setPreviewError(null);
     setPreviewStatus("pending");
   }
 
-  async function explainField(field: PdfField, question?: string) {
-    explanationControllerRef.current?.abort();
+  function appendAgentMessage(message: Omit<ConversationMessage, "id">) {
+    agentMessageIdRef.current += 1;
+    const nextMessage = { ...message, id: agentMessageIdRef.current };
+    setAgentMessages((current) =>
+      [...current, nextMessage].slice(-maxAgentHistoryMessages),
+    );
+  }
+
+  async function requestAgent(request: AgentRequest) {
+    agentControllerRef.current?.abort();
     const controller = new AbortController();
-    explanationControllerRef.current = controller;
-    const normalizedQuestion = question?.trim() || null;
-
-    setExplanationFieldId(field.id);
-    setExplanationStatus("loading");
-    setExplanationError(null);
-
-    if (normalizedQuestion) {
-      setSubmittedQuestion(normalizedQuestion);
-      setQuestionAnswer(null);
-    } else {
-      setExplanation(null);
-      setExplanationModel(null);
-      setQuestionInput("");
-      setSubmittedQuestion(null);
-      setQuestionAnswer(null);
-    }
+    agentControllerRef.current = controller;
+    setAgentStatus("loading");
+    setAgentError(null);
+    setFailedAgentRequest(null);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/ai/explain`, {
+      const response = await fetch(`${apiBaseUrl}/agent/respond`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: field.id,
-          label: field.label || humanizeFieldId(field.id),
-          type: field.type,
-          options: field.options,
-          form_context: field.page
-            ? `This field appears on page ${field.page} of the uploaded form.`
-            : "This field appears in the uploaded form.",
-          ...(normalizedQuestion ? { question: normalizedQuestion } : {}),
-        }),
+        body: JSON.stringify(request),
         signal: controller.signal,
       });
 
@@ -318,54 +389,94 @@ function App() {
         throw new Error(await readApiError(response));
       }
 
-      const result = (await response.json()) as
-        | Partial<FieldExplanationResponse>
-        | null;
-      if (
-        !result ||
-        result.field_id !== field.id ||
-        typeof result.explanation !== "string" ||
-        !result.explanation.trim() ||
-        typeof result.model !== "string" ||
-        !result.model.trim()
-      ) {
-        throw new Error("The API returned an invalid AI explanation.");
-      }
+      const action = parseAgentAction(await response.json(), request.fields);
 
       if (controller.signal.aborted) {
         return;
       }
 
-      if (normalizedQuestion) {
-        setQuestionAnswer(result.explanation.trim());
+      appendAgentMessage({
+        role: "assistant",
+        content: action.message,
+        action: action.action,
+        fieldId: action.field_id,
+        ...(action.action === "propose"
+          ? { proposedValue: action.value }
+          : {}),
+      });
+
+      if (action.action === "skip") {
+        const skippedField = request.fields.find(
+          (field) => field.id === action.field_id,
+        );
+        if (skippedField?.status === "unanswered") {
+          setSkippedFieldIds((current) =>
+            new Set(current).add(action.field_id),
+          );
+        }
+        setAgentActiveFieldId(null);
       } else {
-        setExplanation(result.explanation.trim());
+        setAgentActiveFieldId(action.field_id);
       }
-      setExplanationModel(result.model);
-      setExplanationStatus("success");
+      setAgentStatus("idle");
     } catch (error) {
       if (isAbortError(error)) {
         return;
       }
 
-      setExplanationError(getErrorMessage(error));
-      setExplanationStatus("error");
+      setAgentError(getErrorMessage(error));
+      setFailedAgentRequest(request);
+      setAgentStatus("error");
     } finally {
-      if (explanationControllerRef.current === controller) {
-        explanationControllerRef.current = null;
+      if (agentControllerRef.current === controller) {
+        agentControllerRef.current = null;
       }
     }
   }
 
-  function askFieldQuestion(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const question = questionInput.trim();
-    if (!explanationField || !question) {
+  function sendAgentMessage(
+    message: string,
+    activeFieldOverride?: string | null,
+  ) {
+    const normalizedMessage = message.trim();
+    if (!normalizedMessage || agentStatus === "loading") {
       return;
     }
 
-    setQuestionInput("");
-    void explainField(explanationField, question);
+    const requestFields = buildAgentRequestFields(
+      fields,
+      formValues,
+      confirmedFieldIds,
+      skippedFieldIds,
+    );
+    if (requestFields.length === 0) {
+      setAgentError(
+        "This form does not contain fields the assistant supports.",
+      );
+      setAgentStatus("error");
+      return;
+    }
+
+    const request: AgentRequest = {
+      fields: requestFields,
+      active_field_id:
+        activeFieldOverride === undefined
+          ? agentActiveFieldId
+          : activeFieldOverride,
+      message: normalizedMessage,
+      history: agentMessages
+        .slice(-maxAgentHistoryMessages)
+        .map(({ role, content }) => ({ role, content })),
+    };
+
+    appendAgentMessage({ role: "user", content: normalizedMessage });
+    setAgentInput("");
+    void requestAgent(request);
+  }
+
+  function submitAgentMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    sendAgentMessage(agentInput);
   }
 
   const connectionCopy = {
@@ -386,9 +497,23 @@ function App() {
     ? `completed-${selectedFile.name}`
     : "completed-form.pdf";
   const fieldGroups = groupFieldsByPage(fields);
-  const explanationField = fields.find(
-    (field) => field.id === explanationFieldId,
+  const activeAgentField = fields.find(
+    (field) => field.id === agentActiveFieldId,
   );
+  const currentAgentFields = buildAgentRequestFields(
+    fields,
+    formValues,
+    confirmedFieldIds,
+    skippedFieldIds,
+  );
+  const hasUnansweredAgentField = currentAgentFields.some(
+    (field) => field.status === "unanswered",
+  );
+  const activeAgentFieldState = currentAgentFields.find(
+    (field) => field.id === agentActiveFieldId,
+  );
+  const canUseAgent =
+    extractionStatus === "ready" && currentAgentFields.length > 0;
 
   return (
     <div className="app-shell">
@@ -513,8 +638,8 @@ function App() {
               </div>
 
               <section
-                className={`ai-explanation-panel ${explanationStatus}`}
-                aria-busy={explanationStatus === "loading"}
+                className={`ai-explanation-panel agent-panel ${agentStatus}`}
+                aria-busy={agentStatus === "loading"}
                 aria-live="polite"
               >
                 <div className="ai-explanation-heading">
@@ -527,109 +652,187 @@ function App() {
                   </div>
                 </div>
 
-                {explanationStatus === "idle" ? (
-                  <p className="ai-explanation-empty">
-                    Choose <strong>Explain with AI</strong> on any field for a
-                    plain-language explanation.
-                  </p>
-                ) : null}
-
-                {explanationField && explanationStatus !== "idle" ? (
+                {activeAgentField ? (
                   <div className="ai-selected-field">
-                    <span>Selected field</span>
-                    <strong>
-                      {explanationField.label ||
-                        humanizeFieldId(explanationField.id)}
-                    </strong>
-                  </div>
-                ) : null}
-
-                {explanation ? (
-                  <div className="ai-explanation-response">
-                    <span className="ai-response-label">Explanation</span>
-                    <p>{explanation}</p>
-                    {explanationModel ? (
-                      <small>Response from {explanationModel}</small>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {submittedQuestion ? (
-                  <div className="ai-question-exchange">
-                    <div className="ai-user-question">
-                      <span>Your question</span>
-                      <p>{submittedQuestion}</p>
+                    <div>
+                      <span>Active field</span>
+                      <strong>
+                        {activeAgentField.label ||
+                          humanizeFieldId(activeAgentField.id)}
+                      </strong>
                     </div>
-                    {questionAnswer ? (
-                      <div className="ai-question-answer">
-                        <span>Nemotron</span>
-                        <p>{questionAnswer}</p>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {explanationStatus === "loading" ? (
-                  <div className="ai-explanation-state">
-                    <span className="spinner" aria-hidden="true" />
-                    <span>
-                      {submittedQuestion
-                        ? "Asking Nemotron about this field…"
-                        : "Asking Nemotron to explain this field…"}
-                    </span>
-                  </div>
-                ) : null}
-
-                {explanationStatus === "error" && explanationError ? (
-                  <div className="ai-explanation-error" role="alert">
-                    <p>{explanationError}</p>
-                    {explanationField ? (
+                    {activeAgentFieldState?.status === "unanswered" ? (
                       <button
+                        className="agent-skip-button"
                         type="button"
+                        disabled={agentStatus === "loading"}
                         onClick={() =>
-                          void explainField(
-                            explanationField,
-                            submittedQuestion ?? undefined,
-                          )
+                          sendAgentMessage("Skip this field for now.")
                         }
                       >
-                        {submittedQuestion
-                          ? "Retry question"
-                          : "Retry explanation"}
+                        Skip
                       </button>
                     ) : null}
                   </div>
                 ) : null}
 
-                {explanationField && explanation ? (
-                  <form className="ai-question-form" onSubmit={askFieldQuestion}>
-                    <label htmlFor="field-question">Ask about this field</label>
+                {agentMessages.length === 0 ? (
+                  <p className="ai-explanation-empty">
+                    Start a guided conversation, or choose{" "}
+                    <strong>Explain with AI</strong> on a field. Suggestions
+                    stay separate from your form until a later confirmation
+                    step is added.
+                  </p>
+                ) : null}
+
+                {agentMessages.length > 0 ? (
+                  <div
+                    className="agent-conversation"
+                    aria-label="Recent form assistant conversation"
+                    role="log"
+                  >
+                    {agentMessages.map((message) => {
+                      const messageField = fields.find(
+                        (field) => field.id === message.fieldId,
+                      );
+
+                      return (
+                        <article
+                          className={[
+                            "agent-message",
+                            message.role,
+                            message.action ?? "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          key={message.id}
+                        >
+                          <div className="agent-message-meta">
+                            <strong>
+                              {message.role === "user"
+                                ? "You"
+                                : getAgentActionLabel(message.action)}
+                            </strong>
+                            {messageField ? (
+                              <span>
+                                {messageField.label ||
+                                  humanizeFieldId(messageField.id)}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p>{message.content}</p>
+                          {message.action === "propose" &&
+                          message.proposedValue !== undefined ? (
+                            <div className="agent-proposal">
+                              <span>Proposed answer</span>
+                              <strong>
+                                {formatAgentValue(message.proposedValue)}
+                              </strong>
+                              <small>
+                                Suggestion only — this has not changed the
+                                field or PDF.
+                              </small>
+                            </div>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {agentStatus === "loading" ? (
+                  <div className="ai-explanation-state">
+                    <span className="spinner" aria-hidden="true" />
+                    <span>Form assistant is thinking…</span>
+                  </div>
+                ) : null}
+
+                {agentStatus === "error" && agentError ? (
+                  <div className="ai-explanation-error" role="alert">
+                    <p>{agentError}</p>
+                    {failedAgentRequest ? (
+                      <button
+                        type="button"
+                        onClick={() => void requestAgent(failedAgentRequest)}
+                      >
+                        Retry message
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {canUseAgent &&
+                !activeAgentField &&
+                hasUnansweredAgentField &&
+                agentStatus !== "loading" ? (
+                  <button
+                    className="agent-progress-button"
+                    type="button"
+                    onClick={() =>
+                      sendAgentMessage(
+                        agentMessages.length === 0
+                          ? "Start with the first unanswered field."
+                          : "Continue to the next unanswered field.",
+                        null,
+                      )
+                    }
+                  >
+                    {agentMessages.length === 0
+                      ? "Start guided form"
+                      : "Continue to next field"}
+                  </button>
+                ) : null}
+
+                {canUseAgent &&
+                !activeAgentField &&
+                !hasUnansweredAgentField ? (
+                  <p className="agent-complete-state">
+                    No unanswered supported fields remain.
+                  </p>
+                ) : null}
+
+                {canUseAgent ? (
+                  <form
+                    className="ai-question-form agent-message-form"
+                    onSubmit={submitAgentMessage}
+                  >
+                    <label htmlFor="agent-message">
+                      {activeAgentField
+                        ? "Reply or ask a follow-up"
+                        : "Message the form assistant"}
+                    </label>
                     <div className="ai-question-controls">
                       <input
-                        id="field-question"
+                        id="agent-message"
                         type="text"
-                        maxLength={1000}
-                        placeholder="What would you like clarified?"
-                        value={questionInput}
-                        disabled={explanationStatus === "loading"}
-                        onChange={(event) =>
-                          setQuestionInput(event.target.value)
+                        maxLength={2000}
+                        placeholder={
+                          activeAgentField
+                            ? "Type your answer or ask for clarification"
+                            : "Ask for help with the form"
                         }
+                        value={agentInput}
+                        disabled={agentStatus === "loading"}
+                        onChange={(event) => setAgentInput(event.target.value)}
                       />
                       <button
                         type="submit"
                         disabled={
-                          explanationStatus === "loading" ||
-                          !questionInput.trim()
+                          agentStatus === "loading" || !agentInput.trim()
                         }
                       >
-                        Ask
+                        Send
                       </button>
                     </div>
                     <small>
-                      Each question is independent and does not change the PDF.
+                      Only the eight most recent messages are kept. AI
+                      proposals cannot change your form in this milestone.
                     </small>
                   </form>
+                ) : extractionStatus === "ready" ? (
+                  <p className="agent-complete-state">
+                    This form has no fields supported by the assistant.
+                  </p>
                 ) : null}
               </section>
 
@@ -659,7 +862,10 @@ function App() {
                 ) : null}
 
                 {extractionStatus === "ready" ? (
-                  <form className="field-list" onSubmit={(event) => event.preventDefault()}>
+                  <form
+                    className="field-list"
+                    onSubmit={(event) => event.preventDefault()}
+                  >
                     {fieldGroups.map((group) => (
                       <section
                         className="field-page-group"
@@ -670,17 +876,16 @@ function App() {
                         </h3>
                         <div className="page-field-list">
                           {group.fields.map(({ field, index }) => {
-                            const isSelectedForExplanation =
-                              explanationFieldId === field.id;
-                            const isExplaining =
-                              isSelectedForExplanation &&
-                              explanationStatus === "loading";
+                            const isActiveForAgent =
+                              agentActiveFieldId === field.id;
+                            const isAskingAgent =
+                              isActiveForAgent && agentStatus === "loading";
 
                             return (
                               <div
                                 className={`field-item${
-                                  isSelectedForExplanation
-                                    ? " selected-for-explanation"
+                                  isActiveForAgent
+                                    ? " active-for-agent"
                                     : ""
                                 }`}
                                 key={field.id}
@@ -697,15 +902,21 @@ function App() {
                                   <button
                                     className="explain-field-button"
                                     type="button"
-                                    disabled={isExplaining}
+                                    disabled={agentStatus === "loading"}
                                     aria-label={`Explain ${
                                       field.label || humanizeFieldId(field.id)
                                     } with AI`}
-                                    onClick={() => void explainField(field)}
+                                    onClick={() => {
+                                      setAgentActiveFieldId(field.id);
+                                      sendAgentMessage(
+                                        "Please explain this field in plain language.",
+                                        field.id,
+                                      );
+                                    }}
                                   >
                                     <span aria-hidden="true">✦</span>
-                                    {isExplaining
-                                      ? "Explaining…"
+                                    {isAskingAgent
+                                      ? "Asking…"
                                       : "Explain with AI"}
                                   </button>
                                 ) : null}
@@ -882,10 +1093,177 @@ function humanizeFieldId(fieldId: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-function isExplainableField(field: PdfField): boolean {
+function isExplainableField(
+  field: PdfField,
+): field is PdfField & { type: AgentFieldType } {
   return ["text", "textarea", "number", "dropdown", "checkbox"].includes(
     field.type,
   );
+}
+
+function hasInitialConfirmedValue(field: PdfField): boolean {
+  if (!isExplainableField(field) || field.value === undefined) {
+    return false;
+  }
+
+  if (field.type === "checkbox") {
+    return field.value === true;
+  }
+
+  return isAgentValueCompatible(field, field.value);
+}
+
+function isManuallyConfirmedValue(
+  field: PdfField,
+  value: FieldValue,
+): boolean {
+  return isExplainableField(field) && isAgentValueCompatible(field, value);
+}
+
+function buildAgentRequestFields(
+  fields: PdfField[],
+  values: Record<string, FieldValue>,
+  confirmedFieldIds: Set<string>,
+  skippedFieldIds: Set<string>,
+): AgentRequestField[] {
+  return fields.filter(isExplainableField).map((field) => {
+    const value = values[field.id];
+    const isConfirmed =
+      confirmedFieldIds.has(field.id) &&
+      value !== undefined &&
+      isAgentValueCompatible(field, value);
+    const status: AgentFieldStatus = isConfirmed
+      ? "confirmed"
+      : skippedFieldIds.has(field.id)
+        ? "skipped"
+        : "unanswered";
+    const requestField: AgentRequestField = {
+      id: field.id,
+      label: field.label || humanizeFieldId(field.id),
+      type: field.type,
+      status,
+      ...(field.page ? { page: field.page } : {}),
+      ...(field.options ? { options: field.options } : {}),
+    };
+
+    if (status === "confirmed" && value !== undefined) {
+      requestField.confirmed_value = value;
+    }
+
+    return requestField;
+  });
+}
+
+function isAgentValueCompatible(
+  field: PdfField & { type: AgentFieldType },
+  value: FieldValue,
+): boolean {
+  if (field.type === "checkbox") {
+    return typeof value === "boolean";
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return false;
+  }
+
+  if (field.type === "number") {
+    return numberPattern.test(value) || groupedNumberPattern.test(value);
+  }
+
+  if (field.type === "dropdown") {
+    return (field.options ?? []).includes(value);
+  }
+
+  return true;
+}
+
+function parseAgentAction(
+  payload: unknown,
+  requestFields: AgentRequestField[],
+): AgentAction {
+  if (!isRecord(payload) || !isAgentActionKind(payload.action)) {
+    throw new Error("The API returned an invalid form assistant response.");
+  }
+
+  if (typeof payload.message !== "string" || !payload.message.trim()) {
+    throw new Error("The API returned an invalid form assistant response.");
+  }
+
+  const message = payload.message.trim();
+  const fieldId = payload.field_id;
+
+  if (payload.action === "next") {
+    if (fieldId !== null && typeof fieldId !== "string") {
+      throw new Error("The API returned an invalid form assistant response.");
+    }
+    if (typeof fieldId === "string" && !findAgentField(requestFields, fieldId)) {
+      throw new Error("The form assistant returned an unknown field.");
+    }
+    return { action: "next", message, field_id: fieldId };
+  }
+
+  if (typeof fieldId !== "string") {
+    throw new Error("The API returned an invalid form assistant response.");
+  }
+
+  const field = findAgentField(requestFields, fieldId);
+  if (!field) {
+    throw new Error("The form assistant returned an unknown field.");
+  }
+
+  if (payload.action === "propose") {
+    const value = payload.value;
+    if (
+      (typeof value !== "string" && typeof value !== "boolean") ||
+      !isAgentValueCompatible(field, value)
+    ) {
+      throw new Error("The form assistant returned an invalid proposal.");
+    }
+    return {
+      action: "propose",
+      message,
+      field_id: fieldId,
+      value,
+    };
+  }
+
+  return { action: payload.action, message, field_id: fieldId };
+}
+
+function findAgentField(
+  fields: AgentRequestField[],
+  fieldId: string,
+): AgentRequestField | undefined {
+  return fields.find((field) => field.id === fieldId);
+}
+
+function isAgentActionKind(value: unknown): value is AgentActionKind {
+  return ["explain", "clarify", "propose", "skip", "next"].includes(
+    value as AgentActionKind,
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getAgentActionLabel(action?: AgentActionKind): string {
+  const labels: Record<AgentActionKind, string> = {
+    explain: "Explanation",
+    clarify: "Clarification",
+    propose: "Proposal",
+    skip: "Skipped",
+    next: "Next field",
+  };
+
+  return action ? labels[action] : "Form assistant";
+}
+
+function formatAgentValue(value: FieldValue): string {
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+  return value;
 }
 
 function groupFieldsByPage(fields: PdfField[]): PageFieldGroup[] {

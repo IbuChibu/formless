@@ -680,7 +680,6 @@ h1 {
 }
 
 .ai-explanation-empty,
-.ai-explanation-response p,
 .ai-explanation-error p {
   margin: 0;
   color: #536157;
@@ -689,10 +688,18 @@ h1 {
 }
 
 .ai-selected-field {
-  display: grid;
-  gap: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding-left: 10px;
   border-left: 3px solid #65a77c;
+}
+
+.ai-selected-field > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
 }
 
 .ai-selected-field span {
@@ -709,6 +716,172 @@ h1 {
   line-height: 1.4;
 }
 
+.agent-skip-button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid #c9d7cc;
+  border-radius: 7px;
+  color: #52645a;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.67rem;
+  font-weight: 800;
+}
+
+.agent-skip-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.agent-conversation {
+  display: grid;
+  max-height: 310px;
+  gap: 9px;
+  overflow-y: auto;
+  padding-right: 3px;
+  scroll-behavior: smooth;
+}
+
+.agent-message {
+  display: grid;
+  gap: 6px;
+  padding: 10px 11px;
+  border: 1px solid #d8e3da;
+  border-left-width: 4px;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 82%);
+}
+
+.agent-message.user {
+  margin-left: 24px;
+  border-color: #d5e0d7;
+  border-left-width: 1px;
+  background: #e5eee7;
+}
+
+.agent-message.explain {
+  border-left-color: #3b8657;
+}
+
+.agent-message.clarify {
+  border-left-color: #d19632;
+}
+
+.agent-message.propose {
+  border-left-color: #6359ad;
+}
+
+.agent-message.skip {
+  border-left-color: #77817a;
+}
+
+.agent-message.next {
+  border-left-color: #367b87;
+}
+
+.agent-message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-message-meta strong {
+  color: #385a43;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-message.clarify .agent-message-meta strong {
+  color: #8a611e;
+}
+
+.agent-message.propose .agent-message-meta strong {
+  color: #584f9a;
+}
+
+.agent-message.skip .agent-message-meta strong {
+  color: #626d65;
+}
+
+.agent-message.next .agent-message-meta strong {
+  color: #276a75;
+}
+
+.agent-message-meta span {
+  overflow: hidden;
+  color: #7a867e;
+  font-size: 0.61rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-message p {
+  margin: 0;
+  color: #304037;
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.agent-proposal {
+  display: grid;
+  gap: 3px;
+  margin-top: 2px;
+  padding: 9px 10px;
+  border: 1px solid #d8d3ef;
+  border-radius: 8px;
+  background: #f5f3ff;
+}
+
+.agent-proposal span {
+  color: #6c6499;
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-proposal strong {
+  color: #3e376c;
+  font-size: 0.78rem;
+}
+
+.agent-proposal small {
+  color: #716b8a;
+  font-size: 0.62rem;
+  line-height: 1.4;
+}
+
+.agent-progress-button {
+  min-height: 40px;
+  padding: 0 13px;
+  border: 1px solid #9fc5aa;
+  border-radius: 9px;
+  color: #1d623a;
+  background: #eaf5ed;
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.agent-complete-state {
+  margin: 0;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: #5d6a61;
+  background: #e9efea;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.agent-progress-button:focus-visible,
+.agent-skip-button:focus-visible {
+  outline: 3px solid rgb(52 133 83 / 22%);
+  outline-offset: 2px;
+}
+
 .ai-explanation-state {
   display: flex;
   align-items: center;
@@ -722,66 +895,6 @@ h1 {
   width: 18px;
   height: 18px;
   border-width: 2px;
-}
-
-.ai-explanation-response {
-  padding: 12px 13px;
-  border: 1px solid #cfe2d4;
-  border-radius: 10px;
-  background: rgb(255 255 255 / 78%);
-}
-
-.ai-explanation-response p {
-  color: #2e4034;
-}
-
-.ai-response-label,
-.ai-user-question > span,
-.ai-question-answer > span {
-  display: block;
-  margin-bottom: 5px;
-  color: #5c7865;
-  font-size: 0.62rem;
-  font-weight: 850;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.ai-explanation-response small {
-  display: block;
-  margin-top: 8px;
-  color: #77837b;
-  font-size: 0.64rem;
-}
-
-.ai-question-exchange {
-  display: grid;
-  gap: 8px;
-}
-
-.ai-user-question,
-.ai-question-answer {
-  padding: 10px 12px;
-  border-radius: 10px;
-}
-
-.ai-user-question {
-  margin-left: 22px;
-  background: #e4eee7;
-}
-
-.ai-question-answer {
-  margin-right: 22px;
-  border: 1px solid #cfe2d4;
-  background: rgb(255 255 255 / 82%);
-}
-
-.ai-user-question p,
-.ai-question-answer p {
-  margin: 0;
-  color: #304037;
-  font-size: 0.76rem;
-  line-height: 1.5;
 }
 
 .ai-question-form {
@@ -954,7 +1067,7 @@ h1 {
     box-shadow 130ms ease;
 }
 
-.field-item.selected-for-explanation {
+.field-item.active-for-agent {
   border-color: #b7d7c1;
   background: #f5faf6;
   box-shadow: 0 7px 20px rgb(32 91 52 / 7%);
