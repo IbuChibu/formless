@@ -137,6 +137,7 @@ function App() {
   const [isEditingProposal, setIsEditingProposal] = useState(false);
   const [proposalEditValue, setProposalEditValue] =
     useState<FieldValue>("");
+  const [manualDrawerOpen, setManualDrawerOpen] = useState(false);
 
   const originalUrlRef = useRef<string | null>(null);
   const filledUrlRef = useRef<string | null>(null);
@@ -297,6 +298,7 @@ function App() {
     setPendingProposal(null);
     setIsEditingProposal(false);
     setProposalEditValue("");
+    setManualDrawerOpen(false);
     agentMessageIdRef.current = 0;
     setExtractionStatus("loading");
     setPreviewStatus("idle");
@@ -609,6 +611,19 @@ function App() {
   const hasUnansweredAgentField = currentAgentFields.some(
     (field) => field.status === "unanswered",
   );
+  const confirmedAgentFieldCount = currentAgentFields.filter(
+    (field) => field.status === "confirmed",
+  ).length;
+  const skippedAgentFieldCount = currentAgentFields.filter(
+    (field) => field.status === "skipped",
+  ).length;
+  const reviewedAgentFieldCount =
+    confirmedAgentFieldCount + skippedAgentFieldCount;
+  const agentProgressPercentage = currentAgentFields.length
+    ? Math.round(
+        (reviewedAgentFieldCount / currentAgentFields.length) * 100,
+      )
+    : 0;
   const activeAgentFieldState = currentAgentFields.find(
     (field) => field.id === agentActiveFieldId,
   );
@@ -702,8 +717,8 @@ function App() {
               <p className="eyebrow">Ready when you are</p>
               <h2>Your PDF workspace will appear here.</h2>
               <p>
-                The document preview and its detected form fields will sit side
-                by side.
+                The document preview and guided assistant will sit side by
+                side.
               </p>
             </div>
           </section>
@@ -737,16 +752,81 @@ function App() {
               ) : null}
             </article>
 
-            <aside className="panel fields-panel">
-              <div className="panel-header fields-heading">
+            <aside className="panel fields-panel assistant-workspace">
+              <div className="panel-header assistant-heading">
                 <div>
-                  <p className="panel-kicker">Form fields</p>
-                  <h2>Complete the details</h2>
+                  <p className="panel-kicker">Guided completion</p>
+                  <h2>Form assistant</h2>
                 </div>
-                {fields.length > 0 ? (
-                  <span className="field-count">{fields.length}</span>
+                {currentAgentFields.length > 0 ? (
+                  <span className="assistant-progress-count">
+                    {reviewedAgentFieldCount}/{currentAgentFields.length}
+                  </span>
                 ) : null}
               </div>
+
+              {currentAgentFields.length > 0 ? (
+                <section
+                  className="agent-progress-overview"
+                  aria-label="Supported field progress"
+                >
+                  <div className="agent-progress-copy">
+                    <span>Form progress</span>
+                    <strong>
+                      {reviewedAgentFieldCount} of {currentAgentFields.length}{" "}
+                      reviewed
+                    </strong>
+                  </div>
+                  <div
+                    className="agent-progress-track"
+                    role="progressbar"
+                    aria-label="Reviewed supported fields"
+                    aria-valuemin={0}
+                    aria-valuemax={currentAgentFields.length}
+                    aria-valuenow={reviewedAgentFieldCount}
+                  >
+                    <span style={{ width: `${agentProgressPercentage}%` }} />
+                  </div>
+                  <div className="agent-progress-breakdown">
+                    <span>{confirmedAgentFieldCount} confirmed</span>
+                    <span>{skippedAgentFieldCount} skipped</span>
+                    <span>
+                      {currentAgentFields.length - reviewedAgentFieldCount}{" "}
+                      unanswered
+                    </span>
+                  </div>
+                </section>
+              ) : null}
+
+              {extractionStatus === "loading" ? (
+                <div className="workspace-status">
+                  <div className="loading-state" aria-live="polite">
+                    <span className="spinner" />
+                    <div>
+                      <strong>Reading form fields</strong>
+                      <p>This should only take a moment.</p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {extractionStatus === "empty" ? (
+                <div className="workspace-status">
+                  <div className="message-state">
+                    <strong>No fillable fields found</strong>
+                    <p>Try another PDF that contains AcroForm fields.</p>
+                  </div>
+                </div>
+              ) : null}
+
+              {extractionStatus === "error" ? (
+                <div className="workspace-status">
+                  <div className="message-state" role="alert">
+                    <strong>Fields unavailable</strong>
+                    <p>The original PDF is still available in the preview.</p>
+                  </div>
+                </div>
+              ) : null}
 
               <section
                 className={`ai-explanation-panel agent-panel ${agentStatus}`}
@@ -1059,108 +1139,120 @@ function App() {
                 ) : null}
               </section>
 
-              <div className="fields-content">
-                {extractionStatus === "loading" ? (
-                  <div className="loading-state" aria-live="polite">
-                    <span className="spinner" />
-                    <div>
-                      <strong>Reading form fields</strong>
-                      <p>This should only take a moment.</p>
-                    </div>
-                  </div>
-                ) : null}
-
-                {extractionStatus === "empty" ? (
-                  <div className="message-state">
-                    <strong>No fillable fields found</strong>
-                    <p>Try another PDF that contains AcroForm fields.</p>
-                  </div>
-                ) : null}
-
-                {extractionStatus === "error" ? (
-                  <div className="message-state">
-                    <strong>Fields unavailable</strong>
-                    <p>The original PDF is still available in the preview.</p>
-                  </div>
-                ) : null}
-
-                {extractionStatus === "ready" ? (
-                  <form
-                    className="field-list"
-                    onSubmit={(event) => event.preventDefault()}
+              <section className="manual-fields-drawer">
+                <button
+                  className="manual-drawer-toggle"
+                  type="button"
+                  aria-controls="manual-fields-panel"
+                  aria-expanded={manualDrawerOpen}
+                  disabled={
+                    extractionStatus !== "ready" || fields.length === 0
+                  }
+                  onClick={() => setManualDrawerOpen((current) => !current)}
+                >
+                  <span className="manual-drawer-copy">
+                    <strong>Edit all fields</strong>
+                    <small>
+                      Manual fallback
+                      {fields.length > 0 ? ` · ${fields.length} fields` : ""}
+                    </small>
+                  </span>
+                  <span
+                    className={`manual-drawer-chevron${
+                      manualDrawerOpen ? " open" : ""
+                    }`}
+                    aria-hidden="true"
                   >
-                    {fieldGroups.map((group) => (
-                      <section
-                        className="field-page-group"
-                        key={group.page ?? "other"}
-                      >
-                        <h3 className="field-page-heading">
-                          {group.page ? `Page ${group.page}` : "Other fields"}
-                        </h3>
-                        <div className="page-field-list">
-                          {group.fields.map(({ field, index }) => {
-                            const isActiveForAgent =
-                              agentActiveFieldId === field.id;
-                            const isAskingAgent =
-                              isActiveForAgent && agentStatus === "loading";
+                    ⌄
+                  </span>
+                </button>
 
-                            return (
-                              <div
-                                className={`field-item${
-                                  isActiveForAgent
-                                    ? " active-for-agent"
-                                    : ""
-                                }`}
-                                key={field.id}
-                              >
-                                <FieldControl
-                                  field={field}
-                                  inputId={`pdf-field-${index}`}
-                                  value={formValues[field.id]}
-                                  onChange={(value) =>
-                                    updateField(field.id, value)
-                                  }
-                                />
-                                {isExplainableField(field) ? (
-                                  <button
-                                    className="explain-field-button"
-                                    type="button"
-                                    disabled={
-                                      agentStatus === "loading" ||
-                                      pendingProposal !== null
+                <div
+                  className="fields-content manual-fields-content"
+                  id="manual-fields-panel"
+                  hidden={!manualDrawerOpen}
+                >
+                  {extractionStatus === "ready" ? (
+                    <form
+                      className="field-list"
+                      onSubmit={(event) => event.preventDefault()}
+                    >
+                      {fieldGroups.map((group) => (
+                        <section
+                          className="field-page-group"
+                          key={group.page ?? "other"}
+                        >
+                          <h3 className="field-page-heading">
+                            {group.page
+                              ? `Page ${group.page}`
+                              : "Other fields"}
+                          </h3>
+                          <div className="page-field-list">
+                            {group.fields.map(({ field, index }) => {
+                              const isActiveForAgent =
+                                agentActiveFieldId === field.id;
+                              const isAskingAgent =
+                                isActiveForAgent &&
+                                agentStatus === "loading";
+
+                              return (
+                                <div
+                                  className={`field-item${
+                                    isActiveForAgent
+                                      ? " active-for-agent"
+                                      : ""
+                                  }`}
+                                  key={field.id}
+                                >
+                                  <FieldControl
+                                    field={field}
+                                    inputId={`pdf-field-${index}`}
+                                    value={formValues[field.id]}
+                                    onChange={(value) =>
+                                      updateField(field.id, value)
                                     }
-                                    aria-label={`Explain ${
-                                      field.label || humanizeFieldId(field.id)
-                                    } with AI`}
-                                    onClick={() => {
-                                      setAgentActiveFieldId(field.id);
-                                      sendAgentMessage(
-                                        "Please explain this field in plain language.",
-                                        field.id,
-                                      );
-                                    }}
-                                  >
-                                    <span aria-hidden="true">✦</span>
-                                    {isAskingAgent
-                                      ? "Asking…"
-                                      : "Explain with AI"}
-                                  </button>
-                                ) : null}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </section>
-                    ))}
-                  </form>
-                ) : null}
-              </div>
+                                  />
+                                  {isExplainableField(field) ? (
+                                    <button
+                                      className="explain-field-button"
+                                      type="button"
+                                      disabled={
+                                        agentStatus === "loading" ||
+                                        pendingProposal !== null
+                                      }
+                                      aria-label={`Explain ${
+                                        field.label || humanizeFieldId(field.id)
+                                      } with AI`}
+                                      onClick={() => {
+                                        setAgentActiveFieldId(field.id);
+                                        sendAgentMessage(
+                                          "Please explain this field in plain language.",
+                                          field.id,
+                                        );
+                                      }}
+                                    >
+                                      <span aria-hidden="true">✦</span>
+                                      {isAskingAgent
+                                        ? "Asking…"
+                                        : "Explain with AI"}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      ))}
+                    </form>
+                  ) : null}
+                </div>
+              </section>
 
               <div className="fields-footer">
                 <p>
                   {downloadUrl
                     ? "Your latest changes are ready to download."
-                    : "Edit a field to create a completed copy."}
+                    : "Confirm an answer or edit a field to create a completed copy."}
                 </p>
                 {downloadUrl ? (
                   <a

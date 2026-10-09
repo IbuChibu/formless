@@ -504,7 +504,7 @@ Do not implement:
 
 # Milestone 6.4 — Conversation-first UI
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Make the typed Form Agent the primary workspace while preserving manual editing

@@ -159,6 +159,39 @@ def test_agent_retries_one_invalid_proposal_schema() -> None:
     assert "previous response failed" in nemotron.calls[1][
         "system_prompt"
     ].lower()
+    assert "VALIDATION_FEEDBACK" in nemotron.calls[1]["user_prompt"]
+    assert "previous_response" in nemotron.calls[1]["user_prompt"]
+
+
+def test_agent_correction_retry_explains_an_invalid_proposal_value() -> None:
+    invalid_response = (
+        '{"action":"propose","message":"You said you lease.",'
+        '"field_id":"living_arrangement","value":"Lease"}'
+    )
+    nemotron = StubNemotronService(
+        [
+            invalid_response,
+            '{"action":"propose","message":"You said you rent.",'
+            '"field_id":"living_arrangement","value":"Rent"}',
+        ]
+    )
+    request = FormAgentRequest.model_validate(agent_request_payload())
+
+    action = asyncio.run(
+        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert action.action == "propose"
+    assert action.value == "Rent"
+    assert len(nemotron.calls) == 2
+    correction_call = nemotron.calls[1]
+    assert "Dropdown values must match an available option" in correction_call[
+        "user_prompt"
+    ]
+    assert '\\"value\\":\\"Lease\\"' in correction_call["user_prompt"]
+    assert "Dropdown values must copy one supplied option exactly" in (
+        correction_call["system_prompt"]
+    )
 
 
 @pytest.mark.parametrize(
