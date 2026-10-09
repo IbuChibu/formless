@@ -445,6 +445,35 @@ Do not implement:
 - unbounded or server-persisted conversation history
 - authentication, persistence, or a database
 
+# Milestone 6.2.1 — Conversation quality and grounding
+
+Status: COMPLETE
+
+Goal:
+Make the guided conversation natural and grounded in the available form schema
+before adding proposal confirmation.
+
+Acceptance criteria:
+- a next action asks the selected field using its real label, type, and available options
+- next-action responses never repeat start or continue navigation commands
+- the agent treats the ordered field schema as its only form-wide context
+- questions about why an organisation requests information do not produce an invented purpose
+- when the schema does not contain an authoritative purpose, the response says so and directs the user to official instructions or the form owner
+- placeholder dropdown choices such as `Select one` are treated as unanswered and are not offered as real answers
+- proposal responses explicitly say that the value is awaiting confirmation
+- proposed values remain separate from confirmed values and cannot update a field or PDF
+- one invalid structured model action receives at most one correction attempt before a controlled error
+- backend tests use a mocked Nemotron Service and require no network access
+- frontend production build and existing backend tests pass
+
+Do not implement:
+- confirming, rejecting, editing, or applying an AI proposal
+- AI-assisted PDF filling
+- raw PDF or page-text transmission to Nemotron
+- voice input or output
+- direct editing on the rendered PDF page
+- authentication, persistence, or a database
+
 # Milestone 6.3 — Proposal and confirmation
 
 Status: NOT STARTED

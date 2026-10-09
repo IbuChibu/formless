@@ -92,6 +92,8 @@ const previewDebounceMs = 600;
 const maxAgentHistoryMessages = 8;
 const numberPattern = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 const groupedNumberPattern = /^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d*)?$/;
+const dropdownPlaceholderPattern =
+  /^(?:please\s+)?(?:select|choose)(?:\s+(?:one|an?\s+option))?$/i;
 
 function App() {
   const [connectionStatus, setConnectionStatus] =
@@ -308,7 +310,7 @@ function App() {
       const initialValues = Object.fromEntries(
         extraction.fields.map((field) => [
           field.id,
-          field.value ?? (field.type === "checkbox" ? false : ""),
+          getInitialFieldValue(field),
         ]),
       );
 
@@ -729,8 +731,8 @@ function App() {
                                 {formatAgentValue(message.proposedValue)}
                               </strong>
                               <small>
-                                Suggestion only — this has not changed the
-                                field or PDF.
+                                Awaiting confirmation — this has not changed
+                                the field or PDF.
                               </small>
                             </div>
                           ) : null}
@@ -1028,7 +1030,7 @@ function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
           <option value="" disabled>
             Select an option
           </option>
-          {(field.options ?? []).map((option) => (
+          {getAvailableDropdownOptions(field.options).map((option) => (
             <option key={option} value={option}>
               {option}
             </option>
@@ -1101,6 +1103,19 @@ function isExplainableField(
   );
 }
 
+function getInitialFieldValue(field: PdfField): FieldValue {
+  const fallbackValue = field.type === "checkbox" ? false : "";
+  const value = field.value ?? fallbackValue;
+  if (
+    field.type === "dropdown" &&
+    typeof value === "string" &&
+    isPlaceholderDropdownOption(value)
+  ) {
+    return "";
+  }
+  return value;
+}
+
 function hasInitialConfirmedValue(field: PdfField): boolean {
   if (!isExplainableField(field) || field.value === undefined) {
     return false;
@@ -1126,32 +1141,43 @@ function buildAgentRequestFields(
   confirmedFieldIds: Set<string>,
   skippedFieldIds: Set<string>,
 ): AgentRequestField[] {
-  return fields.filter(isExplainableField).map((field) => {
-    const value = values[field.id];
-    const isConfirmed =
-      confirmedFieldIds.has(field.id) &&
-      value !== undefined &&
-      isAgentValueCompatible(field, value);
-    const status: AgentFieldStatus = isConfirmed
-      ? "confirmed"
-      : skippedFieldIds.has(field.id)
-        ? "skipped"
-        : "unanswered";
-    const requestField: AgentRequestField = {
-      id: field.id,
-      label: field.label || humanizeFieldId(field.id),
-      type: field.type,
-      status,
-      ...(field.page ? { page: field.page } : {}),
-      ...(field.options ? { options: field.options } : {}),
-    };
+  return fields
+    .filter(isExplainableField)
+    .filter(
+      (field) =>
+        field.type !== "dropdown" ||
+        getAvailableDropdownOptions(field.options).length > 0,
+    )
+    .map((field) => {
+      const value = values[field.id];
+      const availableOptions =
+        field.type === "dropdown"
+          ? getAvailableDropdownOptions(field.options)
+          : field.options;
+      const isConfirmed =
+        confirmedFieldIds.has(field.id) &&
+        value !== undefined &&
+        isAgentValueCompatible(field, value);
+      const status: AgentFieldStatus = isConfirmed
+        ? "confirmed"
+        : skippedFieldIds.has(field.id)
+          ? "skipped"
+          : "unanswered";
+      const requestField: AgentRequestField = {
+        id: field.id,
+        label: field.label || humanizeFieldId(field.id),
+        type: field.type,
+        status,
+        ...(field.page ? { page: field.page } : {}),
+        ...(availableOptions ? { options: availableOptions } : {}),
+      };
 
-    if (status === "confirmed" && value !== undefined) {
-      requestField.confirmed_value = value;
-    }
+      if (status === "confirmed" && value !== undefined) {
+        requestField.confirmed_value = value;
+      }
 
-    return requestField;
-  });
+      return requestField;
+    });
 }
 
 function isAgentValueCompatible(
@@ -1171,10 +1197,26 @@ function isAgentValueCompatible(
   }
 
   if (field.type === "dropdown") {
-    return (field.options ?? []).includes(value);
+    return getAvailableDropdownOptions(field.options).includes(value);
   }
 
   return true;
+}
+
+function getAvailableDropdownOptions(options?: string[]): string[] {
+  return (options ?? []).filter(
+    (option) => !isPlaceholderDropdownOption(option),
+  );
+}
+
+function isPlaceholderDropdownOption(option: string): boolean {
+  const normalizedOption = option
+    .trim()
+    .replace(/^[-–—_:.…\s]+|[-–—_:.…\s]+$/g, "");
+  if (!normalizedOption) {
+    return true;
+  }
+  return dropdownPlaceholderPattern.test(normalizedOption);
 }
 
 function parseAgentAction(

@@ -22,10 +22,12 @@ client = TestClient(app)
 class StubNemotronService:
     def __init__(
         self,
-        response: str = "",
+        response: str | list[str] = "",
         error: NemotronServiceError | None = None,
     ) -> None:
-        self.response = response
+        self.responses = (
+            response.copy() if isinstance(response, list) else [response]
+        )
         self.error = error
         self.calls: list[dict[str, Any]] = []
 
@@ -47,7 +49,9 @@ class StubNemotronService:
         )
         if self.error is not None:
             raise self.error
-        return self.response
+        if len(self.responses) > 1:
+            return self.responses.pop(0)
+        return self.responses[0]
 
 
 def agent_request_payload() -> dict[str, Any]:
@@ -112,7 +116,10 @@ def test_agent_returns_a_validated_proposal_without_confirming_it() -> None:
 
     assert action.model_dump() == {
         "action": "propose",
-        "message": "You said you rent. Would you like to use Rent?",
+        "message": (
+            'I understood your answer as "Rent". This proposal is awaiting '
+            "your confirmation and has not been applied to the form."
+        ),
         "field_id": "living_arrangement",
         "value": "Rent",
     }
@@ -123,9 +130,35 @@ def test_agent_returns_a_validated_proposal_without_confirming_it() -> None:
     assert call["max_tokens"] == 600
     assert call["json_response"] is True
     assert "Never invent personal facts" in call["system_prompt"]
+    assert "Never invent why a form owner asks" in call["system_prompt"]
+    assert "only form-wide context" in call["system_prompt"]
     assert "untrusted data" in call["system_prompt"]
     assert '"confirmed_value": false' in call["user_prompt"]
     assert '"active_field_id": "living_arrangement"' in call["user_prompt"]
+
+
+def test_agent_retries_one_invalid_proposal_schema() -> None:
+    nemotron = StubNemotronService(
+        [
+            '{"action":"propose","message":"You rent.",'
+            '"field_id":"living_arrangement"}',
+            '{"action":"propose","message":"You rent.",'
+            '"field_id":"living_arrangement","value":"Rent"}',
+        ]
+    )
+    request = FormAgentRequest.model_validate(agent_request_payload())
+
+    action = asyncio.run(
+        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert action.action == "propose"
+    assert action.value == "Rent"
+    assert "awaiting your confirmation" in action.message
+    assert len(nemotron.calls) == 2
+    assert "previous response failed" in nemotron.calls[1][
+        "system_prompt"
+    ].lower()
 
 
 @pytest.mark.parametrize(
@@ -169,6 +202,86 @@ def test_agent_supports_each_milestone_action(
 
     assert response.status_code == 200
     assert response.json()["action"] == expected_action
+
+
+def test_next_asks_the_selected_field_instead_of_repeating_navigation() -> None:
+    response = post_with_nemotron(
+        StubNemotronService(
+            '{"action":"next","message":"Continue to the next field.",'
+            '"field_id":"full_name"}'
+        ),
+        agent_request_payload(),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "action": "next",
+        "message": "Full name. What should be entered here?",
+        "field_id": "full_name",
+    }
+
+
+def test_next_dropdown_question_omits_placeholder_options() -> None:
+    payload = agent_request_payload()
+    payload["active_field_id"] = None
+    payload["message"] = "Start with the first unanswered field."
+    payload["fields"][0]["status"] = "skipped"
+    payload["fields"][1]["options"].insert(0, "Select one")
+    nemotron = StubNemotronService(
+        '{"action":"next","message":"Start with the first unanswered '
+        'field.","field_id":"living_arrangement"}'
+    )
+
+    response = post_with_nemotron(nemotron, payload)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "action": "next",
+        "message": (
+            "Which option best describes where you live? Choose one of: "
+            "Rent, Own, Staying with someone."
+        ),
+        "field_id": "living_arrangement",
+    }
+    assert "Select one" not in nemotron.calls[0]["user_prompt"]
+
+
+def test_dropdown_placeholder_value_becomes_unanswered() -> None:
+    payload = agent_request_payload()
+    payload["fields"][1].update(
+        {
+            "options": ["Select one", "Rent", "Own"],
+            "status": "confirmed",
+            "confirmed_value": "Select one",
+        }
+    )
+
+    request = FormAgentRequest.model_validate(payload)
+    dropdown = request.fields[1]
+
+    assert dropdown.status == "unanswered"
+    assert dropdown.confirmed_value is None
+    assert dropdown.options == ["Rent", "Own"]
+
+
+def test_purpose_question_uses_grounded_fallback_without_calling_model() -> None:
+    payload = agent_request_payload()
+    payload["message"] = "Why does the organisation need this information?"
+    nemotron = StubNemotronService(
+        '{"action":"explain","message":"An invented reason.",'
+        '"field_id":"living_arrangement"}'
+    )
+    request = FormAgentRequest.model_validate(payload)
+
+    action = asyncio.run(
+        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert action.action == "explain"
+    assert action.field_id == "living_arrangement"
+    assert "does not say why" in action.message
+    assert "official instructions" in action.message
+    assert nemotron.calls == []
 
 
 @pytest.mark.parametrize(
@@ -264,7 +377,7 @@ def test_next_can_finish_only_when_no_fields_are_unanswered() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "action": "next",
-        "message": "All fields have been reviewed.",
+        "message": "All supported fields have been reviewed.",
         "field_id": None,
     }
 
