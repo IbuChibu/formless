@@ -528,6 +528,66 @@ Do not implement:
 - autonomous submission
 - authentication, persistence, or a database
 
+# Milestone 6.5 — Document-aware field questions
+
+Status: NOT STARTED
+
+Goal:
+Ground each supported AcroForm field in the visible question and instructions
+from the PDF's native text layer before that context reaches the Form Agent.
+
+Acceptance criteria:
+- native page text is extracted with PyMuPDF without OCR
+- widget geometry is used internally to associate fields with nearby visible text
+- extraction returns structured question, nearby help text, section, and page context when confidently available
+- existing stable field IDs, types, options, values, ordering, and filling behavior remain unchanged
+- ambiguous text associations fall back to existing labels rather than inventing a question
+- extracted document text and metadata are treated as untrusted data
+- raw PDF bytes are never sent to Nemotron
+- unconfirmed widget values are not included as form instructions or question context
+- sample, household-support, USCIS I-9, and SBA fixtures have deterministic grounding tests
+- existing backend tests and frontend production build pass
+
+Do not implement:
+- OCR or support for image-only or scanned questions
+- support for non-AcroForm PDFs or XFA
+- AI-generated questions, labels, instructions, or purposes
+- exposing widget geometry for direct editing, highlighting, or PDF navigation
+- changes to PDF filling behavior
+- voice interaction
+- authentication, persistence, or a database
+
+# Milestone 6.6 — Multi-form conversation hardening
+
+Status: NOT STARTED
+
+Goal:
+Use structured document context and systematic evaluations to make typed guided
+completion reliable across the supported fixtures before adding voice.
+
+Acceptance criteria:
+- Form Agent requests include bounded form title and instructions, a compact ordered question summary, and detailed active-field context
+- full-form context is structured and size-bounded rather than a raw PDF or page-text dump
+- the active question uses grounded question metadata when available and the existing label fallback otherwise
+- prompts distinguish trusted system rules from untrusted extracted document text, field metadata, and user content
+- prompts never infer missing personal facts or unsupported reasons why a form requests information
+- dropdown, checkbox, numeric, and text answers produce type-compatible proposals or a clarification request
+- next-field progression, follow-up explanation, skip, proposal, and confirmation boundaries continue to work across supported fixtures
+- deterministic mocked scenarios cover the sample, household-support, USCIS I-9, and SBA fixtures
+- evaluations measure grounded question selection, valid action and proposal rates, and invented-fact or invented-purpose failures
+- an optional live Nemotron evaluation can use environment credentials but is excluded from the normal offline test suite
+- existing backend tests and frontend production build pass
+
+Do not implement:
+- OCR
+- sending raw PDF bytes or unbounded page text to Nemotron
+- unbounded conversation history
+- automatic confirmation, application, or invention of user answers
+- direct editing or highlighting on the rendered PDF
+- voice interaction
+- legal or financial advice
+- authentication, persistence, database, or a new agent framework
+
 # Milestone 7 — Voice
 
 Status: NOT STARTED
