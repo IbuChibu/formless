@@ -389,7 +389,7 @@ Do not implement:
 
 # Milestone 6.1 — Agent contract and validation
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Create the backend Form Agent boundary and a validated structured action

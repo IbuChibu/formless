@@ -120,16 +120,33 @@ class NemotronService:
             "END_REQUEST_DATA\n"
             f"{task}"
         )
+
+        return await self.complete(
+            system_prompt=_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            max_tokens=300,
+        )
+
+    async def complete(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 600,
+        json_response: bool = False,
+    ) -> str:
         payload = {
             "model": self._settings.model,
             "messages": [
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.2,
-            "max_tokens": 300,
+            "max_tokens": max_tokens,
             "reasoning_effort": "none",
         }
+        if json_response:
+            payload["response_format"] = {"type": "json_object"}
 
         try:
             async with httpx.AsyncClient(
@@ -172,7 +189,7 @@ class NemotronService:
 
         if not isinstance(content, str) or not content.strip():
             raise NemotronServiceError(
-                "Nebius Token Factory returned an empty explanation"
+                "Nebius Token Factory returned an empty response"
             )
 
         return content.strip()

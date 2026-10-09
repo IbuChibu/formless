@@ -9,6 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from app.services.form_agent_service import (
+    FormAgentAction,
+    FormAgentError,
+    FormAgentRequest,
+    FormAgentService,
+)
 from app.services.nemotron_service import (
     NemotronConfigurationError,
     NemotronService,
@@ -83,6 +89,12 @@ def get_nemotron_service() -> NemotronService:
         ) from error
 
 
+def get_form_agent_service(
+    nemotron_service: NemotronService = Depends(get_nemotron_service),
+) -> FormAgentService:
+    return FormAgentService(nemotron_service)
+
+
 @app.post("/ai/explain", response_model=FieldExplanationResponse)
 async def explain_field(
     field: FieldExplanationRequest,
@@ -105,6 +117,17 @@ async def explain_field(
         explanation=explanation,
         model=service.model,
     )
+
+
+@app.post("/agent/respond", response_model=FormAgentAction)
+async def respond_to_form_agent(
+    request: FormAgentRequest,
+    service: FormAgentService = Depends(get_form_agent_service),
+) -> FormAgentAction:
+    try:
+        return await service.respond(request)
+    except (FormAgentError, NemotronServiceError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @app.post(
