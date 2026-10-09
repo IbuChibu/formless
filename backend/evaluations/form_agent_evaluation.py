@@ -229,6 +229,32 @@ def evaluation_scenarios() -> tuple[EvaluationScenario, ...]:
             expected_field_id="primary_support_category",
         ),
         EvaluationScenario(
+            name="household-option-question-boundary",
+            fixture="household_support_review_demo.pdf",
+            active_field_id="primary_support_category",
+            message="What does Housing stability mean here?",
+            model_response=(
+                '{"action":"explain","message":"This option refers to '
+                'support related to stable housing.",'
+                '"field_id":"primary_support_category"}'
+            ),
+            expected_action="explain",
+            expected_field_id="primary_support_category",
+        ),
+        EvaluationScenario(
+            name="household-invalid-option-clarification",
+            fixture="household_support_review_demo.pdf",
+            active_field_id="primary_support_category",
+            message="Something else applies to me.",
+            model_response=(
+                '{"action":"propose","message":"Proposal",'
+                '"field_id":"primary_support_category",'
+                '"value":"Something else"}'
+            ),
+            expected_action="clarify",
+            expected_field_id="primary_support_category",
+        ),
+        EvaluationScenario(
             name="i9-follow-up-explanation",
             fixture="real_world/uscis_i9_2025.pdf",
             active_field_id="Last Name (Family Name)",

@@ -16,6 +16,12 @@ from pydantic import (
     model_validator,
 )
 
+from app.services.form_agent_value_service import (
+    SupportedFieldType,
+    canonicalize_field_value,
+    infer_unambiguous_answer,
+    validate_field_value,
+)
 from app.services.nemotron_service import NemotronService
 
 
@@ -32,13 +38,6 @@ BoundedInstruction = Annotated[
     Field(min_length=1, max_length=500),
 ]
 AgentFieldValue = Union[BoundedAgentString, StrictBool]
-SupportedFieldType = Literal[
-    "text",
-    "textarea",
-    "number",
-    "dropdown",
-    "checkbox",
-]
 FieldStatus = Literal["unanswered", "confirmed", "skipped"]
 
 MAX_AGENT_FIELDS = 250
@@ -51,13 +50,27 @@ MAX_AGENT_CONTEXT_CHARS = 48_000
 MAX_ACTIVE_OPTIONS = 20
 MAX_ACTIVE_OPTION_CHARS = 120
 
-_NUMBER_PATTERN = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$")
-_GROUPED_NUMBER_PATTERN = re.compile(
-    r"^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d*)?$"
-)
 _PLACEHOLDER_OPTION_PATTERN = re.compile(
     r"^(?:please\s+)?(?:select|choose)(?:\s+(?:one|an?\s+option))?$",
     re.IGNORECASE,
+)
+_SKIP_REQUEST_PATTERNS = (
+    re.compile(
+        r"^(?:please\s+)?(?:skip|pass)(?:\s+(?:this|it|this\s+field|"
+        r"this\s+question))?(?:\s+for\s+(?:now|later))?[.!]?$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:(?:please|let's)\s+)?(?:move\s+on|"
+        r"next(?:\s+(?:field|question))?)[.!]?$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:i(?:'d|\s+would)\s+rather\s+not\s+answer|"
+        r"i\s+do\s+not\s+want\s+to\s+answer|i\s+don't\s+want\s+to\s+answer)"
+        r"(?:\s+this)?(?:\s+(?:right\s+now|for\s+now))?[.!]?$",
+        re.IGNORECASE,
+    ),
 )
 _PURPOSE_QUESTION_PATTERNS = (
     re.compile(r"^why\??$", re.IGNORECASE),
@@ -174,7 +187,11 @@ class FormAgentField(_AgentModel):
         if self.status == "confirmed":
             if self.confirmed_value is None:
                 raise ValueError("Confirmed fields require a confirmed value")
-            _validate_field_value(self, self.confirmed_value)
+            validate_field_value(
+                self.type,
+                self.options,
+                self.confirmed_value,
+            )
         elif self.confirmed_value is not None:
             raise ValueError(
                 "Only confirmed fields may include a confirmed value"
@@ -284,6 +301,10 @@ class FormAgentService:
                 field_id=request.active_field_id,
             )
 
+        deterministic_action = _deterministic_action(request)
+        if deterministic_action is not None:
+            return deterministic_action
+
         request_data = _build_agent_context(request)
         user_prompt = (
             "UNTRUSTED_AGENT_CONTEXT\n"
@@ -309,6 +330,11 @@ class FormAgentService:
             try:
                 action = _parse_action(raw_action)
                 action = _canonicalize_proposal_value(action, request)
+                navigation_clarification = (
+                    _unexpected_navigation_clarification(action, request)
+                )
+                if navigation_clarification is not None:
+                    return navigation_clarification
                 _validate_action_against_request(action, request)
             except FormAgentError as error:
                 validation_error = error
@@ -331,6 +357,66 @@ class FormAgentService:
         if clarification is not None:
             return clarification
         raise validation_error
+
+
+def _deterministic_action(
+    request: FormAgentRequest,
+) -> Optional[FormAgentAction]:
+    fields_by_id = {field.id: field for field in request.fields}
+    active_field = (
+        fields_by_id.get(request.active_field_id)
+        if request.active_field_id is not None
+        else None
+    )
+
+    if active_field is None:
+        next_field = next(
+            (
+                field
+                for field in request.fields
+                if field.status == "unanswered"
+            ),
+            None,
+        )
+        if next_field is None:
+            return NextAction(
+                action="next",
+                message="All supported fields have been reviewed.",
+                field_id=None,
+            )
+        return NextAction(
+            action="next",
+            message=_build_next_field_question(next_field),
+            field_id=next_field.id,
+        )
+
+    if active_field.status != "unanswered":
+        return None
+
+    if _asks_to_skip(request.message):
+        return SkipAction(
+            action="skip",
+            message=_build_skip_message(active_field),
+            field_id=active_field.id,
+        )
+
+    inferred_value = infer_unambiguous_answer(
+        active_field.type,
+        active_field.options,
+        request.message,
+    )
+    if inferred_value is None:
+        return None
+
+    return _normalize_action_message(
+        ProposeAction(
+            action="propose",
+            message="Proposal awaiting confirmation.",
+            field_id=active_field.id,
+            value=inferred_value,
+        ),
+        request,
+    )
 
 
 def _build_agent_context(request: FormAgentRequest) -> dict[str, object]:
@@ -525,35 +611,15 @@ def _canonicalize_proposal_value(
         (field for field in request.fields if field.id == action.field_id),
         None,
     )
-    if field is None or not isinstance(action.value, str):
+    if field is None:
         return action
 
-    normalized_value = action.value.strip()
-    if field.type == "checkbox":
-        checkbox_values = {
-            "yes": True,
-            "true": True,
-            "checked": True,
-            "on": True,
-            "no": False,
-            "false": False,
-            "unchecked": False,
-            "off": False,
-        }
-        checkbox_value = checkbox_values.get(normalized_value.casefold())
-        if checkbox_value is not None:
-            return action.model_copy(update={"value": checkbox_value})
-
-    if field.type == "dropdown":
-        matching_options = [
-            option
-            for option in (field.options or [])
-            if option.casefold() == normalized_value.casefold()
-        ]
-        if len(matching_options) == 1:
-            return action.model_copy(update={"value": matching_options[0]})
-
-    return action
+    normalized_value = canonicalize_field_value(
+        field.type,
+        field.options,
+        action.value,
+    )
+    return action.model_copy(update={"value": normalized_value})
 
 
 def _invalid_value_clarification(
@@ -576,21 +642,59 @@ def _invalid_value_clarification(
     if field is None:
         return None
 
+    return _build_field_clarification(field)
+
+
+def _unexpected_navigation_clarification(
+    action: FormAgentAction,
+    request: FormAgentRequest,
+) -> Optional[ClarifyAction]:
+    if not isinstance(action, (NextAction, SkipAction)):
+        return None
+    if request.active_field_id is None:
+        return None
+
+    field = next(
+        (
+            field
+            for field in request.fields
+            if field.id == request.active_field_id
+        ),
+        None,
+    )
+    if field is None or field.status != "unanswered":
+        return None
+
+    return _build_field_clarification(field)
+
+
+def _build_field_clarification(field: FormAgentField) -> ClarifyAction:
+    field_question = _truncate_text(_field_question(field), 220)
     if field.type == "dropdown":
         visible_options = (field.options or [])[:8]
         options = ", ".join(visible_options)
         if len(field.options or []) > len(visible_options):
             options += f", and {len(field.options or []) - len(visible_options)} more"
         message = (
-            "I couldn't match that answer to an available option. "
+            f'I couldn\'t safely match that answer for “{field_question}” '
+            "to an available option. "
             f"Please choose one of: {options}."
         )
     elif field.type == "checkbox":
-        message = "Please answer yes or no for this checkbox."
+        message = (
+            f'For “{field_question}”, please answer yes or no so I know '
+            "whether the box should be checked."
+        )
     elif field.type == "number":
-        message = "Please provide the exact numeric value to enter."
+        message = (
+            f'For “{field_question}”, please provide one exact numeric '
+            "value to enter."
+        )
     else:
-        message = "Please provide the exact text you want entered."
+        message = (
+            f'For “{field_question}”, please tell me the exact text you '
+            "want entered."
+        )
 
     return ClarifyAction(
         action="clarify",
@@ -638,6 +742,12 @@ def _normalize_action_message(
         )
 
     if isinstance(action, ProposeAction):
+        field = next(
+            field for field in request.fields if field.id == action.field_id
+        )
+        field_question = _truncate_text(_field_question(field), 180).rstrip(
+            " .?"
+        )
         display_value = (
             "Yes" if action.value is True
             else "No" if action.value is False
@@ -646,12 +756,18 @@ def _normalize_action_message(
         return action.model_copy(
             update={
                 "message": (
-                    f"I understood your answer as {display_value}. "
-                    "This proposal is awaiting your confirmation and has "
-                    "not been applied to the form."
+                    f'Got it — for “{field_question}”, I understood your '
+                    f"answer as {display_value}. It is awaiting your "
+                    "confirmation and has not been applied to the form."
                 )
             }
         )
+
+    if isinstance(action, SkipAction):
+        field = next(
+            field for field in request.fields if field.id == action.field_id
+        )
+        return action.model_copy(update={"message": _build_skip_message(field)})
 
     return action
 
@@ -680,6 +796,19 @@ def _build_next_field_question(field: FormAgentField) -> str:
     if len(options) > len(visible_options):
         option_text += f", and {len(options) - len(visible_options)} more"
     return f"{question} Choose one of: {option_text}."
+
+
+def _build_skip_message(field: FormAgentField) -> str:
+    field_question = _truncate_text(_field_question(field), 180).rstrip(" .?")
+    return f'No problem — I\'ll leave “{field_question}” unanswered for now.'
+
+
+def _asks_to_skip(message: str) -> bool:
+    normalized_message = " ".join(message.strip().split())
+    return any(
+        pattern.fullmatch(normalized_message)
+        for pattern in _SKIP_REQUEST_PATTERNS
+    )
 
 
 def _asks_for_unsupported_purpose(message: str) -> bool:
@@ -754,33 +883,8 @@ def _validate_action_against_request(
 
     if isinstance(action, ProposeAction):
         try:
-            _validate_field_value(field, action.value)
+            validate_field_value(field.type, field.options, action.value)
         except ValueError as error:
             raise FormAgentError(
                 "Form Agent returned an invalid proposal value"
             ) from error
-
-
-def _validate_field_value(
-    field: FormAgentField,
-    value: AgentFieldValue,
-) -> None:
-    if field.type == "checkbox":
-        if not isinstance(value, bool):
-            raise ValueError("Checkbox fields require boolean values")
-        return
-
-    if not isinstance(value, str):
-        raise ValueError(f"{field.type} fields require string values")
-
-    if not value.strip():
-        raise ValueError("String field values cannot be empty")
-
-    if field.type == "number" and not (
-        _NUMBER_PATTERN.fullmatch(value)
-        or _GROUPED_NUMBER_PATTERN.fullmatch(value)
-    ):
-        raise ValueError("Number fields require numeric strings")
-
-    if field.type == "dropdown" and value not in (field.options or []):
-        raise ValueError("Dropdown values must match an available option")

@@ -588,6 +588,36 @@ Do not implement:
 - legal or financial advice
 - authentication, persistence, database, or a new agent framework
 
+# Milestone 6.7 — Typed conversation reliability
+
+Status: COMPLETE
+
+Goal:
+Make typed form completion feel conversational and reliably convert clear user
+answers into valid, reviewable proposals before adding voice.
+
+Acceptance criteria:
+- starting, continuing, and explicitly skipping the active field are handled deterministically without relying on model-selected navigation
+- unambiguous natural-language checkbox, dropdown, and numeric answers can be normalized against the active field schema without inventing information
+- deterministic answer handling never treats an explanatory question as a factual answer
+- model-proposed checkbox, dropdown, and numeric values are safely canonicalized when their meaning is unambiguous
+- an invalid model proposal produces a field-specific clarification instead of exposing an invalid-proposal error or silently advancing
+- clarification responses explain what could not be matched and show the accepted answer shape or available options rather than merely repeating the same question
+- next, skip, proposal, confirmation, rejection, and correction messages use concise conversational language grounded in the active field
+- confirming, editing, rejecting, or skipping a proposal preserves the existing explicit-confirmation boundary and gives visible conversational feedback
+- field-value normalization and validation live in a focused module separate from Form Agent orchestration and PDF manipulation
+- deterministic evaluations cover natural-language answers, invalid proposal recovery, skip reliability, and question-versus-answer boundaries across supported field types
+- existing backend tests, the offline Form Agent evaluation, and the frontend production build pass
+
+Do not implement:
+- a second model or multi-agent workflow unless evaluations demonstrate a need
+- automatic confirmation or application of proposed values
+- OCR, raw PDF transmission to Nemotron, or changes to PDF extraction or filling
+- voice input or output
+- direct editing or highlighting on the rendered PDF
+- legal or financial advice
+- authentication, persistence, database, or an agent framework
+
 # Milestone 7 — Voice
 
 Status: NOT STARTED

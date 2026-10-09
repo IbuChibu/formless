@@ -442,6 +442,13 @@ function App() {
     }
 
     writeFieldValue(field.id, value, true);
+    appendAgentMessage({
+      role: "assistant",
+      content: `Confirmed — I added ${formatAgentValue(value)} to “${
+        field.label || humanizeFieldId(field.id)
+      }”. Continue when you’re ready.`,
+      fieldId: field.id,
+    });
     clearPendingProposal();
     setAgentActiveFieldId(null);
     setAgentError(null);
@@ -450,7 +457,16 @@ function App() {
   }
 
   function rejectPendingProposal() {
+    const rejectedFieldId = pendingProposal?.fieldId;
     clearPendingProposal();
+    if (rejectedFieldId) {
+      appendAgentMessage({
+        role: "assistant",
+        content:
+          "No problem — I haven’t used that proposal. Tell me what you’d like to enter instead.",
+        fieldId: rejectedFieldId,
+      });
+    }
     setAgentError(null);
     setFailedAgentRequest(null);
     setAgentStatus("idle");
@@ -462,12 +478,21 @@ function App() {
     }
 
     const fieldId = pendingProposal.fieldId;
+    const field = fields.find((candidate) => candidate.id === fieldId);
     setConfirmedFieldIds((current) => {
       const next = new Set(current);
       next.delete(fieldId);
       return next;
     });
     setSkippedFieldIds((current) => new Set(current).add(fieldId));
+    appendAgentMessage({
+      role: "assistant",
+      content: `No problem — I’ll leave “${
+        field?.label || humanizeFieldId(fieldId)
+      }” unanswered for now. Continue when you’re ready.`,
+      action: "skip",
+      fieldId,
+    });
     clearPendingProposal();
     setAgentActiveFieldId(null);
     setAgentError(null);

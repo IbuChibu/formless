@@ -16,7 +16,7 @@ def test_offline_evaluation_covers_supported_fixtures_and_boundaries() -> None:
         "real_world/sba_startup_costs_2023.pdf",
     }
     assert report.failures == ()
-    assert report.metrics.total_scenarios == 12
+    assert report.metrics.total_scenarios == 14
     assert report.metrics.fixture_count == 4
     assert report.metrics.valid_action_rate == 1.0
     assert report.metrics.grounded_question_selection_rate == 1.0

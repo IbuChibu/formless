@@ -87,13 +87,16 @@ def agent_request_payload() -> dict[str, Any]:
             },
         ],
         "active_field_id": "living_arrangement",
-        "message": "I rent my home.",
+        "message": "Here is my answer about my housing arrangement.",
         "history": [
             {
                 "role": "assistant",
                 "content": "Which option describes where you live?",
             },
-            {"role": "user", "content": "I rent my home."},
+            {
+                "role": "user",
+                "content": "Here is my answer about my housing arrangement.",
+            },
         ],
     }
 
@@ -125,8 +128,9 @@ def test_agent_returns_a_validated_proposal_without_confirming_it() -> None:
     assert action.model_dump() == {
         "action": "propose",
         "message": (
-            'I understood your answer as "Rent". This proposal is awaiting '
-            "your confirmation and has not been applied to the form."
+            "Got it — for “Which option best describes where you live”, I "
+            'understood your answer as "Rent". It is awaiting your '
+            "confirmation and has not been applied to the form."
         ),
         "field_id": "living_arrangement",
         "value": "Rent",
@@ -226,6 +230,12 @@ def test_agent_correction_retry_explains_an_invalid_proposal_value() -> None:
             "1200.5",
             "1200.5",
         ),
+        (
+            "full_name",
+            {"type": "number"},
+            '"£1,200.50"',
+            "1200.50",
+        ),
     ],
 )
 def test_agent_canonicalizes_safe_proposal_formatting(
@@ -257,6 +267,115 @@ def test_agent_canonicalizes_safe_proposal_formatting(
 
 
 @pytest.mark.parametrize(
+    ("field_id", "field_update", "message", "expected_value"),
+    [
+        (
+            "living_arrangement",
+            {},
+            "I rent my home.",
+            "Rent",
+        ),
+        (
+            "shares_costs",
+            {"status": "unanswered", "confirmed_value": None},
+            "Yes, I do.",
+            True,
+        ),
+        (
+            "full_name",
+            {"type": "number"},
+            "The amount is £1,250.00.",
+            "1250.00",
+        ),
+    ],
+)
+def test_agent_handles_unambiguous_structured_answers_without_model_call(
+    field_id: str,
+    field_update: dict[str, Any],
+    message: str,
+    expected_value: str | bool,
+) -> None:
+    payload = agent_request_payload()
+    field = next(field for field in payload["fields"] if field["id"] == field_id)
+    field.update(field_update)
+    if field.get("confirmed_value") is None:
+        field.pop("confirmed_value", None)
+    payload["active_field_id"] = field_id
+    payload["message"] = message
+    nemotron = StubNemotronService("not used")
+
+    action = asyncio.run(
+        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+            FormAgentRequest.model_validate(payload)
+        )
+    )
+
+    assert action.action == "propose"
+    assert action.field_id == field_id
+    assert action.value == expected_value
+    assert "awaiting your confirmation" in action.message
+    assert nemotron.calls == []
+
+
+def test_option_in_an_explanatory_question_is_not_treated_as_an_answer() -> None:
+    payload = agent_request_payload()
+    payload["message"] = "What does Rent mean here?"
+    nemotron = StubNemotronService(
+        '{"action":"explain","message":"Rent means paying a landlord for '
+        'the home you occupy.","field_id":"living_arrangement"}'
+    )
+
+    action = asyncio.run(
+        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+            FormAgentRequest.model_validate(payload)
+        )
+    )
+
+    assert action.action == "explain"
+    assert len(nemotron.calls) == 1
+
+
+def test_negated_option_is_not_treated_as_an_answer() -> None:
+    payload = agent_request_payload()
+    payload["message"] = "I do not rent."
+    nemotron = StubNemotronService(
+        '{"action":"clarify","message":"Which available option applies '
+        'instead?","field_id":"living_arrangement"}'
+    )
+
+    action = asyncio.run(
+        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+            FormAgentRequest.model_validate(payload)
+        )
+    )
+
+    assert action.action == "clarify"
+    assert len(nemotron.calls) == 1
+
+
+def test_explicit_skip_is_reliable_without_model_call() -> None:
+    payload = agent_request_payload()
+    payload["message"] = "Skip this for now."
+    nemotron = StubNemotronService("not used")
+
+    action = asyncio.run(
+        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+            FormAgentRequest.model_validate(payload)
+        )
+    )
+
+    assert action.model_dump() == {
+        "action": "skip",
+        "message": (
+            "No problem — I'll leave “Which option best describes where you "
+            "live” unanswered for now."
+        ),
+        "field_id": "living_arrangement",
+    }
+    assert nemotron.calls == []
+
+
+@pytest.mark.parametrize(
     "raw_action, expected_action",
     [
         (
@@ -274,19 +393,9 @@ def test_agent_canonicalizes_safe_proposal_formatting(
             '"field_id":"living_arrangement","value":"Rent"}',
             "propose",
         ),
-        (
-            '{"action":"skip","message":"We can leave this unanswered '
-            'for now.","field_id":"living_arrangement"}',
-            "skip",
-        ),
-        (
-            '{"action":"next","message":"Next, let us review your name.",'
-            '"field_id":"full_name"}',
-            "next",
-        ),
     ],
 )
-def test_agent_supports_each_milestone_action(
+def test_agent_supports_each_model_reasoning_action(
     raw_action: str,
     expected_action: str,
 ) -> None:
@@ -300,12 +409,15 @@ def test_agent_supports_each_milestone_action(
 
 
 def test_next_asks_the_selected_field_instead_of_repeating_navigation() -> None:
+    payload = agent_request_payload()
+    payload["active_field_id"] = None
+    payload["message"] = "Start with the first unanswered field."
     response = post_with_nemotron(
         StubNemotronService(
             '{"action":"next","message":"Continue to the next field.",'
             '"field_id":"full_name"}'
         ),
-        agent_request_payload(),
+        payload,
     )
 
     assert response.status_code == 200
@@ -318,6 +430,8 @@ def test_next_asks_the_selected_field_instead_of_repeating_navigation() -> None:
 
 def test_next_prefers_the_grounded_question_over_the_field_label() -> None:
     payload = agent_request_payload()
+    payload["active_field_id"] = None
+    payload["message"] = "Start with the first unanswered field."
     payload["fields"][0].update(
         {
             "label": "Employee name tooltip",
@@ -366,7 +480,7 @@ def test_next_dropdown_question_omits_placeholder_options() -> None:
         ),
         "field_id": "living_arrangement",
     }
-    assert "Select one" not in nemotron.calls[0]["user_prompt"]
+    assert nemotron.calls == []
 
 
 def test_dropdown_placeholder_value_becomes_unanswered() -> None:
@@ -453,14 +567,14 @@ def test_model_context_is_structured_and_size_bounded() -> None:
         }
         for index in range(250)
     ]
-    payload["active_field_id"] = None
-    payload["message"] = "Start"
+    payload["active_field_id"] = "field_0"
+    payload["message"] = "Please explain this field."
     payload["history"] = [
         {"role": "user", "content": "H" * 4000}
         for _ in range(8)
     ]
     nemotron = StubNemotronService(
-        '{"action":"next","message":"Start",'
+        '{"action":"explain","message":"Explanation",'
         '"field_id":"field_0"}'
     )
 
@@ -522,7 +636,8 @@ def test_repeated_invalid_proposal_value_becomes_clarification(
     assert response.json() == {
         "action": "clarify",
         "message": (
-            "I couldn't match that answer to an available option. "
+            "I couldn't safely match that answer for “Which option best "
+            "describes where you live?” to an available option. "
             "Please choose one of: Rent, Own, Staying with someone."
         ),
         "field_id": "living_arrangement",
@@ -566,7 +681,7 @@ def test_next_can_finish_only_when_no_fields_are_unanswered() -> None:
     }
 
 
-def test_next_must_select_the_first_unanswered_field() -> None:
+def test_model_cannot_silently_advance_past_an_active_field() -> None:
     response = post_with_nemotron(
         StubNemotronService(
             '{"action":"next","message":"Let us review where you live.",'
@@ -575,9 +690,15 @@ def test_next_must_select_the_first_unanswered_field() -> None:
         agent_request_payload(),
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 200
     assert response.json() == {
-        "detail": "Form Agent did not return the first unanswered field"
+        "action": "clarify",
+        "message": (
+            "I couldn't safely match that answer for “Which option best "
+            "describes where you live?” to an available option. "
+            "Please choose one of: Rent, Own, Staying with someone."
+        ),
+        "field_id": "living_arrangement",
     }
 
 
