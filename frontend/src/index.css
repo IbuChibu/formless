@@ -854,6 +854,188 @@ h1 {
   line-height: 1.4;
 }
 
+.agent-confirmation {
+  display: grid;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid #bcb4e2;
+  border-radius: 11px;
+  background: #f8f7ff;
+  box-shadow: 0 8px 22px rgb(66 55 126 / 8%);
+}
+
+.agent-confirmation-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-confirmation-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.agent-confirmation-heading > div > span,
+.agent-confirmation-value span,
+.agent-proposal-input > span,
+.agent-proposal-choice legend {
+  color: #6c6499;
+  font-size: 0.61rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-confirmation-heading strong {
+  color: #302a5b;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.agent-confirmation-heading code {
+  overflow: hidden;
+  color: #817a9c;
+  font-size: 0.61rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-confirmation-status {
+  flex: 0 0 auto;
+  padding: 5px 7px;
+  border-radius: 999px;
+  color: #554b91;
+  background: #e8e4fb;
+  font-size: 0.6rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.agent-confirmation-value {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #ded9f1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.agent-confirmation-value strong {
+  color: #332d61;
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.agent-confirmation > p {
+  margin: 0;
+  color: #6e6883;
+  font-size: 0.67rem;
+  line-height: 1.45;
+}
+
+.agent-confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.agent-confirmation-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #cbc6df;
+  border-radius: 8px;
+  color: #514a70;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.agent-confirmation-actions button.primary {
+  border-color: #514795;
+  color: #fff;
+  background: #514795;
+}
+
+.agent-confirmation-actions button:hover:not(:disabled) {
+  border-color: #8178b4;
+  background: #f1eefc;
+}
+
+.agent-confirmation-actions button.primary:hover:not(:disabled) {
+  border-color: #40377e;
+  background: #40377e;
+}
+
+.agent-confirmation-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.agent-confirmation-actions button:focus-visible,
+.agent-proposal-input input:focus,
+.agent-proposal-input textarea:focus,
+.agent-proposal-input select:focus,
+.agent-proposal-choice input:focus-visible {
+  outline: 3px solid rgb(81 71 149 / 18%);
+  outline-offset: 2px;
+}
+
+.agent-proposal-edit,
+.agent-proposal-input {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-proposal-input input,
+.agent-proposal-input textarea,
+.agent-proposal-input select {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 10px;
+  border: 1px solid #bdb7d4;
+  border-radius: 8px;
+  outline: none;
+  color: #29243f;
+  background: #fff;
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.agent-proposal-input textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.agent-proposal-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.agent-proposal-choice legend {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.agent-proposal-choice label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #443d64;
+  font-size: 0.73rem;
+  font-weight: 750;
+}
+
+.agent-proposal-choice input {
+  accent-color: #514795;
+}
+
 .agent-progress-button {
   min-height: 40px;
   padding: 0 13px;

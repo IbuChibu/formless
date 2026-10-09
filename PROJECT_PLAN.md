@@ -476,7 +476,7 @@ Do not implement:
 
 # Milestone 6.3 — Proposal and confirmation
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Allow the Form Agent to propose a field value and let the user explicitly

@@ -87,6 +87,11 @@ type ConversationMessage = AgentHistoryMessage & {
   proposedValue?: FieldValue;
 };
 
+type PendingProposal = {
+  fieldId: string;
+  value: FieldValue;
+};
+
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const previewDebounceMs = 600;
 const maxAgentHistoryMessages = 8;
@@ -127,6 +132,11 @@ function App() {
   const [agentError, setAgentError] = useState<string | null>(null);
   const [failedAgentRequest, setFailedAgentRequest] =
     useState<AgentRequest | null>(null);
+  const [pendingProposal, setPendingProposal] =
+    useState<PendingProposal | null>(null);
+  const [isEditingProposal, setIsEditingProposal] = useState(false);
+  const [proposalEditValue, setProposalEditValue] =
+    useState<FieldValue>("");
 
   const originalUrlRef = useRef<string | null>(null);
   const filledUrlRef = useRef<string | null>(null);
@@ -284,6 +294,9 @@ function App() {
     setAgentInput("");
     setAgentError(null);
     setFailedAgentRequest(null);
+    setPendingProposal(null);
+    setIsEditingProposal(false);
+    setProposalEditValue("");
     agentMessageIdRef.current = 0;
     setExtractionStatus("loading");
     setPreviewStatus("idle");
@@ -336,10 +349,24 @@ function App() {
 
   function updateField(fieldId: string, value: FieldValue) {
     const field = fields.find((candidate) => candidate.id === fieldId);
-    const isConfirmed = field
-      ? isManuallyConfirmedValue(field, value)
-      : false;
+    if (!field) {
+      return;
+    }
 
+    const isConfirmed = isManuallyConfirmedValue(field, value);
+
+    writeFieldValue(fieldId, value, isConfirmed);
+
+    if (pendingProposal?.fieldId === fieldId) {
+      clearPendingProposal();
+    }
+  }
+
+  function writeFieldValue(
+    fieldId: string,
+    value: FieldValue,
+    isConfirmed: boolean,
+  ) {
     setFormValues((current) => ({ ...current, [fieldId]: value }));
     setChangedValues((current) => ({ ...current, [fieldId]: value }));
     setConfirmedFieldIds((current) => {
@@ -361,6 +388,66 @@ function App() {
     }
     setPreviewError(null);
     setPreviewStatus("pending");
+  }
+
+  function clearPendingProposal() {
+    setPendingProposal(null);
+    setIsEditingProposal(false);
+    setProposalEditValue("");
+  }
+
+  function confirmPendingProposal(value: FieldValue) {
+    if (!pendingProposal) {
+      return;
+    }
+
+    const field = fields.find(
+      (candidate) => candidate.id === pendingProposal.fieldId,
+    );
+    if (
+      !field ||
+      !isExplainableField(field) ||
+      !isAgentValueCompatible(field, value)
+    ) {
+      setAgentError(
+        "This proposal no longer matches the extracted form field.",
+      );
+      setAgentStatus("error");
+      return;
+    }
+
+    writeFieldValue(field.id, value, true);
+    clearPendingProposal();
+    setAgentActiveFieldId(null);
+    setAgentError(null);
+    setFailedAgentRequest(null);
+    setAgentStatus("idle");
+  }
+
+  function rejectPendingProposal() {
+    clearPendingProposal();
+    setAgentError(null);
+    setFailedAgentRequest(null);
+    setAgentStatus("idle");
+  }
+
+  function skipPendingProposal() {
+    if (!pendingProposal) {
+      return;
+    }
+
+    const fieldId = pendingProposal.fieldId;
+    setConfirmedFieldIds((current) => {
+      const next = new Set(current);
+      next.delete(fieldId);
+      return next;
+    });
+    setSkippedFieldIds((current) => new Set(current).add(fieldId));
+    clearPendingProposal();
+    setAgentActiveFieldId(null);
+    setAgentError(null);
+    setFailedAgentRequest(null);
+    setAgentStatus("idle");
   }
 
   function appendAgentMessage(message: Omit<ConversationMessage, "id">) {
@@ -407,7 +494,15 @@ function App() {
           : {}),
       });
 
-      if (action.action === "skip") {
+      if (action.action === "propose") {
+        setPendingProposal({
+          fieldId: action.field_id,
+          value: action.value,
+        });
+        setProposalEditValue(action.value);
+        setIsEditingProposal(false);
+        setAgentActiveFieldId(action.field_id);
+      } else if (action.action === "skip") {
         const skippedField = request.fields.find(
           (field) => field.id === action.field_id,
         );
@@ -415,6 +510,9 @@ function App() {
           setSkippedFieldIds((current) =>
             new Set(current).add(action.field_id),
           );
+        }
+        if (pendingProposal?.fieldId === action.field_id) {
+          clearPendingProposal();
         }
         setAgentActiveFieldId(null);
       } else {
@@ -513,6 +611,17 @@ function App() {
   );
   const activeAgentFieldState = currentAgentFields.find(
     (field) => field.id === agentActiveFieldId,
+  );
+  const pendingProposalPdfField = fields.find(
+    (field) => field.id === pendingProposal?.fieldId,
+  );
+  const pendingProposalField =
+    pendingProposalPdfField && isExplainableField(pendingProposalPdfField)
+      ? pendingProposalPdfField
+      : null;
+  const canApplyEditedProposal = Boolean(
+    pendingProposalField &&
+      isAgentValueCompatible(pendingProposalField, proposalEditValue),
   );
   const canUseAgent =
     extractionStatus === "ready" && currentAgentFields.length > 0;
@@ -663,7 +772,8 @@ function App() {
                           humanizeFieldId(activeAgentField.id)}
                       </strong>
                     </div>
-                    {activeAgentFieldState?.status === "unanswered" ? (
+                    {activeAgentFieldState?.status === "unanswered" &&
+                    !pendingProposal ? (
                       <button
                         className="agent-skip-button"
                         type="button"
@@ -682,8 +792,8 @@ function App() {
                   <p className="ai-explanation-empty">
                     Start a guided conversation, or choose{" "}
                     <strong>Explain with AI</strong> on a field. Suggestions
-                    stay separate from your form until a later confirmation
-                    step is added.
+                    stay separate from your form until you explicitly confirm
+                    or edit them.
                   </p>
                 ) : null}
 
@@ -731,8 +841,8 @@ function App() {
                                 {formatAgentValue(message.proposedValue)}
                               </strong>
                               <small>
-                                Awaiting confirmation — this has not changed
-                                the field or PDF.
+                                This suggestion never changes the field or PDF
+                                automatically.
                               </small>
                             </div>
                           ) : null}
@@ -740,6 +850,116 @@ function App() {
                       );
                     })}
                   </div>
+                ) : null}
+
+                {pendingProposal && pendingProposalField ? (
+                  <section
+                    className="agent-confirmation"
+                    aria-label="Review proposed answer"
+                  >
+                    <div className="agent-confirmation-heading">
+                      <div>
+                        <span>Review proposal</span>
+                        <strong>
+                          {pendingProposalField.label ||
+                            humanizeFieldId(pendingProposalField.id)}
+                        </strong>
+                        <code>{pendingProposalField.id}</code>
+                      </div>
+                      <span className="agent-confirmation-status">
+                        Awaiting confirmation
+                      </span>
+                    </div>
+
+                    {isEditingProposal ? (
+                      <form
+                        className="agent-proposal-edit"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          if (canApplyEditedProposal) {
+                            confirmPendingProposal(proposalEditValue);
+                          }
+                        }}
+                      >
+                        <ProposalValueEditor
+                          field={pendingProposalField}
+                          value={proposalEditValue}
+                          onChange={setProposalEditValue}
+                        />
+                        <div className="agent-confirmation-actions">
+                          <button
+                            className="primary"
+                            type="submit"
+                            disabled={
+                              agentStatus === "loading" ||
+                              !canApplyEditedProposal
+                            }
+                          >
+                            Use edited answer
+                          </button>
+                          <button
+                            type="button"
+                            disabled={agentStatus === "loading"}
+                            onClick={() => {
+                              setProposalEditValue(pendingProposal.value);
+                              setIsEditingProposal(false);
+                            }}
+                          >
+                            Cancel edit
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <div className="agent-confirmation-value">
+                          <span>Proposed answer</span>
+                          <strong>
+                            {formatAgentValue(pendingProposal.value)}
+                          </strong>
+                        </div>
+                        <p>
+                          Nothing changes until you choose Confirm or submit an
+                          edited answer.
+                        </p>
+                        <div className="agent-confirmation-actions">
+                          <button
+                            className="primary"
+                            type="button"
+                            disabled={agentStatus === "loading"}
+                            onClick={() =>
+                              confirmPendingProposal(pendingProposal.value)
+                            }
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            disabled={agentStatus === "loading"}
+                            onClick={() => {
+                              setProposalEditValue(pendingProposal.value);
+                              setIsEditingProposal(true);
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            disabled={agentStatus === "loading"}
+                            onClick={rejectPendingProposal}
+                          >
+                            Reject
+                          </button>
+                          <button
+                            type="button"
+                            disabled={agentStatus === "loading"}
+                            onClick={skipPendingProposal}
+                          >
+                            Skip field
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </section>
                 ) : null}
 
                 {agentStatus === "loading" ? (
@@ -828,7 +1048,8 @@ function App() {
                     </div>
                     <small>
                       Only the eight most recent messages are kept. AI
-                      proposals cannot change your form in this milestone.
+                      proposals update the form only after you explicitly
+                      confirm or use an edited answer.
                     </small>
                   </form>
                 ) : extractionStatus === "ready" ? (
@@ -904,7 +1125,10 @@ function App() {
                                   <button
                                     className="explain-field-button"
                                     type="button"
-                                    disabled={agentStatus === "loading"}
+                                    disabled={
+                                      agentStatus === "loading" ||
+                                      pendingProposal !== null
+                                    }
                                     aria-label={`Explain ${
                                       field.label || humanizeFieldId(field.id)
                                     } with AI`}
@@ -1066,6 +1290,92 @@ function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
       </span>
       <small>{field.type} is not supported in this milestone.</small>
     </div>
+  );
+}
+
+type ProposalValueEditorProps = {
+  field: PdfField & { type: AgentFieldType };
+  value: FieldValue;
+  onChange: (value: FieldValue) => void;
+};
+
+function ProposalValueEditor({
+  field,
+  value,
+  onChange,
+}: ProposalValueEditorProps) {
+  const inputId = "agent-proposal-value";
+
+  if (field.type === "checkbox") {
+    return (
+      <fieldset className="agent-proposal-choice">
+        <legend>Edit proposed answer</legend>
+        <label>
+          <input
+            type="radio"
+            name={inputId}
+            checked={value === true}
+            onChange={() => onChange(true)}
+          />
+          Yes
+        </label>
+        <label>
+          <input
+            type="radio"
+            name={inputId}
+            checked={value === false}
+            onChange={() => onChange(false)}
+          />
+          No
+        </label>
+      </fieldset>
+    );
+  }
+
+  if (field.type === "dropdown") {
+    return (
+      <label className="agent-proposal-input" htmlFor={inputId}>
+        <span>Edit proposed answer</span>
+        <select
+          id={inputId}
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          {getAvailableDropdownOptions(field.options).map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  if (field.type === "textarea") {
+    return (
+      <label className="agent-proposal-input" htmlFor={inputId}>
+        <span>Edit proposed answer</span>
+        <textarea
+          id={inputId}
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </label>
+    );
+  }
+
+  return (
+    <label className="agent-proposal-input" htmlFor={inputId}>
+      <span>Edit proposed answer</span>
+      <input
+        id={inputId}
+        type="text"
+        inputMode={field.type === "number" ? "decimal" : undefined}
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => onChange(event.target.value)}
+        autoComplete="off"
+      />
+    </label>
   );
 }
 
