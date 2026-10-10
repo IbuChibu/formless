@@ -40,6 +40,19 @@ WebGuidanceUnavailableReason = Literal[
     "not_configured",
     "provider_failure",
 ]
+EvidenceClaimTopic = Literal[
+    "definition",
+    "purpose",
+    "requiredness",
+    "accepted_values",
+    "formatting",
+    "where_to_find",
+]
+EvidenceAssessmentStatus = Literal[
+    "supported",
+    "limited",
+    "conflicting",
+]
 
 MAX_WEB_QUERY_CHARS = 420
 MAX_WEB_RESULTS = 3
@@ -77,6 +90,25 @@ _NEGATIVE_REQUIREMENT_PATTERN = re.compile(
 _POSITIVE_REQUIREMENT_PATTERN = re.compile(
     r"\b(?:is\s+required|are\s+required|must\s+(?:provide|include|complete)|"
     r"required\s+to)\b",
+    re.IGNORECASE,
+)
+_ACCEPTED_VALUES_PATTERN = re.compile(
+    r"\b(?:accepted|allowed|valid)\s+(?:answer|answers|option|options|value|"
+    r"values)\b|\bwhich\s+(?:answer|answers|option|options|value|values)\b",
+    re.IGNORECASE,
+)
+_FORMATTING_PATTERN = re.compile(
+    r"\b(?:format|formatted|formatting|write|written)\b",
+    re.IGNORECASE,
+)
+_FIELD_LOCATOR_PATTERN = re.compile(
+    r"\b(line|box|section|part|item|question)\s*"
+    r"(?:no\.?|number)?\s*"
+    r"([a-z]?\d+[a-z]?(?:[.-]\d+)?|[ivxlcdm]+)\b",
+    re.IGNORECASE,
+)
+_CLAUSE_SPLIT_PATTERN = re.compile(
+    r"(?<=[.!?;])\s+|;\s*|,?\s+(?:but|while|whereas)\s+",
     re.IGNORECASE,
 )
 _SAFE_QUERY_CHARACTER_PATTERN = re.compile(r"[^\w\s.,()&/:'\-]", re.UNICODE)
@@ -201,6 +233,12 @@ class _RankedResult:
     score: float
     quality_rank: int
     relevance_rank: int
+
+
+@dataclass(frozen=True)
+class _EvidenceAssessment:
+    status: EvidenceAssessmentStatus
+    reason: str
 
 
 def plan_web_guidance_lookup(
@@ -356,33 +394,22 @@ def prepare_web_guidance(
             sources=[],
         )
 
-    conflicting = _has_conflicting_requirement_language(selected)
     lacks_issuer_source = not any(
         source.source_quality == "issuing_organization"
         for source in selected
     )
-    limited = conflicting or (
-        lookup.topic in {"purpose", "requirements"} and lacks_issuer_source
+    assessment = _assess_selected_evidence(
+        request,
+        lookup,
+        selected,
+        lacks_issuer_source=lacks_issuer_source,
     )
-    if conflicting:
-        notice = (
-            "The live sources appear to conflict. Treat the explanation as "
-            "uncertain and check the issuing organisation's instructions."
-        )
-    elif limited:
-        notice = (
-            "No issuing-organisation source was identified. These live "
-            "results are general guidance, not a definitive rule."
-        )
-    else:
-        notice = (
-            "Tavily found live web guidance. These sources are current search "
-            "results and have not been pre-reviewed by Formless."
-        )
     return WebGuidanceMetadata(
-        status="limited" if limited else "used",
+        status=(
+            "used" if assessment.status == "supported" else assessment.status
+        ),
         topic=lookup.topic,
-        notice=notice,
+        notice=assessment.reason,
         sources=selected,
     )
 
@@ -740,16 +767,177 @@ def _valid_public_host(hostname: str) -> bool:
     return address.is_global
 
 
-def _has_conflicting_requirement_language(
+def _assess_selected_evidence(
+    request: FormAgentRequest,
+    lookup: WebGuidanceLookup,
+    sources: list[WebGuidanceCitation],
+    *,
+    lacks_issuer_source: bool,
+) -> _EvidenceAssessment:
+    claim_topic = _claim_topic(request, lookup)
+    if (
+        claim_topic == "requiredness"
+        and _has_active_field_requirement_conflict(request, sources)
+    ):
+        active_field_id = request_active_field_id(request)
+        active_field = next(
+            (
+                field
+                for field in request.fields
+                if field.id == active_field_id
+            ),
+            None,
+        )
+        field_label = (
+            truncate_text(active_field.label, 120)
+            if active_field is not None
+            else "the active field"
+        )
+        return _EvidenceAssessment(
+            status="conflicting",
+            reason=(
+                "Relevant live sources make incompatible required/optional "
+                f"claims about {field_label}. Treat this as unresolved and "
+                "check the issuing organisation's instructions."
+            ),
+        )
+
+    if lookup.topic in {"purpose", "requirements"} and lacks_issuer_source:
+        return _EvidenceAssessment(
+            status="limited",
+            reason=(
+                "No issuing-organisation source was identified. These live "
+                "results are general guidance, not a definitive rule."
+            ),
+        )
+
+    return _EvidenceAssessment(
+        status="supported",
+        reason=(
+            "Tavily found live web guidance. These sources are current search "
+            "results and have not been pre-reviewed by Formless."
+        ),
+    )
+
+
+def _claim_topic(
+    request: FormAgentRequest,
+    lookup: WebGuidanceLookup,
+) -> EvidenceClaimTopic:
+    message = request_message(request)
+    if _ACCEPTED_VALUES_PATTERN.search(message) is not None:
+        return "accepted_values"
+    if _FORMATTING_PATTERN.search(message) is not None:
+        return "formatting"
+    return {
+        "meaning": "definition",
+        "purpose": "purpose",
+        "requirements": "requiredness",
+        "where_to_find": "where_to_find",
+    }[lookup.topic]
+
+
+def _has_active_field_requirement_conflict(
+    request: FormAgentRequest,
     sources: list[WebGuidanceCitation],
 ) -> bool:
-    snippets = [source.snippet for source in sources]
-    has_negative = any(
-        _NEGATIVE_REQUIREMENT_PATTERN.search(snippet) is not None
-        for snippet in snippets
+    polarities: set[Literal["required", "optional"]] = set()
+    for source in sources:
+        for clause in _CLAUSE_SPLIT_PATTERN.split(source.snippet):
+            if not clause or not _claim_targets_active_field(request, clause):
+                continue
+            if _NEGATIVE_REQUIREMENT_PATTERN.search(clause) is not None:
+                polarities.add("optional")
+            if _POSITIVE_REQUIREMENT_PATTERN.search(clause) is not None:
+                polarities.add("required")
+    return polarities == {"required", "optional"}
+
+
+def _claim_targets_active_field(
+    request: FormAgentRequest,
+    clause: str,
+) -> bool:
+    active_field_id = request_active_field_id(request)
+    active_field = next(
+        (
+            field
+            for field in request.fields
+            if field.id == active_field_id
+        ),
+        None,
     )
-    has_positive = any(
-        _POSITIVE_REQUIREMENT_PATTERN.search(snippet) is not None
-        for snippet in snippets
+    if active_field is None:
+        return False
+
+    expected_form_codes = _form_codes(
+        " ".join(
+            part
+            for part in (
+                request.form_context.form_id,
+                request.form_context.title,
+            )
+            if part
+        )
     )
-    return has_negative and has_positive
+    clause_form_codes = _form_codes(clause)
+    if (
+        expected_form_codes
+        and clause_form_codes
+        and not expected_form_codes.intersection(clause_form_codes)
+    ):
+        return False
+    if _has_mismatched_explicit_version(
+        request.form_context.form_version,
+        clause,
+    ):
+        return False
+
+    active_field_text = " ".join(
+        part
+        for part in (
+            active_field.id.replace("_", " ").replace("-", " "),
+            active_field.label,
+            field_question(active_field),
+            active_field.section,
+        )
+        if part
+    )
+    active_locators = _field_locators(active_field_text)
+    clause_locators = _field_locators(clause)
+    if active_locators and clause_locators:
+        return _locators_match(active_locators, clause_locators)
+
+    active_tokens = _significant_tokens(
+        " ".join((active_field.label, field_question(active_field))),
+        _GENERIC_FIELD_TOKENS,
+    )
+    return _field_token_match(active_tokens, _relevance_tokens(clause))
+
+
+def _field_locators(value: str) -> frozenset[str]:
+    return frozenset(
+        f"{match.group(1).casefold()}:{match.group(2).casefold()}"
+        for match in _FIELD_LOCATOR_PATTERN.finditer(value)
+    )
+
+
+def _locators_match(
+    active_locators: frozenset[str],
+    claim_locators: frozenset[str],
+) -> bool:
+    active_by_kind: dict[str, set[str]] = {}
+    claim_by_kind: dict[str, set[str]] = {}
+    for locator in active_locators:
+        kind, value = locator.split(":", maxsplit=1)
+        active_by_kind.setdefault(kind, set()).add(value)
+    for locator in claim_locators:
+        kind, value = locator.split(":", maxsplit=1)
+        claim_by_kind.setdefault(kind, set()).add(value)
+
+    shared_kinds = active_by_kind.keys() & claim_by_kind.keys()
+    if any(
+        active_by_kind[kind].isdisjoint(claim_by_kind[kind])
+        for kind in shared_kinds
+    ):
+        return False
+    return bool(active_locators.intersection(claim_locators))

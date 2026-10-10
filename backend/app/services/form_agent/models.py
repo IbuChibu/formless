@@ -394,7 +394,13 @@ class WebGuidanceCitation(_AgentModel):
 
 class WebGuidanceMetadata(_AgentModel):
     provider: Literal["tavily"] = "tavily"
-    status: Literal["used", "limited", "empty", "unavailable"]
+    status: Literal[
+        "used",
+        "limited",
+        "conflicting",
+        "empty",
+        "unavailable",
+    ]
     topic: Literal["meaning", "purpose", "requirements", "where_to_find"]
     notice: str = Field(min_length=1, max_length=600)
     sources: list[WebGuidanceCitation] = Field(
@@ -408,7 +414,10 @@ class WebGuidanceMetadata(_AgentModel):
             raise ValueError(
                 "Empty or unavailable web guidance cannot include sources"
             )
-        if self.status in {"used", "limited"} and not self.sources:
+        if (
+            self.status in {"used", "limited", "conflicting"}
+            and not self.sources
+        ):
             raise ValueError("Used web guidance requires sources")
         return self
 

@@ -15,6 +15,7 @@ from .answer_adapters import (
     interpret_answer,
 )
 from .conversation_policy import (
+    conflicting_guidance_action,
     deterministic_action,
     insufficient_guidance_action,
     invalid_value_clarification,
@@ -116,6 +117,13 @@ class FormAgentService:
             if web_guidance.status in {"empty", "unavailable"}:
                 return response_for_action(
                     insufficient_guidance_action(request, web_guidance),
+                    request,
+                    web_guidance=web_guidance,
+                    preserve_conversation_phase=True,
+                )
+            if web_guidance.status == "conflicting":
+                return response_for_action(
+                    conflicting_guidance_action(request, web_guidance),
                     request,
                     web_guidance=web_guidance,
                     preserve_conversation_phase=True,

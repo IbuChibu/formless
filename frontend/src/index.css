@@ -965,7 +965,8 @@ h1 {
   background: #f0f8fa;
 }
 
-.agent-web-guidance.limited {
+.agent-web-guidance.limited,
+.agent-web-guidance.conflicting {
   border-color: #e0c68e;
   background: #fff9ec;
 }
@@ -983,7 +984,8 @@ h1 {
   text-transform: uppercase;
 }
 
-.agent-web-guidance.limited > span {
+.agent-web-guidance.limited > span,
+.agent-web-guidance.conflicting > span {
   color: #8a611e;
 }
 

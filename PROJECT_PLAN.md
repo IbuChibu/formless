@@ -1003,7 +1003,7 @@ Do not implement:
 
 # Milestone 6.13.4 — Claim-scoped source conflict detection
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Report conflicts only when relevant sources make incompatible claims about the

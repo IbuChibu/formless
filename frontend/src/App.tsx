@@ -95,7 +95,12 @@ type WebGuidanceCitation = {
 
 type WebGuidanceMetadata = {
   provider: "tavily";
-  status: "used" | "limited" | "empty" | "unavailable";
+  status:
+    | "used"
+    | "limited"
+    | "conflicting"
+    | "empty"
+    | "unavailable";
   topic: "meaning" | "purpose" | "requirements" | "where_to_find";
   notice: string;
   sources: WebGuidanceCitation[];
@@ -1952,9 +1957,13 @@ function parseWebGuidance(payload: unknown): WebGuidanceMetadata | null {
   if (
     !isRecord(payload) ||
     payload.provider !== "tavily" ||
-    !["used", "limited", "empty", "unavailable"].includes(
-      String(payload.status),
-    ) ||
+    ![
+      "used",
+      "limited",
+      "conflicting",
+      "empty",
+      "unavailable",
+    ].includes(String(payload.status)) ||
     !["meaning", "purpose", "requirements", "where_to_find"].includes(
       String(payload.topic),
     ) ||

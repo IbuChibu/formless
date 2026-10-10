@@ -551,7 +551,7 @@ def test_relevance_gate_rejects_explicitly_mismatched_form_version() -> None:
     ) == (current,)
 
 
-def test_conflicting_rules_are_explicitly_limited() -> None:
+def test_same_field_requirement_conflict_is_typed_and_attributed() -> None:
     guidance = prepare_web_guidance(
         _w9_request("What is required on line 1?"),
         WebGuidanceLookup(topic="requirements", query="unused"),
@@ -576,8 +576,220 @@ def test_conflicting_rules_are_explicitly_limited() -> None:
         ),
     )
 
+    assert guidance.status == "conflicting"
+    assert "incompatible required/optional claims" in guidance.notice
+    assert len(guidance.sources) == 2
+
+
+def test_different_w9_line_does_not_conflict_with_active_line() -> None:
+    guidance = prepare_web_guidance(
+        _w9_request("What is required on line 1?"),
+        WebGuidanceLookup(topic="requirements", query="unused"),
+        (
+            TavilySearchResult(
+                title="Form W-9 line 1 instructions",
+                url="https://example.com/w9-line-1",
+                content=(
+                    "Form W-9 line 1 entity or individual name is required."
+                ),
+                score=0.9,
+            ),
+            TavilySearchResult(
+                title="Form W-9 line 1 and line 2 instructions",
+                url="https://example.org/w9-lines",
+                content=(
+                    "Form W-9 line 1 identifies the entity or individual. "
+                    "Line 2 business name is optional."
+                ),
+                score=0.8,
+            ),
+        ),
+    )
+
     assert guidance.status == "limited"
-    assert "conflict" in guidance.notice
+    assert "incompatible" not in guidance.notice
+    assert len(guidance.sources) == 2
+
+
+def test_different_form_claim_does_not_conflict_with_active_form() -> None:
+    guidance = prepare_web_guidance(
+        _w9_request("What is required on line 1?"),
+        WebGuidanceLookup(topic="requirements", query="unused"),
+        (
+            TavilySearchResult(
+                title="Form W-9 line 1 instructions",
+                url="https://example.com/w9-active-form",
+                content="Form W-9 line 1 entity name is required.",
+                score=0.8,
+            ),
+            TavilySearchResult(
+                title="Form W-9 line 1 and Form W-8 line 1 overview",
+                url="https://example.org/w9-w8-overview",
+                content=(
+                    "Form W-9 line 1 identifies the entity or individual. "
+                    "Form W-8 line 1 is optional."
+                ),
+                score=0.8,
+            ),
+        ),
+    )
+
+    assert guidance.status == "limited"
+    assert "incompatible" not in guidance.notice
+
+
+def test_different_section_claim_does_not_conflict_with_active_section() -> None:
+    request_data = _w9_request("What is required on line 1?").model_dump()
+    request_data["fields"][0]["section"] = "Section 1"
+    request = FormAgentRequest.model_validate(request_data)
+    guidance = prepare_web_guidance(
+        request,
+        WebGuidanceLookup(topic="requirements", query="unused"),
+        (
+            TavilySearchResult(
+                title="Form W-9 section 1 line 1 instructions",
+                url="https://example.com/w9-section-one",
+                content=(
+                    "Form W-9 section 1 line 1 entity name is required."
+                ),
+                score=0.8,
+            ),
+            TavilySearchResult(
+                title="Form W-9 section guide",
+                url="https://example.org/w9-sections",
+                content=(
+                    "Form W-9 section 1 line 1 identifies the entity. "
+                    "Section 2 line 1 is optional."
+                ),
+                score=0.8,
+            ),
+        ),
+    )
+
+    assert guidance.status == "limited"
+    assert "incompatible" not in guidance.notice
+
+
+def test_mismatched_version_claim_cannot_create_conflict() -> None:
+    guidance = prepare_web_guidance(
+        _i9_request("Is the family name required?"),
+        WebGuidanceLookup(topic="requirements", query="unused"),
+        (
+            TavilySearchResult(
+                title="Form I-9 edition 01/20/25 instructions",
+                url="https://www.uscis.gov/i-9/current-name",
+                content=(
+                    "Form I-9 edition 01/20/25 says the employee family "
+                    "name is required."
+                ),
+                score=0.8,
+            ),
+            TavilySearchResult(
+                title="Form I-9 edition 10/21/19 instructions",
+                url="https://www.uscis.gov/i-9/archived-name",
+                content=(
+                    "Form I-9 edition 10/21/19 says the employee family "
+                    "name is optional."
+                ),
+                score=0.9,
+            ),
+        ),
+    )
+
+    assert guidance.status == "used"
+    assert [source.url for source in guidance.sources] == [
+        "https://www.uscis.gov/i-9/current-name"
+    ]
+
+
+def test_duplicate_required_paraphrases_are_not_a_conflict() -> None:
+    guidance = prepare_web_guidance(
+        _w9_request("What is required on line 1?"),
+        WebGuidanceLookup(topic="requirements", query="unused"),
+        (
+            TavilySearchResult(
+                title="Form W-9 line 1 requirement",
+                url="https://example.com/w9-required",
+                content="Form W-9 line 1 entity name is required.",
+                score=0.8,
+            ),
+            TavilySearchResult(
+                title="Form W-9 line 1 completion",
+                url="https://example.org/w9-must-complete",
+                content=(
+                    "A person must complete Form W-9 line 1 with the entity "
+                    "or individual name."
+                ),
+                score=0.8,
+            ),
+        ),
+    )
+
+    assert guidance.status == "limited"
+    assert "incompatible" not in guidance.notice
+
+
+def test_unrelated_optional_text_does_not_create_conflict() -> None:
+    guidance = prepare_web_guidance(
+        _w9_request("What is required on line 1?"),
+        WebGuidanceLookup(topic="requirements", query="unused"),
+        (
+            TavilySearchResult(
+                title="Form W-9 line 1 instructions",
+                url="https://example.com/w9-required-name",
+                content=(
+                    "Form W-9 line 1 entity or individual name is required."
+                ),
+                score=0.8,
+            ),
+            TavilySearchResult(
+                title="Form W-9 line 1 help",
+                url="https://example.org/w9-newsletter",
+                content=(
+                    "Form W-9 line 1 identifies the entity or individual. "
+                    "Newsletter participation is optional."
+                ),
+                score=0.8,
+            ),
+        ),
+    )
+
+    assert guidance.status == "limited"
+    assert "incompatible" not in guidance.notice
+
+
+@pytest.mark.parametrize(
+    ("message", "topic"),
+    [
+        ("What does line 1 mean?", "meaning"),
+        ("Which values are allowed on line 1?", "requirements"),
+        ("How should line 1 be formatted?", "meaning"),
+    ],
+)
+def test_requiredness_language_does_not_cross_controlled_topics(
+    message: str,
+    topic: str,
+) -> None:
+    guidance = prepare_web_guidance(
+        _w9_request(message),
+        WebGuidanceLookup(topic=topic, query="unused"),  # type: ignore[arg-type]
+        (
+            TavilySearchResult(
+                title="Form W-9 line 1 source one",
+                url="https://example.com/w9-topic-required",
+                content="Form W-9 line 1 entity name is required.",
+                score=0.8,
+            ),
+            TavilySearchResult(
+                title="Form W-9 line 1 source two",
+                url="https://example.org/w9-topic-optional",
+                content="Form W-9 line 1 entity name is optional.",
+                score=0.8,
+            ),
+        ),
+    )
+
+    assert guidance.status != "conflicting"
 
 
 def test_empty_or_invalid_results_return_typed_empty_guidance() -> None:
@@ -653,6 +865,44 @@ def test_orchestrator_searches_once_and_returns_attributed_web_guidance() -> Non
         )[1].split("\nEND_UNTRUSTED_AGENT_CONTEXT", maxsplit=1)[0]
     )
     assert prompt_context["live_web_guidance"]["provider"] == "tavily"
+
+
+def test_orchestrator_returns_deterministic_conflict_without_model_call() -> None:
+    request = _w9_request("What is required on line 1?")
+    nemotron = StubNemotronService("not used")
+    tavily = StubTavilyService(
+        (
+            TavilySearchResult(
+                title="Form W-9 line 1 requirement",
+                url="https://example.com/w9-conflict-required",
+                content="Form W-9 line 1 entity name is required.",
+                score=0.8,
+            ),
+            TavilySearchResult(
+                title="Form W-9 line 1 optional",
+                url="https://example.org/w9-conflict-optional",
+                content="Form W-9 line 1 entity name is optional.",
+                score=0.8,
+            ),
+        )
+    )
+
+    response = asyncio.run(
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            tavily,
+        ).respond(request)
+    )
+
+    assert response.action.action == "explain"
+    assert "cannot give a definitive rule" in response.action.message
+    assert "has not been changed" in response.action.message
+    assert response.conversation_state == request.conversation_state
+    assert response.web_guidance is not None
+    assert response.web_guidance.status == "conflicting"
+    assert len(response.web_guidance.sources) == 2
+    assert nemotron.calls == []
+    assert len(tavily.queries) == 1
 
 
 def test_invalid_web_proposal_gets_one_model_correction_without_researching() -> None:

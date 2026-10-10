@@ -388,6 +388,30 @@ def insufficient_guidance_action(
     )
 
 
+def conflicting_guidance_action(
+    request: FormAgentRequest,
+    web_guidance: WebGuidanceMetadata,
+) -> ExplainAction:
+    if web_guidance.status != "conflicting":
+        raise FormAgentError(
+            "Conflict response requires conflicting web guidance"
+        )
+    active_field_id = request_active_field_id(request)
+    if active_field_id is None:
+        raise FormAgentError("Web guidance requires an active field")
+
+    return ExplainAction(
+        action="explain",
+        message=(
+            "The relevant live sources disagree about whether this question "
+            "is required or optional, so I cannot give a definitive rule. "
+            "Review the linked sources and check the issuing organisation's "
+            "instructions. Your form answer has not been changed."
+        ),
+        field_id=active_field_id,
+    )
+
+
 def invalid_value_clarification(
     error: FormAgentError,
     request: FormAgentRequest,
