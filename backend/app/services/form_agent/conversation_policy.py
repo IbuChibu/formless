@@ -217,7 +217,11 @@ def deterministic_action(
             raise FormAgentTransitionError(
                 "There is no pending proposal to confirm"
             )
-        return _confirmed_action(fields_by_id[pending.field_id], pending.value)
+        return _confirmed_action(
+            fields_by_id[pending.field_id],
+            pending.value,
+            request.fields,
+        )
 
     if isinstance(event, ConfirmEditEvent):
         if active_field is None:
@@ -239,18 +243,22 @@ def deterministic_action(
             raise FormAgentTransitionError(
                 "The edited answer is not valid for this field"
             ) from error
-        return _confirmed_action(active_field, value)
+        return _confirmed_action(active_field, value, request.fields)
 
     if isinstance(event, RejectEvent):
         if active_field is None:
             raise FormAgentTransitionError(
                 "There is no active proposal to reject"
             )
+        question = truncate_text(
+            field_question(active_field),
+            180,
+        ).rstrip(" .?")
         return RejectedAction(
             action="rejected",
             message=(
-                "No problem — I haven’t used that proposal. Tell me what "
-                "you’d like to enter instead."
+                "No problem — I haven’t used that proposal. What should be "
+                f'entered instead for “{question}”?'
             ),
             field_id=active_field.id,
         )
@@ -260,11 +268,11 @@ def deterministic_action(
             raise FormAgentTransitionError(
                 "There is no active field to skip"
             )
-        return SkipAction(
-            action="skip",
-            message=_build_skip_message(active_field),
-            field_id=active_field.id,
-        )
+        if event.field_id != active_field.id:
+            raise FormAgentTransitionError(
+                "The field selected for skipping is no longer active"
+            )
+        return _skip_action(active_field, request.fields)
 
     if (
         request.conversation_state.phase == "awaiting_confirmation"
@@ -288,11 +296,7 @@ def deterministic_action(
 
     message = request_message(request)
     if _asks_to_skip(message):
-        return SkipAction(
-            action="skip",
-            message=_build_skip_message(active_field),
-            field_id=active_field.id,
-        )
+        return _skip_action(active_field, request.fields)
 
     adapter_result = answer_interpreter(active_field, message)
     if isinstance(adapter_result, ClarificationNeeded):
@@ -326,20 +330,14 @@ def response_for_action(
             ),
         )
     elif isinstance(action, ConfirmedAction):
-        state = ConversationState(
-            phase="field_confirmed",
-            active_field_id=action.field_id,
-        )
+        state = _state_after_resolution(action.field_id, request.fields)
     elif isinstance(action, RejectedAction):
         state = ConversationState(
             phase="awaiting_answer",
             active_field_id=action.field_id,
         )
     elif isinstance(action, SkipAction):
-        state = ConversationState(
-            phase="field_skipped",
-            active_field_id=action.field_id,
-        )
+        state = _state_after_resolution(action.field_id, request.fields)
     elif isinstance(action, NextAction):
         state = ConversationState(
             phase=("awaiting_answer" if action.field_id else "form_complete"),
@@ -459,7 +457,7 @@ def normalize_action_message(
         field = next(
             field for field in request.fields if field.id == action.field_id
         )
-        return action.model_copy(update={"message": _build_skip_message(field)})
+        return _skip_action(field, request.fields)
 
     return action
 
@@ -491,10 +489,7 @@ def build_next_field_question(field: FormAgentField) -> str:
 
 
 def _next_unanswered_action(fields: list[FormAgentField]) -> NextAction:
-    next_field = next(
-        (field for field in fields if field.status == "unanswered"),
-        None,
-    )
+    next_field = _next_unanswered_field(fields)
     if next_field is None:
         return NextAction(
             action="next",
@@ -511,13 +506,16 @@ def _next_unanswered_action(fields: list[FormAgentField]) -> NextAction:
 def _confirmed_action(
     field: FormAgentField,
     value: str | bool,
+    fields: list[FormAgentField],
 ) -> ConfirmedAction:
     question = truncate_text(field_question(field), 180).rstrip(" .?")
+    next_field = _next_unanswered_field(fields, resolved_field_id=field.id)
+    progression = _progression_message(next_field)
     return ConfirmedAction(
         action="confirmed",
         message=(
             f'Confirmed — I added {format_agent_value(value)} to “{question}”. '
-            "Continue when you’re ready."
+            f"{progression}"
         ),
         field_id=field.id,
         value=value,
@@ -543,9 +541,55 @@ def _adapter_clarification(
     )
 
 
-def _build_skip_message(field: FormAgentField) -> str:
+def _skip_action(
+    field: FormAgentField,
+    fields: list[FormAgentField],
+) -> SkipAction:
     question = truncate_text(field_question(field), 180).rstrip(" .?")
-    return f'No problem — I\'ll leave “{question}” unanswered for now.'
+    next_field = _next_unanswered_field(fields, resolved_field_id=field.id)
+    return SkipAction(
+        action="skip",
+        message=(
+            f'No problem — I\'ll leave “{question}” unanswered for now. '
+            f"{_progression_message(next_field)}"
+        ),
+        field_id=field.id,
+    )
+
+
+def _state_after_resolution(
+    resolved_field_id: str,
+    fields: list[FormAgentField],
+) -> ConversationState:
+    next_field = _next_unanswered_field(
+        fields,
+        resolved_field_id=resolved_field_id,
+    )
+    return ConversationState(
+        phase="awaiting_answer" if next_field else "form_complete",
+        active_field_id=next_field.id if next_field else None,
+    )
+
+
+def _next_unanswered_field(
+    fields: list[FormAgentField],
+    *,
+    resolved_field_id: Optional[str] = None,
+) -> Optional[FormAgentField]:
+    return next(
+        (
+            field
+            for field in fields
+            if field.status == "unanswered" and field.id != resolved_field_id
+        ),
+        None,
+    )
+
+
+def _progression_message(next_field: Optional[FormAgentField]) -> str:
+    if next_field is None:
+        return "All supported fields have been reviewed."
+    return f"Next, {build_next_field_question(next_field)}"
 
 
 def format_agent_value(value: str | bool) -> str:

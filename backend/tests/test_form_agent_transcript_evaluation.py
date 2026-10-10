@@ -47,17 +47,24 @@ def test_offline_transcripts_cover_complete_multiform_conversations() -> None:
         turn.event["type"]
         for transcript in transcripts
         for turn in transcript.turns
-    } >= {"advance", "message", "reject", "confirm", "skip"}
+    } >= {
+        "advance",
+        "message",
+        "reject",
+        "confirm",
+        "confirm_edit",
+        "skip",
+    }
 
     assert report.failures == ()
     assert report.metrics.total_transcripts == 4
-    assert report.metrics.total_turns == 43
+    assert report.metrics.total_turns == 31
     assert report.metrics.fixture_count == 4
     assert report.metrics.form_completion_rate == 1.0
     assert report.metrics.first_attempt_accepted_proposal_rate == 0.889
     assert report.metrics.average_turns_per_confirmed_field == 3.667
     assert report.metrics.repeated_question_rate == 0.2
-    assert report.metrics.clarification_rate == 0.07
+    assert report.metrics.clarification_rate == 0.097
     assert report.metrics.invalid_action_rate == 0.0
     assert report.metrics.invalid_proposal_rate == 0.0
     assert report.metrics.confirmation_boundary_failure_rate == 0.0
@@ -73,7 +80,7 @@ def test_adapter_comparison_improves_reprompts_and_invalid_proposals() -> None:
 
     assert comparison.repeated_question_rate_before == 0.286
     assert comparison.repeated_question_rate_after == 0.2
-    assert comparison.invalid_proposal_rate_before == 0.023
+    assert comparison.invalid_proposal_rate_before == 0.032
     assert comparison.invalid_proposal_rate_after == 0.0
     assert comparison.invention_failures_before == 0
     assert comparison.invention_failures_after == 0
@@ -116,7 +123,7 @@ def test_failure_output_identifies_exact_transcript_and_turn() -> None:
         "failure-location-check, turn 1 (ask-name): expected action "
         '"clarify", got "next"'
     )
-    assert report.metrics.invalid_action_rate == 0.083
+    assert report.metrics.invalid_action_rate == 0.111
 
 
 def test_optional_live_mode_reports_latency_and_model_calls_per_field() -> None:

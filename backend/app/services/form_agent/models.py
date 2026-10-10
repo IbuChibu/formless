@@ -204,6 +204,7 @@ class RejectEvent(_AgentModel):
 
 class SkipEvent(_AgentModel):
     type: Literal["skip"]
+    field_id: str = Field(min_length=1, max_length=500)
 
 
 FormAgentEvent = Annotated[

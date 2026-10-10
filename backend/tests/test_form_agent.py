@@ -378,7 +378,8 @@ def test_explicit_skip_is_reliable_without_model_call() -> None:
         "action": "skip",
         "message": (
             "No problem — I'll leave “Which option best describes where you "
-            "live” unanswered for now."
+            "live” unanswered for now. Next, Full name. What should be "
+            "entered here?"
         ),
         "field_id": "living_arrangement",
     }

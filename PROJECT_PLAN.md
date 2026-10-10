@@ -756,7 +756,7 @@ Do not implement:
 
 # Milestone 6.12 — Confirmation-driven progression
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Make the conversation progress naturally after an explicit proposal decision

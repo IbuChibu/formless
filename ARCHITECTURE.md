@@ -129,6 +129,16 @@ Every Form Agent response contains both a typed action and the resulting state,
 so the frontend does not infer progression from assistant wording. The state is
 validated on every request and is never stored by the backend.
 
+After an explicit confirmation, edited confirmation, or skip, the backend
+deterministically selects the next unanswered field. The response action still
+identifies the field that was just resolved, while the resulting state points
+to the next active field or `form_complete`. Its acknowledgement includes the
+next field's real question without another model call. Explicit skip events
+also carry the intended field ID so a stale repeated event cannot skip the new
+active field. The `field_confirmed` and `field_skipped` phases remain available
+for direct/manual field-state changes and compatibility with explicit advance
+events, but the normal proposal-decision path progresses in one response.
+
 ## Agent evaluation
 
 Agent evaluation is separate from runtime orchestration. The existing
@@ -159,8 +169,10 @@ For agent or voice input:
    field adapter and the field's ID, type, and available options.
 5. The frontend asks the user to confirm, edit, reject, or skip the proposal.
 6. A separate confirmation event is validated before the value enters shared
-   field state.
-7. The frontend sends confirmed values to the existing PDF filling endpoint.
+   field state exactly once. Rejection keeps the same field active.
+7. Confirmation, edited confirmation, and skip deterministically transition to
+   the next unanswered field, or to form complete, without another model call.
+8. The frontend sends confirmed values to the existing PDF filling endpoint.
 
 For manual or direct-on-form input, the explicit user edit is already a
 confirmation. It updates the same shared state and uses the same PDF filling

@@ -110,7 +110,7 @@ type AgentEvent =
   | { type: "confirm" }
   | { type: "confirm_edit"; value: FieldValue }
   | { type: "reject" }
-  | { type: "skip" };
+  | { type: "skip"; field_id: string };
 
 type AgentAction =
   | {
@@ -202,6 +202,7 @@ function App() {
   const filledUrlRef = useRef<string | null>(null);
   const extractionControllerRef = useRef<AbortController | null>(null);
   const agentControllerRef = useRef<AbortController | null>(null);
+  const agentRequestInFlightRef = useRef(false);
   const agentMessageIdRef = useRef(0);
 
   useEffect(() => {
@@ -324,6 +325,8 @@ function App() {
 
     extractionControllerRef.current?.abort();
     agentControllerRef.current?.abort();
+    agentControllerRef.current = null;
+    agentRequestInFlightRef.current = false;
     const controller = new AbortController();
     extractionControllerRef.current = controller;
 
@@ -504,7 +507,10 @@ function App() {
     if (!agentConversationState.pending_proposal) {
       return;
     }
-    sendAgentEvent({ type: "skip" });
+    sendAgentEvent({
+      type: "skip",
+      field_id: agentConversationState.pending_proposal.field_id,
+    });
   }
 
   function appendAgentMessage(message: Omit<ConversationMessage, "id">) {
@@ -516,7 +522,11 @@ function App() {
   }
 
   async function requestAgent(request: AgentRequest) {
-    agentControllerRef.current?.abort();
+    if (agentRequestInFlightRef.current) {
+      return;
+    }
+
+    agentRequestInFlightRef.current = true;
     const controller = new AbortController();
     agentControllerRef.current = controller;
     setAgentStatus("loading");
@@ -593,12 +603,13 @@ function App() {
     } finally {
       if (agentControllerRef.current === controller) {
         agentControllerRef.current = null;
+        agentRequestInFlightRef.current = false;
       }
     }
   }
 
   function sendAgentEvent(event: AgentEvent, visibleMessage?: string) {
-    if (agentStatus === "loading") {
+    if (agentStatus === "loading" || agentRequestInFlightRef.current) {
       return;
     }
 
@@ -941,7 +952,12 @@ function App() {
                         className="agent-skip-button"
                         type="button"
                         disabled={agentStatus === "loading"}
-                        onClick={() => sendAgentEvent({ type: "skip" })}
+                        onClick={() =>
+                          sendAgentEvent({
+                            type: "skip",
+                            field_id: activeAgentField.id,
+                          })
+                        }
                       >
                         Skip
                       </button>
@@ -1724,7 +1740,7 @@ function parseAgentResponse(
     payload.conversation_state,
     requestFields,
   );
-  validateAgentResponseState(action, conversationState);
+  validateAgentResponseState(action, conversationState, requestFields);
   return { action, conversation_state: conversationState };
 }
 
@@ -1851,8 +1867,36 @@ function parseConversationState(
 function validateAgentResponseState(
   action: AgentAction,
   state: ConversationState,
+  requestFields: AgentRequestField[],
 ) {
-  if (action.field_id !== state.active_field_id) {
+  const isResolutionAction =
+    action.action === "confirmed" || action.action === "skip";
+  const resolutionField =
+    action.field_id === null
+      ? undefined
+      : findAgentField(requestFields, action.field_id);
+  const resolutionFieldWasUnanswered =
+    resolutionField?.status === "unanswered";
+  const expectedNextField = isResolutionAction
+    ? requestFields.find(
+        (field) =>
+          field.status === "unanswered" && field.id !== action.field_id,
+      )
+    : undefined;
+  const progressedToNextField =
+    isResolutionAction &&
+    resolutionFieldWasUnanswered &&
+    expectedNextField !== undefined &&
+    state.phase === "awaiting_answer" &&
+    state.active_field_id === expectedNextField.id;
+  const completedForm =
+    isResolutionAction &&
+    resolutionFieldWasUnanswered &&
+    expectedNextField === undefined &&
+    state.phase === "form_complete" &&
+    state.active_field_id === null;
+
+  if (!isResolutionAction && action.field_id !== state.active_field_id) {
     throw new Error("The assistant response and conversation state disagree.");
   }
 
@@ -1861,9 +1905,11 @@ function validateAgentResponseState(
       state.phase === "awaiting_confirmation" &&
       state.pending_proposal?.field_id === action.field_id &&
       state.pending_proposal.value === action.value) ||
-    (action.action === "confirmed" && state.phase === "field_confirmed") ||
+    (action.action === "confirmed" &&
+      (progressedToNextField || completedForm)) ||
     (action.action === "rejected" && state.phase === "awaiting_answer") ||
-    (action.action === "skip" && state.phase === "field_skipped") ||
+    (action.action === "skip" &&
+      (progressedToNextField || completedForm)) ||
     (action.action === "explain" && state.phase === "awaiting_answer") ||
     (action.action === "clarify" &&
       ["awaiting_clarification", "awaiting_confirmation"].includes(

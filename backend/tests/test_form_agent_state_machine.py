@@ -31,6 +31,7 @@ def request_payload(
     active_field_id: str | None = None,
     pending_proposal: dict[str, Any] | None = None,
     name_status: str = "unanswered",
+    include_next_field: bool = False,
 ) -> dict[str, Any]:
     name_field: dict[str, Any] = {
         "id": "full_name",
@@ -42,17 +43,29 @@ def request_payload(
     if name_status == "confirmed":
         name_field["confirmed_value"] = "Ada Lovelace"
 
-    return {
-        "fields": [
-            name_field,
+    fields = [
+        name_field,
+        {
+            "id": "shares_costs",
+            "label": "Do you share household costs?",
+            "type": "checkbox",
+            "status": "confirmed",
+            "confirmed_value": False,
+        },
+    ]
+    if include_next_field:
+        fields.append(
             {
-                "id": "shares_costs",
-                "label": "Do you share household costs?",
-                "type": "checkbox",
-                "status": "confirmed",
-                "confirmed_value": False,
-            },
-        ],
+                "id": "country",
+                "label": "Country",
+                "type": "dropdown",
+                "options": ["United Kingdom", "United States", "Other"],
+                "status": "unanswered",
+            }
+        )
+
+    return {
+        "fields": fields,
         "conversation_state": {
             "phase": phase,
             "active_field_id": active_field_id,
@@ -146,6 +159,7 @@ def test_confirmation_is_a_distinct_event_and_does_not_mutate_request() -> None:
                 "value": "Ada Lovelace",
             },
             event={"type": "confirm"},
+            include_next_field=True,
         )
     )
 
@@ -157,14 +171,18 @@ def test_confirmation_is_a_distinct_event_and_does_not_mutate_request() -> None:
 
     assert response.action.action == "confirmed"
     assert response.action.value == "Ada Lovelace"
-    assert response.conversation_state.phase == "field_confirmed"
-    assert response.conversation_state.pending_proposal is None
+    assert response.conversation_state.model_dump() == {
+        "phase": "awaiting_answer",
+        "active_field_id": "country",
+        "pending_proposal": None,
+    }
+    assert "Next, Country" in response.action.message
     assert request.fields[0].status == "unanswered"
     assert request.fields[1].confirmed_value is False
 
 
 def test_rejection_returns_field_to_answerable_state() -> None:
-    response, _ = respond(
+    response, nemotron = respond(
         request_payload(
             phase="awaiting_confirmation",
             active_field_id="full_name",
@@ -182,10 +200,14 @@ def test_rejection_returns_field_to_answerable_state() -> None:
         "active_field_id": "full_name",
         "pending_proposal": None,
     }
+    assert "haven’t used that proposal" in response.action.message
+    assert "entered instead" in response.action.message
+    assert "What is your full name" in response.action.message
+    assert nemotron.calls == []
 
 
-def test_skip_clears_a_pending_proposal_without_auto_advancing() -> None:
-    response, _ = respond(
+def test_skip_clears_a_pending_proposal_and_asks_the_next_field() -> None:
+    response, nemotron = respond(
         request_payload(
             phase="awaiting_confirmation",
             active_field_id="full_name",
@@ -193,16 +215,116 @@ def test_skip_clears_a_pending_proposal_without_auto_advancing() -> None:
                 "field_id": "full_name",
                 "value": "Ada Lovelace",
             },
-            event={"type": "skip"},
+            event={"type": "skip", "field_id": "full_name"},
+            include_next_field=True,
         )
     )
 
     assert response.action.action == "skip"
     assert response.conversation_state.model_dump() == {
-        "phase": "field_skipped",
-        "active_field_id": "full_name",
+        "phase": "awaiting_answer",
+        "active_field_id": "country",
         "pending_proposal": None,
     }
+    assert "Next, Country" in response.action.message
+    assert nemotron.calls == []
+
+
+def test_confirming_an_edited_answer_uses_the_same_progression() -> None:
+    response, nemotron = respond(
+        request_payload(
+            phase="awaiting_confirmation",
+            active_field_id="full_name",
+            pending_proposal={
+                "field_id": "full_name",
+                "value": "Ada Example",
+            },
+            event={"type": "confirm_edit", "value": "Ada Lovelace"},
+            include_next_field=True,
+        )
+    )
+
+    assert response.action.action == "confirmed"
+    assert response.action.value == "Ada Lovelace"
+    assert response.conversation_state.model_dump() == {
+        "phase": "awaiting_answer",
+        "active_field_id": "country",
+        "pending_proposal": None,
+    }
+    assert "Next, Country" in response.action.message
+    assert nemotron.calls == []
+
+
+@pytest.mark.parametrize("event_type", ["confirm", "skip"])
+def test_resolving_the_final_field_completes_the_form(event_type: str) -> None:
+    response, nemotron = respond(
+        request_payload(
+            phase="awaiting_confirmation",
+            active_field_id="full_name",
+            pending_proposal={
+                "field_id": "full_name",
+                "value": "Ada Lovelace",
+            },
+            event=(
+                {"type": "skip", "field_id": "full_name"}
+                if event_type == "skip"
+                else {"type": "confirm"}
+            ),
+        )
+    )
+
+    assert response.action.action == (
+        "confirmed" if event_type == "confirm" else "skip"
+    )
+    assert response.conversation_state.model_dump() == {
+        "phase": "form_complete",
+        "active_field_id": None,
+        "pending_proposal": None,
+    }
+    assert "All supported fields have been reviewed" in response.action.message
+    assert nemotron.calls == []
+
+
+@pytest.mark.parametrize("event_type", ["confirm", "skip"])
+def test_duplicate_resolution_event_is_rejected_after_progression(
+    event_type: str,
+) -> None:
+    event = (
+        {"type": "skip", "field_id": "full_name"}
+        if event_type == "skip"
+        else {"type": "confirm"}
+    )
+    first_response, _ = respond(
+        request_payload(
+            phase="awaiting_confirmation",
+            active_field_id="full_name",
+            pending_proposal={
+                "field_id": "full_name",
+                "value": "Ada Lovelace",
+            },
+            event=event,
+            include_next_field=True,
+        )
+    )
+
+    assert first_response.conversation_state.active_field_id == "country"
+    expected_error = (
+        "no longer active" if event_type == "skip" else "is not valid"
+    )
+    with pytest.raises(FormAgentTransitionError, match=expected_error):
+        respond(
+            request_payload(
+                phase=first_response.conversation_state.phase,
+                active_field_id=(
+                    first_response.conversation_state.active_field_id
+                ),
+                event=event,
+                name_status=(
+                    "confirmed" if event_type == "confirm" else "skipped"
+                ),
+                include_next_field=True,
+            )
+        )
 
 
 def test_explicit_advance_after_confirmation_can_complete_the_form() -> None:

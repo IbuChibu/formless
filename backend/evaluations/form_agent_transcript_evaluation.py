@@ -16,7 +16,7 @@ import asyncio
 from dataclasses import asdict, dataclass
 import json
 from time import perf_counter
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, Union, cast
 
 from app.services.form_agent import (
     ConfirmedAction,
@@ -50,6 +50,7 @@ from evaluations.form_agent_evaluation import (
 
 
 FieldValue = Union[str, bool]
+_SAME_ACTIVE_FIELD = object()
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,8 @@ class TranscriptTurn:
     event: dict[str, Any]
     expected_action: str
     expected_phase: str
-    expected_active_field_id: Optional[str]
+    expected_action_field_id: Optional[str]
+    expected_state_active_field_id: Optional[str]
     expected_confirmed_values: tuple[tuple[str, FieldValue], ...] = ()
     expected_skipped_field_ids: tuple[str, ...] = ()
     expected_value: Optional[FieldValue] = None
@@ -165,9 +167,9 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
         ("full_name", "Ada Lovelace"),
         ("country", "United Kingdom"),
     )
-    household_name = (("applicant_full_legal_name", "Sam Example"),)
+    household_name = (("applicant_full_legal_name", "Sam Example-Smith"),)
     household_name_category = (
-        ("applicant_full_legal_name", "Sam Example"),
+        ("applicant_full_legal_name", "Sam Example-Smith"),
         ("primary_support_category", "Housing stability"),
     )
     household_all = household_name_category + (
@@ -236,18 +238,11 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirm-name",
                     {"type": "confirm"},
                     "confirmed",
-                    "field_confirmed",
+                    "awaiting_answer",
                     "full_name",
+                    state_active_field_id="country",
                     confirmed=sample_name,
                     expected_value="Ada Lovelace",
-                ),
-                _turn(
-                    "ask-country",
-                    _advance(),
-                    "next",
-                    "awaiting_answer",
-                    "country",
-                    confirmed=sample_name,
                 ),
                 _turn(
                     "country-proposal",
@@ -264,34 +259,19 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirm-country",
                     {"type": "confirm"},
                     "confirmed",
-                    "field_confirmed",
+                    "awaiting_answer",
                     "country",
+                    state_active_field_id="accept_terms",
                     confirmed=sample_name_country,
                     expected_value="United Kingdom",
                 ),
                 _turn(
-                    "ask-terms",
-                    _advance(),
-                    "next",
-                    "awaiting_answer",
-                    "accept_terms",
-                    confirmed=sample_name_country,
-                ),
-                _turn(
                     "skip-terms",
-                    {"type": "skip"},
+                    {"type": "skip", "field_id": "accept_terms"},
                     "skip",
-                    "field_skipped",
-                    "accept_terms",
-                    confirmed=sample_name_country,
-                    skipped=("accept_terms",),
-                ),
-                _turn(
-                    "complete-sample",
-                    _advance(),
-                    "next",
                     "form_complete",
-                    None,
+                    "accept_terms",
+                    state_active_field_id=None,
                     confirmed=sample_name_country,
                     skipped=("accept_terms",),
                 ),
@@ -329,20 +309,13 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                 ),
                 _turn(
                     "confirm-name",
-                    {"type": "confirm"},
+                    {"type": "confirm_edit", "value": "Sam Example-Smith"},
                     "confirmed",
-                    "field_confirmed",
-                    "applicant_full_legal_name",
-                    confirmed=household_name,
-                    expected_value="Sam Example",
-                ),
-                _turn(
-                    "ask-category",
-                    _advance(),
-                    "next",
                     "awaiting_answer",
-                    "primary_support_category",
+                    "applicant_full_legal_name",
+                    state_active_field_id="primary_support_category",
                     confirmed=household_name,
+                    expected_value="Sam Example-Smith",
                 ),
                 _turn(
                     "category-proposal",
@@ -359,18 +332,11 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirm-category",
                     {"type": "confirm"},
                     "confirmed",
-                    "field_confirmed",
+                    "awaiting_answer",
                     "primary_support_category",
+                    state_active_field_id="shares_food_or_living_costs",
                     confirmed=household_name_category,
                     expected_value="Housing stability",
-                ),
-                _turn(
-                    "ask-cost-sharing",
-                    _advance(),
-                    "next",
-                    "awaiting_answer",
-                    "shares_food_or_living_costs",
-                    confirmed=household_name_category,
                 ),
                 _turn(
                     "unclear-cost-sharing",
@@ -400,18 +366,11 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirm-cost-sharing",
                     {"type": "confirm"},
                     "confirmed",
-                    "field_confirmed",
+                    "form_complete",
                     "shares_food_or_living_costs",
+                    state_active_field_id=None,
                     confirmed=household_all,
                     expected_value=True,
-                ),
-                _turn(
-                    "complete-household",
-                    _advance(),
-                    "next",
-                    "form_complete",
-                    None,
-                    confirmed=household_all,
                 ),
             ),
         ),
@@ -453,18 +412,11 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirm-family-name",
                     {"type": "confirm"},
                     "confirmed",
-                    "field_confirmed",
+                    "awaiting_answer",
                     "Last Name (Family Name)",
+                    state_active_field_id="State",
                     confirmed=i9_name,
                     expected_value="Example",
-                ),
-                _turn(
-                    "ask-state",
-                    _advance(),
-                    "next",
-                    "awaiting_answer",
-                    "State",
-                    confirmed=i9_name,
                 ),
                 _turn(
                     "state-proposal",
@@ -481,34 +433,19 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirm-state",
                     {"type": "confirm"},
                     "confirmed",
-                    "field_confirmed",
+                    "awaiting_answer",
                     "State",
+                    state_active_field_id="CB_1",
                     confirmed=i9_name_state,
                     expected_value="CA",
                 ),
                 _turn(
-                    "ask-attestation",
-                    _advance(),
-                    "next",
-                    "awaiting_answer",
-                    "CB_1",
-                    confirmed=i9_name_state,
-                ),
-                _turn(
                     "skip-attestation",
-                    {"type": "skip"},
+                    {"type": "skip", "field_id": "CB_1"},
                     "skip",
-                    "field_skipped",
-                    "CB_1",
-                    confirmed=i9_name_state,
-                    skipped=("CB_1",),
-                ),
-                _turn(
-                    "complete-uscis",
-                    _advance(),
-                    "next",
                     "form_complete",
-                    None,
+                    "CB_1",
+                    state_active_field_id=None,
                     confirmed=i9_name_state,
                     skipped=("CB_1",),
                 ),
@@ -548,18 +485,11 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirm-label",
                     {"type": "confirm"},
                     "confirmed",
-                    "field_confirmed",
+                    "awaiting_answer",
                     "Monthly rent expense 1",
+                    state_active_field_id="Monthly actual cost 1",
                     confirmed=sba_label,
                     expected_value="Monthly rent",
-                ),
-                _turn(
-                    "ask-actual-cost",
-                    _advance(),
-                    "next",
-                    "awaiting_answer",
-                    "Monthly actual cost 1",
-                    confirmed=sba_label,
                 ),
                 _turn(
                     "unclear-actual-cost",
@@ -589,34 +519,22 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirm-actual-cost",
                     {"type": "confirm"},
                     "confirmed",
-                    "field_confirmed",
+                    "awaiting_answer",
                     "Monthly actual cost 1",
+                    state_active_field_id="One-time budget cost 1",
                     confirmed=sba_label_actual,
                     expected_value="1050.50",
                 ),
                 _turn(
-                    "ask-one-time-budget",
-                    _advance(),
-                    "next",
-                    "awaiting_answer",
-                    "One-time budget cost 1",
-                    confirmed=sba_label_actual,
-                ),
-                _turn(
                     "skip-one-time-budget",
-                    {"type": "skip"},
+                    {
+                        "type": "skip",
+                        "field_id": "One-time budget cost 1",
+                    },
                     "skip",
-                    "field_skipped",
-                    "One-time budget cost 1",
-                    confirmed=sba_label_actual,
-                    skipped=("One-time budget cost 1",),
-                ),
-                _turn(
-                    "complete-sba",
-                    _advance(),
-                    "next",
                     "form_complete",
-                    None,
+                    "One-time budget cost 1",
+                    state_active_field_id=None,
                     confirmed=sba_label_actual,
                     skipped=("One-time budget cost 1",),
                 ),
@@ -734,7 +652,7 @@ async def run_transcript_evaluation(
                         f'"{action.action}"',
                     )
                 )
-            if action_field_id != turn.expected_active_field_id:
+            if action_field_id != turn.expected_action_field_id:
                 action_invalid = True
                 failures.append(
                     _failure(
@@ -742,7 +660,7 @@ async def run_transcript_evaluation(
                         turn_number,
                         turn,
                         "expected action field "
-                        f'"{turn.expected_active_field_id}", got '
+                        f'"{turn.expected_action_field_id}", got '
                         f'"{action_field_id}"',
                     )
                 )
@@ -864,7 +782,21 @@ async def run_transcript_evaluation(
 
             state = response.conversation_state
             clarification_count += int(action.action == "clarify")
-            if action.action in {"next", "clarify"} and (
+            progressed_field_id = (
+                state.active_field_id
+                if isinstance(action, (ConfirmedAction, SkipAction))
+                and state.phase == "awaiting_answer"
+                else None
+            )
+            if progressed_field_id is not None:
+                field_turn_counts[progressed_field_id] = (
+                    field_turn_counts.get(progressed_field_id, 0) + 1
+                )
+                question_count += 1
+                previous_question_by_field[progressed_field_id] = " ".join(
+                    action.message.casefold().split()
+                )
+            elif action.action in {"next", "clarify"} and (
                 action_field_id is not None
             ):
                 question_count += 1
@@ -1001,8 +933,9 @@ def _turn(
     event: dict[str, Any],
     expected_action: str,
     expected_phase: str,
-    expected_active_field_id: Optional[str],
+    expected_action_field_id: Optional[str],
     *,
+    state_active_field_id: object = _SAME_ACTIVE_FIELD,
     confirmed: tuple[tuple[str, FieldValue], ...] = (),
     skipped: tuple[str, ...] = (),
     expected_value: Optional[FieldValue] = None,
@@ -1017,7 +950,12 @@ def _turn(
         event=event,
         expected_action=expected_action,
         expected_phase=expected_phase,
-        expected_active_field_id=expected_active_field_id,
+        expected_action_field_id=expected_action_field_id,
+        expected_state_active_field_id=(
+            expected_action_field_id
+            if state_active_field_id is _SAME_ACTIVE_FIELD
+            else cast(Optional[str], state_active_field_id)
+        ),
         expected_confirmed_values=confirmed,
         expected_skipped_field_ids=skipped,
         expected_value=expected_value,
@@ -1142,14 +1080,14 @@ def _assert_turn_state(
                 f'"{state.phase}"',
             )
         )
-    if state.active_field_id != turn.expected_active_field_id:
+    if state.active_field_id != turn.expected_state_active_field_id:
         failures.append(
             _failure(
                 transcript,
                 turn_number,
                 turn,
                 "expected active field "
-                f'"{turn.expected_active_field_id}", got '
+                f'"{turn.expected_state_active_field_id}", got '
                 f'"{state.active_field_id}"',
             )
         )
