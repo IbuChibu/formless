@@ -802,6 +802,26 @@ h1 {
   font-weight: 800;
 }
 
+.agent-field-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-guidance-button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid #a9cdb5;
+  border-radius: 7px;
+  color: #27623d;
+  background: #f3f8f4;
+  cursor: pointer;
+  font-size: 0.67rem;
+  font-weight: 800;
+}
+
+.agent-guidance-button:disabled,
 .agent-skip-button:disabled {
   cursor: wait;
   opacity: 0.55;
@@ -933,6 +953,83 @@ h1 {
   color: #68786e;
   font-size: 0.6rem;
   line-height: 1.4;
+}
+
+.agent-web-guidance {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+  padding: 10px;
+  border: 1px solid #b9d7dd;
+  border-radius: 8px;
+  background: #f0f8fa;
+}
+
+.agent-web-guidance.limited {
+  border-color: #e0c68e;
+  background: #fff9ec;
+}
+
+.agent-web-guidance.empty {
+  border-style: dashed;
+}
+
+.agent-web-guidance > span {
+  color: #276a75;
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-web-guidance.limited > span {
+  color: #8a611e;
+}
+
+.agent-web-guidance > p {
+  color: #435f64;
+  font-size: 0.68rem;
+}
+
+.agent-web-source {
+  display: grid;
+  gap: 4px;
+  padding-top: 7px;
+  border-top: 1px solid rgb(75 130 140 / 18%);
+}
+
+.agent-web-source a {
+  color: #236271;
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.agent-web-source p {
+  color: #3d5358;
+  font-size: 0.67rem;
+}
+
+.agent-web-source small {
+  color: #687b7f;
+  font-size: 0.58rem;
+  line-height: 1.4;
+}
+
+.agent-web-guidance > button {
+  justify-self: start;
+  padding: 6px 9px;
+  border: 1px solid #9fc4cc;
+  border-radius: 7px;
+  color: #245d68;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.65rem;
+  font-weight: 850;
+}
+
+.agent-web-guidance > button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .agent-proposal {
@@ -1169,7 +1266,9 @@ h1 {
 }
 
 .agent-progress-button:focus-visible,
-.agent-skip-button:focus-visible {
+.agent-skip-button:focus-visible,
+.agent-guidance-button:focus-visible,
+.agent-web-guidance > button:focus-visible {
   outline: 3px solid rgb(52 133 83 / 22%);
   outline-offset: 2px;
 }

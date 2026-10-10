@@ -7,6 +7,7 @@ type ConnectionStatus = "checking" | "connected" | "disconnected";
 type ExtractionStatus = "idle" | "loading" | "ready" | "empty" | "error";
 type PreviewStatus = "idle" | "pending" | "updating" | "ready" | "error";
 type AgentStatus = "idle" | "loading" | "error";
+type AgentActivity = "responding" | "guidance";
 type FieldValue = string | boolean;
 type AgentActionKind =
   | "explain"
@@ -76,6 +77,28 @@ type OfficialGuidanceCitation = {
   retrieved_at: string;
   excerpt: string;
   excerpt_kind: "paraphrase";
+};
+
+type WebGuidanceCitation = {
+  source_id: string;
+  title: string;
+  url: string;
+  hostname: string;
+  retrieved_at: string;
+  form_version?: string | null;
+  snippet: string;
+  source_quality:
+    | "issuing_organization"
+    | "public_authority"
+    | "general_web";
+};
+
+type WebGuidanceMetadata = {
+  provider: "tavily";
+  status: "used" | "limited" | "empty";
+  topic: "meaning" | "purpose" | "requirements" | "where_to_find";
+  notice: string;
+  sources: WebGuidanceCitation[];
 };
 
 type AgentRequestField = {
@@ -156,6 +179,7 @@ type AgentResponse = {
   action: AgentAction;
   conversation_state: ConversationState;
   guidance: OfficialGuidanceCitation[];
+  web_guidance: WebGuidanceMetadata | null;
 };
 
 type ConversationMessage = AgentHistoryMessage & {
@@ -164,6 +188,8 @@ type ConversationMessage = AgentHistoryMessage & {
   fieldId?: string | null;
   proposedValue?: FieldValue;
   guidance?: OfficialGuidanceCitation[];
+  webGuidance?: WebGuidanceMetadata | null;
+  webGuidanceRetry?: AgentRequest;
 };
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -204,6 +230,8 @@ function App() {
     useState<ConversationState>(createInitialConversationState());
   const [agentMessages, setAgentMessages] = useState<ConversationMessage[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
+  const [agentActivity, setAgentActivity] =
+    useState<AgentActivity>("responding");
   const [agentInput, setAgentInput] = useState("");
   const [agentError, setAgentError] = useState<string | null>(null);
   const [failedAgentRequest, setFailedAgentRequest] =
@@ -370,6 +398,7 @@ function App() {
     setAgentConversationState(createInitialConversationState());
     setAgentMessages([]);
     setAgentStatus("idle");
+    setAgentActivity("responding");
     setAgentInput("");
     setAgentError(null);
     setFailedAgentRequest(null);
@@ -545,6 +574,9 @@ function App() {
     const controller = new AbortController();
     agentControllerRef.current = controller;
     setAgentStatus("loading");
+    setAgentActivity(
+      agentRequestMayUseGuidance(request) ? "guidance" : "responding",
+    );
     setAgentError(null);
     setFailedAgentRequest(null);
 
@@ -576,6 +608,10 @@ function App() {
         action: action.action,
         fieldId: action.field_id,
         guidance: agentResponse.guidance,
+        webGuidance: agentResponse.web_guidance,
+        ...(agentResponse.web_guidance?.status === "empty"
+          ? { webGuidanceRetry: request }
+          : {}),
         ...(action.action === "propose"
           ? { proposedValue: action.value }
           : {}),
@@ -964,19 +1000,40 @@ function App() {
                     ["awaiting_answer", "awaiting_clarification"].includes(
                       agentConversationState.phase,
                     ) ? (
-                      <button
-                        className="agent-skip-button"
-                        type="button"
-                        disabled={agentStatus === "loading"}
-                        onClick={() =>
-                          sendAgentEvent({
-                            type: "skip",
-                            field_id: activeAgentField.id,
-                          })
-                        }
-                      >
-                        Skip
-                      </button>
+                      <div className="agent-field-actions">
+                        <button
+                          className="agent-guidance-button"
+                          type="button"
+                          disabled={agentStatus === "loading"}
+                          onClick={() => {
+                            const message =
+                              "Search for current guidance that explains this field.";
+                            sendAgentEvent(
+                              {
+                                type: "focus_field",
+                                field_id: activeAgentField.id,
+                                content: message,
+                              },
+                              message,
+                            );
+                          }}
+                        >
+                          Search guidance
+                        </button>
+                        <button
+                          className="agent-skip-button"
+                          type="button"
+                          disabled={agentStatus === "loading"}
+                          onClick={() =>
+                            sendAgentEvent({
+                              type: "skip",
+                              field_id: activeAgentField.id,
+                            })
+                          }
+                        >
+                          Skip
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                 ) : null}
@@ -1025,7 +1082,7 @@ function App() {
                               </span>
                             ) : null}
                           </div>
-                          {message.guidance?.length ? (
+                          {message.guidance?.length || message.webGuidance ? (
                             <span className="agent-explanation-label">
                               Assistant explanation
                             </span>
@@ -1052,6 +1109,52 @@ function App() {
                               </small>
                             </aside>
                           ))}
+                          {message.webGuidance ? (
+                            <aside
+                              className={`agent-web-guidance ${message.webGuidance.status}`}
+                            >
+                              <span>Live web guidance · Tavily</span>
+                              <p>{message.webGuidance.notice}</p>
+                              {message.webGuidance.sources.map((source) => (
+                                <article
+                                  className="agent-web-source"
+                                  key={`${message.id}-${source.source_id}`}
+                                >
+                                  <a
+                                    href={source.url}
+                                    rel="noreferrer"
+                                    target="_blank"
+                                  >
+                                    {source.title}
+                                  </a>
+                                  <p>{source.snippet}</p>
+                                  <small>
+                                    {getWebSourceQualityLabel(
+                                      source.source_quality,
+                                    )} · {source.hostname} · Retrieved{" "}
+                                    {source.retrieved_at}
+                                    {source.form_version
+                                      ? ` · Form version ${source.form_version}`
+                                      : ""}
+                                  </small>
+                                </article>
+                              ))}
+                              {message.webGuidance.status === "empty" &&
+                              message.webGuidanceRetry ? (
+                                <button
+                                  type="button"
+                                  disabled={agentStatus === "loading"}
+                                  onClick={() =>
+                                    void requestAgent(
+                                      message.webGuidanceRetry as AgentRequest,
+                                    )
+                                  }
+                                >
+                                  Search again
+                                </button>
+                              ) : null}
+                            </aside>
+                          ) : null}
                           {message.action === "propose" &&
                           message.proposedValue !== undefined ? (
                             <div className="agent-proposal">
@@ -1184,7 +1287,11 @@ function App() {
                 {agentStatus === "loading" ? (
                   <div className="ai-explanation-state">
                     <span className="spinner" aria-hidden="true" />
-                    <span>Form assistant is thinking…</span>
+                    <span>
+                      {agentActivity === "guidance"
+                        ? "Checking reviewed and live guidance…"
+                        : "Form assistant is thinking…"}
+                    </span>
                   </div>
                 ) : null}
 
@@ -1196,7 +1303,9 @@ function App() {
                         type="button"
                         onClick={() => void requestAgent(failedAgentRequest)}
                       >
-                        Retry message
+                        {agentRequestMayUseGuidance(failedAgentRequest)
+                          ? "Retry guidance search"
+                          : "Retry message"}
                       </button>
                     ) : null}
                   </div>
@@ -1783,11 +1892,13 @@ function parseAgentResponse(
     requestFields,
   );
   const guidance = parseOfficialGuidance(payload.guidance);
+  const webGuidance = parseWebGuidance(payload.web_guidance);
   validateAgentResponseState(action, conversationState, requestFields);
   return {
     action,
     conversation_state: conversationState,
     guidance,
+    web_guidance: webGuidance,
   };
 }
 
@@ -1828,6 +1939,68 @@ function parseOfficialGuidance(
       excerpt_kind: citation.excerpt_kind,
     };
   });
+}
+
+function parseWebGuidance(payload: unknown): WebGuidanceMetadata | null {
+  if (payload === undefined || payload === null) {
+    return null;
+  }
+  if (
+    !isRecord(payload) ||
+    payload.provider !== "tavily" ||
+    !["used", "limited", "empty"].includes(String(payload.status)) ||
+    !["meaning", "purpose", "requirements", "where_to_find"].includes(
+      String(payload.topic),
+    ) ||
+    typeof payload.notice !== "string" ||
+    !payload.notice.trim() ||
+    !Array.isArray(payload.sources) ||
+    payload.sources.length > 3
+  ) {
+    throw new Error("The API returned invalid live web guidance.");
+  }
+
+  const sources = payload.sources.map((source) => {
+    if (
+      !isRecord(source) ||
+      typeof source.source_id !== "string" ||
+      typeof source.title !== "string" ||
+      typeof source.url !== "string" ||
+      !source.url.startsWith("https://") ||
+      typeof source.hostname !== "string" ||
+      typeof source.retrieved_at !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(
+        source.retrieved_at,
+      ) ||
+      (source.form_version !== null &&
+        source.form_version !== undefined &&
+        typeof source.form_version !== "string") ||
+      typeof source.snippet !== "string" ||
+      ![
+        "issuing_organization",
+        "public_authority",
+        "general_web",
+      ].includes(String(source.source_quality))
+    ) {
+      throw new Error("The API returned invalid live web guidance.");
+    }
+    return source as WebGuidanceCitation;
+  });
+
+  const status = payload.status as WebGuidanceMetadata["status"];
+  if (
+    (status === "empty" && sources.length > 0) ||
+    (status !== "empty" && sources.length === 0)
+  ) {
+    throw new Error("The API returned invalid live web guidance.");
+  }
+  return {
+    provider: "tavily",
+    status,
+    topic: payload.topic as WebGuidanceMetadata["topic"],
+    notice: payload.notice,
+    sources,
+  };
 }
 
 function parseAgentAction(
@@ -2091,6 +2264,32 @@ function getAgentActionLabel(action?: AgentActionKind): string {
   };
 
   return action ? labels[action] : "Form assistant";
+}
+
+function getWebSourceQualityLabel(
+  quality: WebGuidanceCitation["source_quality"],
+): string {
+  return {
+    issuing_organization: "Known issuing-organisation source",
+    public_authority: "Public-authority source",
+    general_web: "General web source",
+  }[quality];
+}
+
+function agentRequestMayUseGuidance(request: AgentRequest): boolean {
+  if (
+    request.event.type !== "message" &&
+    request.event.type !== "focus_field"
+  ) {
+    return false;
+  }
+  const message = request.event.content;
+  return (
+    message.trim().endsWith("?") ||
+    /\b(?:why|what|which|who|when|where|how|explain|meaning|mean|instructions?|required?|requirements?|rules?|purpose|help|search|find)\b/i.test(
+      message,
+    )
+  );
 }
 
 function createInitialConversationState(): ConversationState {

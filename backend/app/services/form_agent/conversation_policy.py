@@ -38,6 +38,7 @@ from .models import (
     RejectedAction,
     SkipAction,
     SkipEvent,
+    WebGuidanceMetadata,
     field_question,
     request_active_field_id,
     request_message,
@@ -280,6 +281,7 @@ def response_for_action(
     action: FormAgentAction,
     request: FormAgentRequest,
     guidance: tuple[OfficialGuidanceCitation, ...] = (),
+    web_guidance: Optional[WebGuidanceMetadata] = None,
 ) -> FormAgentResponse:
     active_field_id = request_active_field_id(request)
     if isinstance(action, ProposeAction):
@@ -336,6 +338,11 @@ def response_for_action(
             "action": action.model_dump(),
             "conversation_state": state.model_dump(),
             "guidance": [citation.model_dump() for citation in guidance],
+            "web_guidance": (
+                web_guidance.model_dump()
+                if web_guidance is not None
+                else None
+            ),
         }
     )
 

@@ -367,6 +367,50 @@ class OfficialGuidanceCitation(_AgentModel):
     excerpt_kind: Literal["paraphrase"] = "paraphrase"
 
 
+class WebGuidanceCitation(_AgentModel):
+    source_id: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=300)
+    url: str = Field(
+        min_length=1,
+        max_length=1000,
+        pattern=r"^https://",
+    )
+    hostname: str = Field(min_length=1, max_length=253)
+    retrieved_at: str = Field(
+        pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
+    )
+    form_version: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+    )
+    snippet: str = Field(min_length=1, max_length=500)
+    source_quality: Literal[
+        "issuing_organization",
+        "public_authority",
+        "general_web",
+    ]
+
+
+class WebGuidanceMetadata(_AgentModel):
+    provider: Literal["tavily"] = "tavily"
+    status: Literal["used", "limited", "empty"]
+    topic: Literal["meaning", "purpose", "requirements", "where_to_find"]
+    notice: str = Field(min_length=1, max_length=600)
+    sources: list[WebGuidanceCitation] = Field(
+        default_factory=list,
+        max_length=3,
+    )
+
+    @model_validator(mode="after")
+    def validate_status_sources(self) -> WebGuidanceMetadata:
+        if self.status == "empty" and self.sources:
+            raise ValueError("Empty web guidance cannot include sources")
+        if self.status != "empty" and not self.sources:
+            raise ValueError("Used web guidance requires sources")
+        return self
+
+
 FormAgentAction = Annotated[
     Union[
         ExplainAction,
@@ -399,6 +443,7 @@ class FormAgentResponse(_AgentModel):
         default_factory=list,
         max_length=2,
     )
+    web_guidance: Optional[WebGuidanceMetadata] = None
 
 
 def request_active_field_id(request: FormAgentRequest) -> Optional[str]:

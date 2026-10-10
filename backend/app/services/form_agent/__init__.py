@@ -26,6 +26,8 @@ from .models import (
     RejectedAction,
     SkipAction,
     SkipEvent,
+    WebGuidanceCitation,
+    WebGuidanceMetadata,
 )
 from .orchestrator import FormAgentService
 from .prompt_builder import MAX_AGENT_CONTEXT_CHARS
@@ -61,4 +63,6 @@ __all__ = [
     "RejectedAction",
     "SkipAction",
     "SkipEvent",
+    "WebGuidanceCitation",
+    "WebGuidanceMetadata",
 ]

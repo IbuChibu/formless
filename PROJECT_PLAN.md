@@ -815,7 +815,7 @@ Do not implement:
 
 # Milestone 6.13.1 — Policy-gated web guidance with Tavily
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Use Tavily to find current, attributable web guidance when reviewed local

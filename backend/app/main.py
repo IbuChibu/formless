@@ -27,6 +27,11 @@ from app.services.pdf_service import (
     extract_acroform,
     fill_acroform_fields,
 )
+from app.services.tavily_service import (
+    TavilyConfigurationError,
+    TavilyService,
+    TavilyServiceError,
+)
 
 
 PdfFieldValue = Union[str, bool]
@@ -102,10 +107,15 @@ def get_nemotron_service() -> NemotronService:
         ) from error
 
 
+def get_tavily_service() -> TavilyService:
+    return TavilyService.from_optional_environment()
+
+
 def get_form_agent_service(
     nemotron_service: NemotronService = Depends(get_nemotron_service),
+    tavily_service: TavilyService = Depends(get_tavily_service),
 ) -> FormAgentService:
-    return FormAgentService(nemotron_service)
+    return FormAgentService(nemotron_service, tavily_service)
 
 
 @app.post("/ai/explain", response_model=FieldExplanationResponse)
@@ -141,7 +151,9 @@ async def respond_to_form_agent(
         return await service.respond(request)
     except FormAgentTransitionError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    except (FormAgentError, NemotronServiceError) as error:
+    except TavilyConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except (FormAgentError, NemotronServiceError, TavilyServiceError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 

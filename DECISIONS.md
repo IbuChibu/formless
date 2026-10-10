@@ -88,3 +88,20 @@ Reason:
 This gives users attributable help without runtime crawling or general RAG,
 prevents silently applying instructions from the wrong form edition, and keeps
 external text inside the same untrusted-data boundary as PDF and user content.
+
+---
+
+## 2026-10-10 — Live web guidance is policy-gated and separate from reviewed guidance
+
+Decision:
+The Form Agent may use Tavily for one bounded search only when the user asks an
+informational question and reviewed local guidance is insufficient. Search
+eligibility and query construction are deterministic backend responsibilities.
+Live results remain visibly separate from reviewed official guidance.
+
+Reason:
+This provides current, attributable help for unrecognized forms without giving
+the model autonomous tool access or maintaining a large domain allowlist. The
+query excludes PDF bytes, field values, proposals, personal answers, and
+conversation history, while returned snippets and URLs are treated as
+untrusted data and cannot cross the existing proposal-confirmation boundary.

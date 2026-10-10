@@ -14,13 +14,13 @@ Voice / Text / PDF field click / Manual drawer
           +---------+---------+
           |                   |
           v                   v
-     PDF Service          Form Agent
-                         /          \
-                        v            v
-          Local official guidance  Nemotron Service
-                 registry                 |
-                                          v
-                                Nebius Token Factory
+     PDF Service                Form Agent
+                         /          |          \
+                        v           v           v
+          Local official     Tavily Service   Nemotron Service
+          guidance registry        |                 |
+                                   v                 v
+                              Tavily Search  Nebius Token Factory
 
 ## Frontend
 
@@ -30,6 +30,7 @@ Responsible for:
 - recording voice
 - displaying conversation
 - displaying attributable official-guidance sources returned by the backend
+- distinguishing attributable live web guidance from reviewed official guidance
 - showing progress
 - keeping the current uploaded form's ephemeral field state
 - keeping AI-proposed values separate from confirmed values
@@ -67,6 +68,16 @@ Must not:
 Responsible only for:
 - communicating with Nebius Token Factory
 
+## Tavily Service
+
+Responsible only for:
+- reading server-side Tavily configuration
+- communicating with the Tavily Search API
+- mapping timeouts, provider failures, and malformed responses to controlled errors
+
+It does not decide when to search, build form-specific queries, rank sources,
+or process conversation state.
+
 ## Form Agent
 
 Responsible for:
@@ -74,6 +85,9 @@ Responsible for:
 - validating explicit conversation events and state transitions
 - deciding what context goes to Nemotron
 - selecting bounded official guidance for an exact allowlisted form version
+- deterministically deciding whether an informational turn needs live guidance
+- building non-personal search queries from bounded form and field metadata
+- validating, ranking, labeling, and bounding live sources before model use
 - processing model actions
 - deciding when clarification is needed
 - marking proposed changes as requiring confirmation
@@ -126,9 +140,9 @@ official source. If no exact source is available for an official-purpose or
 rule question, the agent says so instead of substituting another form version
 or inferring an answer.
 
-## Planned Tavily integration (Milestone 6.13.1)
+## Tavily integration (Milestone 6.13.1)
 
-Tavily will be a retrieval tool inside the existing Form Agent, not a second
+Tavily is a retrieval tool inside the existing Form Agent, not a second
 agent and not a frontend integration. The existing Form Agent endpoint remains
 the only conversational API:
 
@@ -255,13 +269,14 @@ weakening invention checks.
 For agent or voice input:
 1. The frontend sends the explicit event, conversation state, and bounded form
    context to the Form Agent.
-2. For explanatory turns, the Form Agent may select bounded local guidance for
-   an exact allowlisted form version and active field.
+2. For explanatory turns, the Form Agent first selects bounded local guidance
+   for an exact allowlisted form version and active field. If that is
+   insufficient, deterministic policy may perform one bounded Tavily lookup.
 3. The Form Agent first asks the selected field-type adapter to match or clarify
    common answers; genuinely complex interpretation can fall through to
    Nemotron.
 4. The Form Agent returns a typed action, resulting conversation state, and any
-   attributable guidance used by the explanation.
+   attributable reviewed or live guidance used by the explanation.
 5. Backend code validates every deterministic or model proposal through the
    field adapter and the field's ID, type, and available options.
 6. The frontend asks the user to confirm, edit, reject, or skip the proposal.
