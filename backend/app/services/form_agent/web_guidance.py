@@ -11,6 +11,7 @@ from urllib.parse import urlparse, urlunparse
 
 from app.services.tavily_service import TavilySearchResult
 
+from .conversation_policy import message_needs_external_guidance
 from .models import (
     FocusFieldEvent,
     ExplainAction,
@@ -65,7 +66,7 @@ _PURPOSE_PATTERN = re.compile(
 )
 _REQUIREMENTS_PATTERN = re.compile(
     r"\b(?:official|instructions?|required?|requirements?|rules?|must|"
-    r"allowed?)\b",
+    r"allowed?|legal(?:ly)?|eligib(?:le|ility)|mandatory|optional)\b",
     re.IGNORECASE,
 )
 _WHERE_PATTERN = re.compile(
@@ -77,8 +78,7 @@ _MEANING_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _PERSONAL_ADVICE_PATTERN = re.compile(
-    r"(?:\b(?:am\s+i|do\s+i)\s+(?:eligible|qualify)\b|"
-    r"\bwhat\s+should\s+i\s+(?:put|answer|choose|claim)\b|"
+    r"(?:\bwhat\s+should\s+i\s+(?:put|answer|choose|claim)\b|"
     r"\bwhich\s+(?:answer|option)\s+should\s+i\b|"
     r"\b(?:legal|financial|medical|tax)\s+advice\b)",
     re.IGNORECASE,
@@ -245,7 +245,7 @@ def plan_web_guidance_lookup(
     request: FormAgentRequest,
     guidance: tuple[OfficialGuidanceCitation, ...],
 ) -> Optional[WebGuidanceLookup]:
-    if guidance or request.conversation_state.phase == "awaiting_confirmation":
+    if guidance:
         return None
     if not isinstance(request.event, (MessageEvent, FocusFieldEvent)):
         return None
@@ -262,6 +262,8 @@ def plan_web_guidance_lookup(
 
     message = request_message(request)
     if _PERSONAL_ADVICE_PATTERN.search(message) is not None:
+        return None
+    if not message_needs_external_guidance(request):
         return None
     topic = _classify_topic(message)
     if topic is None:

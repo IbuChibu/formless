@@ -51,6 +51,12 @@ _DATE_FRAMES = (
         r"(?P<value>.+)$",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"^i\s+(?:started|began)\s+(?:living|residing)"
+        r"(?:\s+at\s+(?:that|the)\s+address|\s+there|\s+here)?"
+        r"\s+(?:on\s+)?(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
 ) + _GENERAL_FRAMES
 _ADDRESS_FRAMES = (
     re.compile(
@@ -88,6 +94,11 @@ _NUMERIC_DATE_PATTERN = re.compile(
 _ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MONTH_YEAR_PATTERN = re.compile(
     r"^(?P<month>\d{1,2})[/.](?P<year>\d{4})$"
+)
+_SEASON_YEAR_PATTERN = re.compile(
+    r"\b(?P<season>spring|summer|autumn|fall|winter)\s+"
+    r"(?P<year>\d{4})\b",
+    re.IGNORECASE,
 )
 _POSTCODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 -]{0,10}[A-Za-z0-9]$")
 _PHONE_PATTERN = re.compile(
@@ -151,6 +162,21 @@ def adapt_date(field: FormAgentField, message: str) -> AnswerAdapterResult:
     candidate = preflight_message(message, accepted_shape=accepted_shape)
     if not isinstance(candidate, str):
         return candidate
+    season_year = _SEASON_YEAR_PATTERN.search(candidate)
+    if season_year is not None:
+        period = season_year.group(0)
+        return ClarificationNeeded(
+            reason=(
+                f"You said {period}, which identifies a period but not one "
+                "exact date. Do you remember the month and day, or only "
+                f"{period}?"
+            ),
+            accepted_shape=(
+                f"If you know the complete date, {accepted_shape[0].lower()}"
+                f"{accepted_shape[1:]} Otherwise, keep the answer at the "
+                "precision you actually know."
+            ),
+        )
     if _UNCERTAIN_PATTERN.search(candidate) or _RELATIVE_DATE_PATTERN.search(
         candidate
     ):

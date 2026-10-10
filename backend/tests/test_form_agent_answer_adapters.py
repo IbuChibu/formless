@@ -122,6 +122,33 @@ def test_date_adapter_returns_form_compatible_dates(
     assert result == MatchedAnswer(expected)
 
 
+def test_date_adapter_extracts_a_clear_date_from_a_conversational_answer() -> None:
+    result = interpret_answer(
+        _field(
+            field_id="move_in_date",
+            label="Date you began living at your usual address",
+        ),
+        "I started living there on 12 June 2019.",
+    )
+
+    assert result == MatchedAnswer("12 June 2019")
+
+
+def test_date_adapter_acknowledges_partial_season_information() -> None:
+    result = interpret_answer(
+        _field(
+            field_id="move_in_date",
+            label="Date you began living at your usual address",
+        ),
+        "I think it was around summer 2019.",
+    )
+
+    assert isinstance(result, ClarificationNeeded)
+    assert "You said summer 2019" in result.reason
+    assert "month and day" in result.reason
+    assert "precision you actually know" in result.accepted_shape
+
+
 @pytest.mark.parametrize(
     "answer",
     ["03/04/1990", "31/02/2020", "around March 1990", "next Friday"],

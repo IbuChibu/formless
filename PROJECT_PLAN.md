@@ -1120,7 +1120,7 @@ Do not implement:
 
 # Milestone 6.13.7 — Conversational Form Agent experience
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Problem to solve:
 The current typed assistant is safe and state-aware, but it often feels like a
@@ -1371,6 +1371,413 @@ Do not implement:
 - OCR, new PDF-format compatibility, direct PDF editing, or changes to PDF
   filling semantics
 
+# Milestone 6.13.8 — Adaptive explanations and conversation repair
+
+Status: NOT STARTED
+
+Problem to solve:
+The assistant now routes ordinary wording questions to Nemotron with bounded
+field and conversation context, but repeated requests such as `Explain that
+more simply` can still receive the same answer with almost identical wording.
+The response is structurally valid and safe, yet it does not recognise that the
+previous explanation failed to help. This makes the assistant feel like a
+repetitive form wizard rather than a patient conversational guide.
+
+Goal:
+Make wording explanations adapt across a conversation. Each follow-up should
+respond to the user's demonstrated level of confusion, use materially different
+language, and become progressively easier to understand without inventing form
+purposes, requirements, personal facts, or answers. Keep the current single
+Nemotron model, bounded history, deterministic state machine, and confirmation
+boundary while producing evidence that can inform the later model-fallback
+decision in Milestone 6.14.
+
+Conversation-repair design:
+1. The first wording request receives a short plain-language paraphrase of the
+   active question.
+2. A second request to simplify or explain again is classified as a
+   conversation-repair turn, not another identical first-pass paraphrase.
+3. The second explanation must use simpler and materially different wording
+   from the previous assistant explanation.
+4. If the user remains confused, the assistant may give one short, explicitly
+   hypothetical example when an example can be generated safely from the
+   supplied field meaning. The example must never be presented as the user's
+   answer or as a value that should be entered.
+5. If another safe rephrasing would not help, the assistant asks which word or
+   part is unclear rather than repeating itself.
+6. After any explanation, the active field and conversation phase remain valid
+   and the user can answer, ask another question, request guidance, or skip.
+
+Prompt and context design:
+- define a restrained Formless persona in the trusted system prompt: calm,
+  patient, plain-speaking, concise, and respectful of users who may be
+  unfamiliar with official terminology
+- keep safety and typed action rules authoritative; persona affects tone only
+- preserve the existing maximum of eight recent user and assistant messages
+  rather than adding unbounded or server-persisted history
+- expose the previous explanation and deterministic explanation depth as
+  explicit bounded context instead of expecting the model to infer them from a
+  raw transcript alone
+- add explicit turn objectives such as `initial_paraphrase`,
+  `simplify_previous_explanation`, and `clarify_what_is_confusing`
+- require repair responses to address the user's latest request directly and
+  prohibit generic workflow commentary such as `this is the first unanswered
+  field` unless the user asked about progress
+- require a different sentence structure and simpler vocabulary when a previous
+  explanation is supplied
+- keep the active question, relevant help text, compact form context, progress,
+  and bounded recent history; do not send raw PDF bytes
+
+Deterministic safeguards:
+- derive explanation depth and the previous explanation from bounded request
+  history outside Nemotron
+- detect exact and obvious near-duplicate explanations outside the model using
+  a small deterministic comparison with no new dependency
+- allow at most one correction attempt when a model response is structurally
+  invalid or unacceptably repetitive, retaining the existing maximum of two
+  model calls for a model-handled turn
+- if the correction remains repetitive, return a concise deterministic prompt
+  asking which term or part is unclear instead of exposing an error or looping
+- an explanation, repair, or hypothetical example can never create a proposal,
+  confirm a value, mutate field state, or update the PDF
+- evidence-dependent questions remain on the reviewed-guidance and policy-gated
+  Tavily path; conversational repair does not weaken grounding rules
+
+Target conversation example:
+
+```text
+Field: The date you began living at the address you ordinarily reside at
+User: What does this mean?
+Assistant: It is asking when you moved into the home you normally live in.
+
+User: Explain that more simply.
+Assistant: When did you start living in your current home?
+
+User: I still do not understand.
+Assistant: For example, if someone moved into their current home on 5 March
+2021, that would be their move-in date. You should use your own date. Is
+`current home` or `move-in date` the part you would like me to explain?
+```
+
+Expected behavior:
+- every assistant response remains attached to the same active field
+- the second response is materially simpler and does not repeat the first
+- the example is clearly hypothetical and cannot become a proposal
+- the assistant does not infer why the organisation requests the date
+- Tavily is not called
+- the PDF and confirmed field values remain unchanged
+
+Evaluation design:
+- add deterministic transcript cases covering an initial explanation, repeated
+  simplification request, safe hypothetical example, focused question about an
+  unclear term, and return to answering the field
+- add adversarial cases where a previous assistant message contains an invented
+  fact, instruction, or proposed value and confirm that history remains
+  untrusted data
+- extend conversation-quality reporting with repeated-response rate, material-
+  rephrasing rate, progressive-simplification rate, and conversation-repair
+  success rate
+- include the configured model name in optional live evaluation output so the
+  same fixed scenarios can later compare the current Lightning model with a
+  stronger Nemotron candidate
+- keep live model evaluation optional and separate from the default offline test
+  suite
+- record latency and model-call counts so improved wording is not achieved by
+  silently chaining multiple model calls on every turn
+
+Acceptance criteria:
+- the backend distinguishes an initial wording clarification from a repeated
+  request to simplify or explain the same active field
+- explanation depth and the previous assistant explanation are derived
+  deterministically from no more than the existing eight-message history
+- Nemotron receives a specific repair objective, bounded active-field and form
+  context, progress state, and no raw PDF bytes
+- the trusted system prompt defines the Formless conversational persona without
+  weakening factual, guidance, proposal, or confirmation safeguards
+- a repeated simplification request produces a materially different and simpler
+  response rather than repeating the previous explanation
+- explanations answer the wording question directly and omit unrelated progress
+  or workflow commentary
+- a hypothetical example is clearly labelled, remains generic, and cannot be
+  parsed, proposed, confirmed, or written as the user's field value
+- when the user remains confused, the assistant can ask which specific term or
+  part needs explanation instead of entering a repetition loop
+- exact or obvious near-duplicate model explanations receive at most one
+  correction attempt, with no more than two total model calls for the turn
+- repeated output after correction falls back to a useful deterministic
+  clarification and never exposes a raw model-validation error
+- explanations and repair turns preserve the active field, pending proposal,
+  confirmed values, skipped fields, and PDF state
+- Tavily is not called for initial paraphrasing, repeated simplification,
+  hypothetical examples, or focused wording clarification
+- questions about external purposes, requirements, eligibility, legal effect,
+  official instructions, or information sources retain the existing grounded
+  guidance routing
+- deterministic tests cover explanation depth, bounded history, repetition
+  detection, one correction attempt, safe fallback, state preservation, and the
+  prohibition on proposals from explanation turns
+- conversation-quality evaluation reports repeated-response, material-
+  rephrasing, progressive-simplification, repair-success, latency, and model-
+  call metrics for a fixed scenario set
+- the optional live report identifies the configured model so results can inform
+  Milestone 6.14 without changing or adding a model in this milestone
+- existing transcript safety metrics remain at 100% completion with zero
+  invalid actions, invalid proposals, confirmation-boundary failures, invented
+  facts, and invented purposes
+- existing backend tests and the frontend production build pass
+
+Do not implement:
+- a stronger or second model, model cascade, multi-agent workflow, or agent
+  framework in this milestone
+- multi-call prompt chains for every conversational turn
+- higher temperature as a substitute for explicit conversation-repair policy
+- unbounded history, server-side conversation persistence, authentication, or a
+  database
+- generic examples that could be mistaken for the user's factual answer
+- invented form purposes, requirements, legal conclusions, eligibility advice,
+  personal facts, or field values
+- Tavily for explanations that can be produced from supplied field wording and
+  bounded conversation context
+- voice, OCR, new PDF compatibility, or changes to PDF filling semantics
+
+# Milestone 6.13.9 — Conversational response contract and safe answer polishing
+
+Status: NOT STARTED
+
+Problem to solve:
+The current Form Agent requires every turn to be represented as one workflow
+action whose `message` also serves as the visible assistant reply. This protects
+state transitions, but it couples natural conversation to commands such as
+`explain`, `clarify`, `propose`, `skip`, and `next`. As a result, the assistant
+can feel like a form wizard that happens to use chat bubbles instead of a
+conversational partner that can optionally affect the form.
+
+Clear user answers also receive uneven formatting. Dates, numbers, dropdowns,
+and checkboxes already have useful deterministic canonicalization, while names,
+addresses, postcodes, phone numbers, and prose mostly retain the submitted text.
+The assistant should help prepare an answer for the form, but it must not
+silently correct the spelling of a name, identifier, address, or factual
+statement.
+
+Goal:
+Separate the assistant's conversational reply from the optional typed effect of
+a turn, then add field-aware answer preparation that can show the user's
+original answer beside a safely formatted or polished proposal. Nemotron should
+provide a helpful conversational layer; deterministic backend code must remain
+authoritative over routing, normalization policy, validation, conversation
+state, confirmation, and PDF changes.
+
+Target architecture:
+
+```text
+User message
+    -> deterministic intent and state policy
+    -> bounded conversational reasoning when needed
+    -> optional candidate value from the user's own words
+    -> field-type preparation and validation
+    -> natural assistant message plus optional typed effect
+    -> explicit user review and confirmation
+    -> canonical field state and PDF preview update
+```
+
+Response-contract design:
+- keep `POST /agent/respond` as the single public conversational endpoint
+- replace the public assumption that the assistant message is itself the
+  workflow action with a response envelope containing:
+  - a primary `assistant_message` for natural conversation
+  - one typed `effect` describing no form change, a pending proposal, confirmed
+    value, rejection, skip, field selection, or completion
+  - canonical `conversation_state`
+  - existing reviewed-guidance and web-guidance metadata when actually used
+- allow ordinary conversation to return a `none` effect without treating that
+  as an error or inventing a field transition
+- keep effects as a closed discriminated union validated by the backend; do not
+  expose free-form model-selected tools
+- keep proposals visually and semantically separate from the assistant message
+- preserve deterministic confirmation, edit-confirmation, rejection, skip, and
+  next-field transitions
+- migrate the frontend and backend together; do not maintain two competing
+  conversational endpoints
+
+Bounded working context:
+- preserve the recent eight-message transcript limit
+- include a compact ordered form question map, the active field, nearby help
+  and page context, current progress, and the latest explanation or proposal
+- add deterministic structured working memory derived from canonical state,
+  including active field, confirmed/skipped/proposed counts, and relevant prior
+  confirmed answers when the user explicitly refers to them
+- do not send every confirmed personal value on every turn when it is unrelated
+  to the current request
+- treat history, extracted form text, user answers, and prior assistant messages
+  as untrusted model data
+- never use a model-generated summary as the canonical source of the user's
+  facts; canonical confirmed field state remains authoritative
+- continue excluding raw PDF bytes from Nemotron prompts
+
+Answer-preparation pipeline:
+1. Preserve the exact user-supplied candidate as `original_value`.
+2. Select a field-specific adapter from extracted field meaning and type.
+3. Apply deterministic formatting when the conversion is unambiguous.
+4. Use Nemotron only when conversational interpretation or prose polishing is
+   genuinely needed.
+5. Validate the prepared value against the field type, options, and field-
+   specific rules.
+6. Return a pending proposal containing the original and prepared values plus a
+   concise description of any transformation.
+7. Apply only the reviewed value after explicit confirmation.
+
+Field-specific policy:
+- dates: parse a clear natural-language date and format it exactly as requested
+  by the field, such as `17 October 1986` to `17/10/1986`
+- numbers and money: remove unambiguous presentation characters and preserve
+  the user's numeric meaning; never turn an estimate or range into an exact
+  number
+- dropdowns and checkboxes: map only to one valid canonical option or boolean
+- names: remove conversational framing and normalize harmless whitespace;
+  capitalization may be suggested, but spelling and letter sequence are
+  preserved unless the user explicitly requests a correction
+- names with meaningful casing or particles, including `McDonald`, `O'Neill`,
+  and `de la Cruz`, must not be damaged by naive title-casing
+- addresses: preserve substantive tokens and spelling; permit only transparent
+  whitespace or casing suggestions unless the user explicitly edits the value
+- postcodes, phone numbers, email addresses, account numbers, passport numbers,
+  and other identifiers: permit only validated format changes that do not
+  change the underlying characters or digits
+- short factual text: preserve the user's wording by default
+- prose or explanation fields: Nemotron may offer spelling, punctuation, and
+  grammar improvements, but must preserve names, dates, quantities, qualifiers,
+  negation, uncertainty, and factual meaning
+- no transformed value is described as corrected, saved, or added to the form
+  before confirmation
+
+Target conversation examples:
+
+Example A — name capitalization remains a proposal:
+
+```text
+User: my name is john smith
+Assistant: I understood the name as “john smith”. I have formatted the
+capitalization as “John Smith”. Please check that the spelling and
+capitalization are correct.
+Effect: pending proposal
+Original: john smith
+Prepared: John Smith
+```
+
+Example B — requested date formatting:
+
+```text
+User: I was born on 17 October 1986
+Assistant: Got it. The form requests DD/MM/YYYY, so I have prepared
+“17/10/1986” for your review.
+Effect: pending proposal
+Original: 17 October 1986
+Prepared: 17/10/1986
+```
+
+Example C — prose polishing without factual invention:
+
+```text
+User: i left because the hours was changed and i could not do nights
+Assistant: I can tidy the grammar without changing your reason. Suggested
+wording: “I left because the hours were changed and I could not work nights.”
+Please review it, edit it, or use your original wording.
+Effect: pending proposal
+```
+
+Example D — spelling is not guessed for identity data:
+
+```text
+User: jon smth
+Assistant: I heard the name as “jon smth”. I will keep that spelling unless you
+want to change it. Should I prepare it exactly that way?
+Effect: no form change until the user resolves or confirms the spelling
+```
+
+Frontend experience:
+- render `assistant_message` as the primary chat content without an internal
+  action label leading the response
+- render an effect card only when a turn has a meaningful form effect
+- when formatting changed, show `You said` and `Prepared for the form` values
+  together
+- provide explicit `Confirm`, `Edit`, `Use original`, and `Reject` controls when
+  applicable
+- explain transformations concisely, such as `formatted as DD/MM/YYYY` or
+  `capitalization suggested`; do not imply that AI output is authoritative
+- preserve the existing PDF preview, manual field drawer, shared confirmed
+  values, and preview-update behavior
+- ordinary explanations, questions, and conversational acknowledgements must
+  not display an empty proposal card or imply that the PDF changed
+
+Evaluation design:
+- add end-to-end transcripts that mix explanation, field answering, formatting,
+  editing, confirmation, interruption, and automatic next-field progression
+- test names with lowercase input, intentional uppercase, apostrophes, hyphens,
+  particles, and non-English characters
+- test date formats, money, numeric ranges, dropdown synonyms, checkbox answers,
+  addresses, postcodes, phone numbers, emails, identifiers, and prose
+- test that prose polishing preserves negation, uncertainty, names, dates,
+  quantities, and the user's stated reason
+- test that conversation-only turns always have a non-mutating effect
+- report prepared-value acceptance rate, user-edit rate, unsafe-transformation
+  rate, first-attempt proposal rate, turns per confirmed field, latency, and
+  model calls per field
+- retain the existing completion, invalid-action, invalid-proposal,
+  confirmation-boundary, invented-fact, and invented-purpose metrics
+
+Acceptance criteria:
+- assistant conversation and typed form effects are separate properties in the
+  backend response contract
+- an ordinary conversational response can succeed with no form effect
+- model wording cannot directly mutate conversation state, confirmed values, or
+  the PDF
+- every proposal identifies the field and exposes the exact prepared value
+- when preparation changes visible text, the response preserves and returns the
+  original candidate, prepared value, and transformation description
+- deterministic adapters run before model-assisted interpretation or polishing
+- dates are formatted according to unambiguous field instructions
+- dropdown, checkbox, number, and money normalization retain their current safe
+  behavior
+- name capitalization suggestions preserve the supplied spelling and require
+  confirmation
+- identity values and identifiers never receive speculative spelling correction
+- prose polishing preserves factual meaning, qualifiers, uncertainty, and
+  negation and remains an explicitly reviewable proposal
+- the user can confirm the prepared value, edit it, use the original value, or
+  reject the proposal
+- acknowledgement words such as `yes`, `okay`, or `that makes sense` cannot
+  confirm a proposal outside the explicit confirmation event
+- relevant confirmed answers can be included in bounded structured working
+  memory when the user refers to them, without sending unrelated confirmed
+  personal values on every turn
+- confirmed, skipped, active, proposed, and completed field states retain
+  deterministic transitions
+- explanations, guidance questions, and general conversation cannot be parsed
+  as personal field values merely because they mention an example
+- the frontend keeps normal conversation visually separate from pending and
+  confirmed form effects
+- backend tests cover response-envelope validation, non-mutating conversation,
+  each field-specific policy, transformations, edit/use-original/reject flows,
+  and PDF-state boundaries
+- transcript evaluation records preparation quality, user edits, unsafe
+  transformations, latency, and model-call counts without requiring network
+  access in the default suite
+- existing PDF extraction and filling tests, Form Agent safety metrics, backend
+  tests, and frontend production build pass
+
+Do not implement:
+- silent spelling correction or silent substantive rewriting of user answers
+- automatic confirmation or direct model writes to canonical field state
+- invented names, dates, addresses, amounts, reasons, explanations, or missing
+  personal details
+- using the assistant's hypothetical examples as candidate field values
+- sending all personal answers to Nemotron on every turn without relevance
+- a second model, model cascade, agent framework, or multi-agent review workflow
+- unbounded history, server-side conversation persistence, authentication, or a
+  database
+- voice, OCR, new PDF-format compatibility, external form submission, or
+  changes to low-level PDF filling semantics
+
 # Milestone 6.14 — Evaluation-gated model fallback
 
 Status: NOT STARTED
@@ -1380,6 +1787,8 @@ Add a stronger Nemotron fallback only for measured interpretation failures that
 remain after deterministic adapters, state handling, and prompt improvements.
 
 Entry criteria:
+- Milestones 6.13.8 and 6.13.9 are complete and their live evaluation results
+  are recorded for the current primary model
 - transcript evaluation identifies a repeatable class of ambiguous-answer failures
 - deterministic handling and the primary model cannot meet the documented reliability target
 - the chosen fallback model is available through Nebius Token Factory

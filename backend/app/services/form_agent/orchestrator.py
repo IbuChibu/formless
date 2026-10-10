@@ -22,6 +22,7 @@ from .conversation_policy import (
     normalize_action_message,
     response_for_action,
     unexpected_navigation_clarification,
+    validate_action_for_turn,
     validate_event_transition,
 )
 from .models import (
@@ -73,6 +74,13 @@ class FormAgentService:
     async def respond(self, request: FormAgentRequest) -> FormAgentResponse:
         validate_event_transition(request)
 
+        policy_action = deterministic_action(
+            request,
+            self._answer_interpreter,
+        )
+        if policy_action is not None:
+            return response_for_action(policy_action, request)
+
         guidance = select_official_guidance(request)
         if guidance:
             guidance_action = authoritative_guidance_action(request, guidance)
@@ -82,13 +90,6 @@ class FormAgentService:
                     request,
                     guidance,
                 )
-
-        policy_action = deterministic_action(
-            request,
-            self._answer_interpreter,
-        )
-        if policy_action is not None:
-            return response_for_action(policy_action, request)
 
         web_guidance = None
         web_lookup = plan_web_guidance_lookup(request, guidance)
@@ -153,6 +154,7 @@ class FormAgentService:
                 action = canonicalize_proposal_value(action, request)
                 validate_guidance_action(action, guidance)
                 validate_web_guidance_action(action, web_guidance)
+                validate_action_for_turn(action, request)
                 navigation_clarification = (
                     unexpected_navigation_clarification(action, request)
                 )

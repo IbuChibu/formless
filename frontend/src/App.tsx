@@ -255,6 +255,7 @@ function App() {
   const agentControllerRef = useRef<AbortController | null>(null);
   const agentRequestInFlightRef = useRef(false);
   const agentMessageIdRef = useRef(0);
+  const agentInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -583,7 +584,7 @@ function App() {
     agentControllerRef.current = controller;
     setAgentStatus("loading");
     setAgentActivity(
-      agentRequestMayUseGuidance(request) ? "guidance" : "responding",
+      agentRequestNeedsExternalGuidance(request) ? "guidance" : "responding",
     );
     setAgentError(null);
     setFailedAgentRequest(null);
@@ -1063,10 +1064,19 @@ function App() {
                     aria-label="Recent form assistant conversation"
                     role="log"
                   >
-                    {agentMessages.map((message) => {
+                    {agentMessages.map((message, messageIndex) => {
                       const messageField = fields.find(
                         (field) => field.id === message.fieldId,
                       );
+                      const isLatestMessage =
+                        messageIndex === agentMessages.length - 1;
+                      const canOfferExplanationActions =
+                        isLatestMessage &&
+                        message.role === "assistant" &&
+                        message.action === "explain" &&
+                        message.fieldId === agentActiveFieldId &&
+                        activeAgentFieldState?.status === "unanswered" &&
+                        pendingProposal === null;
 
                       return (
                         <article
@@ -1083,20 +1093,24 @@ function App() {
                             <strong>
                               {message.role === "user"
                                 ? "You"
-                                : getAgentActionLabel(message.action)}
+                                : "Form assistant"}
                             </strong>
-                            {messageField ? (
-                              <span>
-                                {messageField.label ||
-                                  humanizeFieldId(messageField.id)}
-                              </span>
-                            ) : null}
+                            <div>
+                              {message.role === "assistant" &&
+                              message.action &&
+                              message.action !== "explain" ? (
+                                <small>
+                                  {getAgentActionLabel(message.action)}
+                                </small>
+                              ) : null}
+                              {messageField ? (
+                                <span>
+                                  {messageField.label ||
+                                    humanizeFieldId(messageField.id)}
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
-                          {message.guidance?.length || message.webGuidance ? (
-                            <span className="agent-explanation-label">
-                              Assistant explanation
-                            </span>
-                          ) : null}
                           <p>{message.content}</p>
                           {message.guidance?.map((citation) => (
                             <aside
@@ -1119,7 +1133,8 @@ function App() {
                               </small>
                             </aside>
                           ))}
-                          {message.webGuidance ? (
+                          {message.webGuidance &&
+                          message.webGuidance.sources.length > 0 ? (
                             <aside
                               className={`agent-web-guidance ${message.webGuidance.status}`}
                             >
@@ -1149,23 +1164,24 @@ function App() {
                                   </small>
                                 </article>
                               ))}
-                              {["empty", "unavailable"].includes(
-                                message.webGuidance.status,
-                              ) &&
-                              message.webGuidanceRetry ? (
-                                <button
-                                  type="button"
-                                  disabled={agentStatus === "loading"}
-                                  onClick={() =>
-                                    void requestAgent(
-                                      message.webGuidanceRetry as AgentRequest,
-                                    )
-                                  }
-                                >
-                                  Search again
-                                </button>
-                              ) : null}
                             </aside>
+                          ) : null}
+                          {message.webGuidance &&
+                          message.webGuidance.sources.length === 0 &&
+                          message.webGuidanceRetry ? (
+                            <div className="agent-guidance-recovery">
+                              <button
+                                type="button"
+                                disabled={agentStatus === "loading"}
+                                onClick={() =>
+                                  void requestAgent(
+                                    message.webGuidanceRetry as AgentRequest,
+                                  )
+                                }
+                              >
+                                Retry guidance check
+                              </button>
+                            </div>
                           ) : null}
                           {message.action === "propose" &&
                           message.proposedValue !== undefined ? (
@@ -1178,6 +1194,51 @@ function App() {
                                 This suggestion never changes the field or PDF
                                 automatically.
                               </small>
+                            </div>
+                          ) : null}
+                          {canOfferExplanationActions ? (
+                            <div
+                              className="agent-conversation-actions"
+                              aria-label="Continue this conversation"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => agentInputRef.current?.focus()}
+                              >
+                                Answer now
+                              </button>
+                              <button
+                                type="button"
+                                disabled={agentStatus === "loading"}
+                                onClick={() =>
+                                  sendAgentMessage("Explain that more simply.")
+                                }
+                              >
+                                Explain more
+                              </button>
+                              <button
+                                type="button"
+                                disabled={agentStatus === "loading"}
+                                onClick={() =>
+                                  sendAgentMessage(
+                                    "Check official guidance for this question.",
+                                  )
+                                }
+                              >
+                                Check guidance
+                              </button>
+                              <button
+                                type="button"
+                                disabled={agentStatus === "loading"}
+                                onClick={() =>
+                                  sendAgentEvent({
+                                    type: "skip",
+                                    field_id: message.fieldId as string,
+                                  })
+                                }
+                              >
+                                Skip for now
+                              </button>
                             </div>
                           ) : null}
                         </article>
@@ -1315,7 +1376,7 @@ function App() {
                         type="button"
                         onClick={() => void requestAgent(failedAgentRequest)}
                       >
-                        {agentRequestMayUseGuidance(failedAgentRequest)
+                        {agentRequestNeedsExternalGuidance(failedAgentRequest)
                           ? "Retry guidance search"
                           : "Retry message"}
                       </button>
@@ -1357,6 +1418,7 @@ function App() {
                     </label>
                     <div className="ai-question-controls">
                       <input
+                        ref={agentInputRef}
                         id="agent-message"
                         type="text"
                         maxLength={2000}
@@ -2230,7 +2292,12 @@ function validateAgentResponseState(
     (action.action === "rejected" && state.phase === "awaiting_answer") ||
     (action.action === "skip" &&
       (progressedToNextField || completedForm)) ||
-    (action.action === "explain" && state.phase === "awaiting_answer") ||
+    (action.action === "explain" &&
+      [
+        "awaiting_answer",
+        "awaiting_clarification",
+        "awaiting_confirmation",
+      ].includes(state.phase)) ||
     (action.action === "clarify" &&
       ["awaiting_clarification", "awaiting_confirmation"].includes(
         state.phase,
@@ -2337,7 +2404,7 @@ function getWebSourceQualityLabel(
   }[quality];
 }
 
-function agentRequestMayUseGuidance(request: AgentRequest): boolean {
+function agentRequestNeedsExternalGuidance(request: AgentRequest): boolean {
   if (
     request.event.type !== "message" &&
     request.event.type !== "focus_field"
@@ -2345,12 +2412,16 @@ function agentRequestMayUseGuidance(request: AgentRequest): boolean {
     return false;
   }
   const message = request.event.content;
-  return (
-    message.trim().endsWith("?") ||
-    /\b(?:why|what|which|who|when|where|how|explain|meaning|mean|instructions?|required?|requirements?|rules?|purpose|help|search|find)\b/i.test(
-      message,
-    )
-  );
+  return [
+    /\bwhy\b/i,
+    /\b(?:what|which)\s+(?:is|was|are|were)\s+(?:the\s+)?(?:purpose|reason)\b/i,
+    /\b(?:purpose|reason)\s+(?:of|for)\b/i,
+    /\b(?:is|are|was|were|am)\b.{0,80}\b(?:legally\s+required|required|mandatory|optional|allowed|eligible)\b/i,
+    /\bmust\s+(?:i|we|this|that|the)\b/i,
+    /\b(?:legal\s+(?:effect|rules?|obligation)|law|eligibility\s+requirements?|official\s+(?:instructions?|guidance|worksheet|form)|current\s+guidance|check\s+(?:the\s+)?(?:web|guidance)|search(?:\s+(?:the\s+)?web)?|sources?)\b/i,
+    /\b(?:what|which|do|does|can|could)\b.{0,60}\binstructions?\b/i,
+    /\bwhere\s+(?:can|could|do|would)\s+i\s+(?:find|locate|obtain|look\s+up)\b/i,
+  ].some((pattern) => pattern.test(message));
 }
 
 function createInitialConversationState(): ConversationState {

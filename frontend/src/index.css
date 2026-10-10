@@ -888,6 +888,26 @@ h1 {
   text-transform: uppercase;
 }
 
+.agent-message-meta > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.agent-message-meta small {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border-radius: 999px;
+  color: #647168;
+  background: #edf2ee;
+  font-size: 0.54rem;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .agent-message.clarify .agent-message-meta strong {
   color: #8a611e;
 }
@@ -1031,6 +1051,37 @@ h1 {
 }
 
 .agent-web-guidance > button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.agent-guidance-recovery,
+.agent-conversation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-guidance-recovery button,
+.agent-conversation-actions button {
+  padding: 6px 8px;
+  border: 1px solid #c6d7ca;
+  border-radius: 7px;
+  color: #3d5d47;
+  background: #f7faf8;
+  cursor: pointer;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.agent-guidance-recovery button {
+  border-color: #9fc4cc;
+  color: #245d68;
+  background: #f3f9fa;
+}
+
+.agent-guidance-recovery button:disabled,
+.agent-conversation-actions button:disabled {
   cursor: wait;
   opacity: 0.55;
 }

@@ -192,17 +192,25 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
             turns=(
                 _turn("ask-name", _advance(), "next", "awaiting_answer", "full_name"),
                 _turn(
-                    "unclear-name",
-                    _message("What name format should I use?"),
-                    "clarify",
-                    "awaiting_clarification",
+                    "explain-name-question",
+                    _message("What does this question mean?"),
+                    "explain",
+                    "awaiting_answer",
                     "full_name",
                     model_response=_action_json(
-                        "clarify",
-                        "Please provide the exact full name to enter.",
+                        "explain",
+                        "It asks for the complete name you want entered. You "
+                        "can answer now, ask me to explain more, or skip it.",
                         "full_name",
                     ),
                     expected_model_calls=1,
+                ),
+                _turn(
+                    "check-progress",
+                    _message("What have we completed so far?"),
+                    "explain",
+                    "awaiting_answer",
+                    "full_name",
                 ),
                 _turn(
                     "first-name-proposal",
@@ -217,6 +225,22 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                         "full_name",
                         "same as above",
                     ),
+                ),
+                _turn(
+                    "explain-while-proposal-pending",
+                    _message("Explain that question more simply."),
+                    "explain",
+                    "awaiting_confirmation",
+                    "full_name",
+                    expected_pending_field_id="full_name",
+                    expected_pending_value="Ada Example",
+                    model_response=_action_json(
+                        "explain",
+                        "It asks for your full name. The proposed answer is "
+                        "still waiting for your review.",
+                        "full_name",
+                    ),
+                    expected_model_calls=1,
                 ),
                 _turn(
                     "reject-name",

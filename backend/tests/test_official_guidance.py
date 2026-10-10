@@ -278,7 +278,7 @@ def test_supported_purpose_response_is_attributed_without_model_call() -> None:
     assert nemotron.calls == []
 
 
-def test_field_explanation_sends_bounded_untrusted_guidance_to_model() -> None:
+def test_plain_field_explanation_uses_bounded_context_without_guidance() -> None:
     request = _i9_request("What does family name mean here?")
     nemotron = StubNemotronService(
         '{"action":"explain","message":"Use the relevant family name.",'
@@ -295,10 +295,9 @@ def test_field_explanation_sends_bounded_untrusted_guidance_to_model() -> None:
     context = json.loads(raw_context)
 
     assert response.action.action == "explain"
-    assert len(response.guidance) == 1
-    assert context["official_guidance"][0]["source_id"] == (
-        "uscis-i9-form-2025"
-    )
+    assert response.guidance == []
+    assert context["official_guidance"] == []
+    assert context["conversation"]["turn_objective"] == "paraphrase"
     assert len(json.dumps(context, ensure_ascii=False)) <= (
         MAX_AGENT_CONTEXT_CHARS
     )
@@ -331,7 +330,7 @@ def test_guidance_excerpt_prompt_injection_remains_untrusted_data() -> None:
 
 def test_guidance_cannot_become_a_personal_value_proposal() -> None:
     guidance = select_official_guidance(
-        _i9_request("What does family name mean here?")
+        _i9_request("Where can I find this information?")
     )
     action = ProposeAction(
         action="propose",
@@ -345,7 +344,7 @@ def test_guidance_cannot_become_a_personal_value_proposal() -> None:
 
 
 def test_model_cannot_turn_guidance_into_a_personal_answer() -> None:
-    request = _i9_request("What does family name mean here?")
+    request = _i9_request("Where can I find this information?")
     nemotron = StubNemotronService(
         '{"action":"propose","message":"Use Example.",'
         '"field_id":"Last Name (Family Name)","value":"Example"}'

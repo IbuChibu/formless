@@ -242,11 +242,11 @@ def _results() -> tuple[TavilySearchResult, ...]:
 @pytest.mark.parametrize(
     "message",
     [
-        "What does family name mean?",
-        "Please explain this field.",
+        "Search current guidance: what does family name mean?",
         "Where can I find this information?",
         "Why does the form request this?",
         "What do the instructions require?",
+        "Am I eligible under the official instructions?",
     ],
 )
 def test_policy_allows_only_informational_requests(message: str) -> None:
@@ -262,7 +262,8 @@ def test_policy_allows_only_informational_requests(message: str) -> None:
         "Skip this field.",
         "Next question.",
         "What should I put here?",
-        "Am I eligible?",
+        "What does family name mean?",
+        "Please explain this field.",
         "I need tax advice.",
     ],
 )
@@ -848,7 +849,11 @@ def test_orchestrator_searches_once_and_returns_attributed_web_guidance() -> Non
         FormAgentService(  # type: ignore[arg-type]
             nemotron,
             tavily,
-        ).respond(_w9_request("What name should I enter on line 1?"))
+        ).respond(
+            _w9_request(
+                "Search current guidance: what does line 1 name mean?"
+            )
+        )
     )
 
     assert response.action.action == "explain"
@@ -920,7 +925,11 @@ def test_invalid_web_proposal_gets_one_model_correction_without_researching() ->
         FormAgentService(  # type: ignore[arg-type]
             nemotron,
             tavily,
-        ).respond(_w9_request("What name should I enter on line 1?"))
+        ).respond(
+            _w9_request(
+                "Search current guidance: what does line 1 name mean?"
+            )
+        )
     )
 
     assert response.action.action == "explain"
@@ -936,17 +945,18 @@ def test_empty_search_returns_explanation_without_model_call() -> None:
         FormAgentService(  # type: ignore[arg-type]
             nemotron,
             tavily,
-        ).respond(_request("What does family name mean?"))
+        ).respond(
+            _request(
+                "Search current guidance: what does family name mean?"
+            )
+        )
     )
 
     assert response.action.action == "explain"
     assert response.web_guidance is not None
     assert response.web_guidance.status == "empty"
-    assert (
-        "available form schema and verified guidance do not establish"
-        in response.action.message
-    )
-    assert "I won't infer one" in response.action.message
+    assert "couldn't find relevant verified guidance" in response.action.message
+    assert "I won't guess" in response.action.message
     assert nemotron.calls == []
     assert len(tavily.queries) == 1
 
@@ -971,7 +981,12 @@ def test_irrelevant_results_do_not_reach_nemotron_or_response_citations() -> Non
         FormAgentService(  # type: ignore[arg-type]
             nemotron,
             tavily,
-        ).respond(_sample_request("What does full name mean on this form?"))
+        ).respond(
+            _sample_request(
+                "Search current guidance: what does full name mean on this "
+                "form?"
+            )
+        )
     )
 
     assert response.action.action == "explain"
@@ -979,12 +994,9 @@ def test_irrelevant_results_do_not_reach_nemotron_or_response_citations() -> Non
     assert response.web_guidance.status == "empty"
     assert response.web_guidance.sources == []
     assert response.conversation_state == _sample_request(
-        "What does full name mean on this form?"
+        "Search current guidance: what does full name mean on this form?"
     ).conversation_state
-    assert (
-        "available form schema and verified guidance do not establish"
-        in response.action.message
-    )
+    assert "couldn't find relevant verified guidance" in response.action.message
     assert nemotron.calls == []
     assert len(tavily.queries) == 1
 
@@ -1021,10 +1033,10 @@ def test_household_purpose_abstention_is_grounded_and_preserves_phase() -> None:
     assert response.web_guidance is not None
     assert response.web_guidance.status == "empty"
     assert response.web_guidance.sources == []
-    assert "do not establish the purpose of this question" in (
+    assert "does not establish the purpose of this question" in (
         response.action.message
     )
-    assert "I won't infer one" in response.action.message
+    assert "I won't guess" in response.action.message
     assert all(
         invented_phrase not in response.action.message.casefold()
         for invented_phrase in (
@@ -1082,7 +1094,9 @@ def test_endpoint_returns_typed_unavailable_web_guidance(
     try:
         response = client.post(
             "/agent/respond",
-            json=_request("What does family name mean?").model_dump(),
+                json=_request(
+                    "Search current guidance: what does family name mean?"
+                ).model_dump(),
         )
     finally:
         app.dependency_overrides.clear()
@@ -1093,7 +1107,7 @@ def test_endpoint_returns_typed_unavailable_web_guidance(
     assert payload["web_guidance"]["status"] == "unavailable"
     assert payload["web_guidance"]["sources"] == []
     assert expected_notice in payload["web_guidance"]["notice"]
-    assert "Live web guidance is unavailable right now" in (
+    assert "couldn't check live guidance right now" in (
         payload["action"]["message"]
     )
     assert nemotron.calls == []

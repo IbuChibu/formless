@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from .conversation_policy import turn_objective
 from .models import (
     FormAgentError,
     FormAgentField,
@@ -47,6 +48,10 @@ Rules:
 - Do not invent citations or claims beyond the supplied official_guidance and live_web_guidance snippets.
 - Use only field IDs supplied in the structured context.
 - Use the bounded recent_history only to understand the current conversation.
+- Follow turn_objective. For paraphrase, return an explain action that starts with a direct plain-language restatement of the active question, then offers a useful path back to answering it. Do not claim that guidance is unavailable merely because no external source was supplied.
+- For evidence_grounded_explanation, return an explain action based only on supplied official or live guidance. If neither is supplied, do not invent an external fact, purpose, rule, or source.
+- For clarify_answer, acknowledge the usable part of the user's answer and ask only for the missing or ambiguous part. Never add precision the user did not provide.
+- Resolve words such as this, that, it, the previous question, and explain more simply against the active field and bounded recent history.
 - The compact ordered_questions list is the only form-wide question summary. Detailed metadata is supplied only for active_field and next_unanswered_field.
 - When active_field is null and next_unanswered_field is present, return next for next_unanswered_field.id.
 - A next action must target next_unanswered_field.id, or null when next_unanswered_field is null.
@@ -141,6 +146,15 @@ def build_agent_context(
         ),
         None,
     )
+    confirmed_count = sum(
+        field.status == "confirmed" for field in request.fields
+    )
+    skipped_count = sum(field.status == "skipped" for field in request.fields)
+    proposed_count = int(request.conversation_state.pending_proposal is not None)
+    unanswered_count = max(
+        0,
+        len(request.fields) - confirmed_count - skipped_count - proposed_count,
+    )
     context: dict[str, object] = {
         "form": {
             "title": request.form_context.title,
@@ -166,9 +180,17 @@ def build_agent_context(
             if next_unanswered_field is not None
             else None
         ),
+        "progress": {
+            "supported": len(request.fields),
+            "confirmed": confirmed_count,
+            "proposed": proposed_count,
+            "skipped": skipped_count,
+            "unanswered": unanswered_count,
+        },
         "conversation": {
             "phase": request.conversation_state.phase,
             "event_type": request.event.type,
+            "turn_objective": turn_objective(request),
             "user_message": request_message(request),
             "recent_history": [
                 {

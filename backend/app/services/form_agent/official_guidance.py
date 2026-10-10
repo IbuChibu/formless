@@ -7,9 +7,9 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .conversation_policy import message_needs_external_guidance
 from .models import (
     ExplainAction,
-    FocusFieldEvent,
     FormAgentAction,
     FormAgentError,
     FormAgentRequest,
@@ -28,11 +28,6 @@ _ALLOWED_SOURCE_HOSTS = frozenset(
         "www.uscis.gov",
         "legacy.sba.gov",
     }
-)
-_QUESTION_PATTERN = re.compile(
-    r"\b(?:why|what|which|who|when|where|how|explain|meaning|mean|"
-    r"instructions?|required?|requirements?|rule|purpose|help)\b",
-    re.IGNORECASE,
 )
 _PURPOSE_PATTERN = re.compile(
     r"(?:\bwhy\b|\bpurpose\b|\breason\b|\bused\s+for\b)",
@@ -241,10 +236,7 @@ def validate_guidance_action(
 
 
 def _is_guidance_request(request: FormAgentRequest) -> bool:
-    if isinstance(request.event, FocusFieldEvent):
-        return True
-    message = request_message(request)
-    return message.endswith("?") or _QUESTION_PATTERN.search(message) is not None
+    return message_needs_external_guidance(request)
 
 
 def _entry_score(

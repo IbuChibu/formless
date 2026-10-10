@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import TypeAdapter
 
@@ -86,6 +86,103 @@ _SKIP_REQUEST_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+
+TurnIntent = Literal[
+    "command",
+    "field_answer",
+    "uncertain_answer",
+    "wording_clarification",
+    "evidence_question",
+    "progress_question",
+]
+TurnObjective = Literal[
+    "deterministic_command",
+    "interpret_answer",
+    "clarify_answer",
+    "paraphrase",
+    "evidence_grounded_explanation",
+    "progress_help",
+]
+
+_PROGRESS_QUESTION_PATTERN = re.compile(
+    r"\b(?:what|which)\s+(?:have\s+we|did\s+we|is)\s+"
+    r"(?:complete|completed|done|left|remaining)\b|"
+    r"\bhow\s+(?:far|much)\s+(?:are\s+we|have\s+we)\b|"
+    r"\b(?:show|summari[sz]e|tell\s+me)\s+(?:my\s+|the\s+)?progress\b|"
+    r"\b(?:form\s+)?progress\b|"
+    r"\b(?:come|go|return)(?:\s+back)?\s+to\s+(?:this|it)"
+    r"(?:\s+later)?\b|"
+    r"\b(?:answer|do)\s+(?:this|it)\s+later\b",
+    re.IGNORECASE,
+)
+_EXTERNAL_GUIDANCE_PATTERN = re.compile(
+    r"\bwhy\b|"
+    r"\b(?:what|which)\s+(?:is|was|are|were)\s+(?:the\s+)?"
+    r"(?:purpose|reason)\b|"
+    r"\b(?:purpose|reason)\s+(?:of|for)\b|"
+    r"\b(?:is|are|was|were|am)\b.{0,80}\b(?:legally\s+required|"
+    r"required|mandatory|optional|allowed|eligible)\b|"
+    r"\bmust\s+(?:i|we|this|that|the)\b|"
+    r"\b(?:legal\s+(?:effect|rules?|obligation)|law|eligibility\s+"
+    r"requirements?|official\s+(?:instructions?|guidance|worksheet|form)|"
+    r"current\s+guidance|check\s+(?:the\s+)?(?:web|guidance)|"
+    r"search(?:\s+(?:the\s+)?web)?|sources?)\b|"
+    r"\b(?:what|which|do|does|can|could)\b.{0,60}\binstructions?\b|"
+    r"\bwhere\s+(?:can|could|do|would)\s+i\s+(?:find|locate|obtain|"
+    r"look\s+up)\b",
+    re.IGNORECASE,
+)
+_WORDING_CLARIFICATION_PATTERN = re.compile(
+    r"\b(?:what\s+does\s+(?:this|that|it|the\s+(?:field|question))\s+mean|"
+    r"what\s+is\s+(?:this|that|it|the\s+(?:field|question))\s+asking|"
+    r"explain(?:\s+(?:this|that|it|the\s+(?:field|question)))?|"
+    r"clarify(?:\s+(?:this|that|it|the\s+(?:field|question)))?|"
+    r"rephrase(?:\s+(?:this|that|it|the\s+(?:field|question)))?|"
+    r"plain\s+(?:english|language)|more\s+simply|simpler\s+words?|"
+    r"what\s+should\s+i\s+(?:put|enter|write|answer|choose))\b",
+    re.IGNORECASE,
+)
+_UNCERTAIN_ANSWER_PATTERN = re.compile(
+    r"\b(?:about|approximately|around|roughly|maybe|perhaps|not\s+sure|"
+    r"unsure|i\s+think|probably|possibly|sometime|between)\b",
+    re.IGNORECASE,
+)
+
+
+def classify_turn_intent(request: FormAgentRequest) -> TurnIntent:
+    if not isinstance(request.event, (MessageEvent, FocusFieldEvent)):
+        return "command"
+
+    message = request_message(request).strip()
+    if _PROGRESS_QUESTION_PATTERN.search(message) is not None:
+        return "progress_question"
+    if _EXTERNAL_GUIDANCE_PATTERN.search(message) is not None:
+        return "evidence_question"
+    if (
+        _WORDING_CLARIFICATION_PATTERN.search(message) is not None
+        or message.endswith("?")
+    ):
+        return "wording_clarification"
+    if _UNCERTAIN_ANSWER_PATTERN.search(message) is not None:
+        return "uncertain_answer"
+    return "field_answer"
+
+
+def turn_objective(request: FormAgentRequest) -> TurnObjective:
+    return {
+        "command": "deterministic_command",
+        "field_answer": "interpret_answer",
+        "uncertain_answer": "clarify_answer",
+        "wording_clarification": "paraphrase",
+        "evidence_question": "evidence_grounded_explanation",
+        "progress_question": "progress_help",
+    }[classify_turn_intent(request)]
+
+
+def message_needs_external_guidance(request: FormAgentRequest) -> bool:
+    return classify_turn_intent(request) == "evidence_question"
+
+
 def validate_event_transition(request: FormAgentRequest) -> None:
     phase = request.conversation_state.phase
     event_type = request.event.type
@@ -169,6 +266,7 @@ def deterministic_action(
         else None
     )
     event = request.event
+    turn_intent = classify_turn_intent(request)
 
     if isinstance(event, AdvanceEvent):
         return _next_unanswered_action(request.fields)
@@ -244,6 +342,10 @@ def deterministic_action(
             raise FormAgentTransitionError(
                 "There is no active proposal to review"
             )
+        if turn_intent == "progress_question":
+            return _progress_action(request, active_field)
+        if turn_intent in {"wording_clarification", "evidence_question"}:
+            return None
         return ClarifyAction(
             action="clarify",
             message=(
@@ -259,6 +361,11 @@ def deterministic_action(
     message = request_message(request)
     if _asks_to_skip(message):
         return _skip_action(active_field, request.fields)
+
+    if turn_intent == "progress_question":
+        return _progress_action(request, active_field)
+    if turn_intent in {"wording_clarification", "evidence_question"}:
+        return None
 
     adapter_result = answer_interpreter(active_field, message)
     if isinstance(adapter_result, ClarificationNeeded):
@@ -320,7 +427,15 @@ def response_for_action(
             phase="awaiting_clarification",
             active_field_id=action.field_id,
         )
-    elif isinstance(action, ExplainAction) and preserve_conversation_phase:
+    elif isinstance(action, ExplainAction) and (
+        preserve_conversation_phase
+        or request.conversation_state.phase
+        in {
+            "awaiting_answer",
+            "awaiting_clarification",
+            "awaiting_confirmation",
+        }
+    ):
         state = request.conversation_state
     elif isinstance(action, ExplainAction):
         state = ConversationState(
@@ -370,19 +485,18 @@ def insufficient_guidance_action(
         "requirements": "an authoritative requirement or rule for this question",
         "where_to_find": "a verified place to find this information",
     }[web_guidance.topic]
-    unavailable_prefix = (
-        "Live web guidance is unavailable right now. "
+    opening = (
+        "I couldn't check live guidance right now."
         if web_guidance.status == "unavailable"
-        else ""
+        else "I couldn't find relevant verified guidance for this question."
     )
     return ExplainAction(
         action="explain",
         message=(
-            f"{unavailable_prefix}The available form schema and verified "
-            f"guidance do not establish {subject}, so I won't infer one. "
-            "Check the form's own instructions or ask the issuing "
-            "organisation. You can retry guidance, answer from your own "
-            "knowledge, skip this field, or continue manually."
+            f"{opening} The form wording alone does not establish {subject}, "
+            "so I won't guess. You can retry the guidance check, consult the "
+            "form's instructions or issuing organisation, answer from your "
+            "own knowledge, or skip this field for now."
         ),
         field_id=active_field_id,
     )
@@ -450,6 +564,19 @@ def unexpected_navigation_clarification(
         return None
 
     return _build_field_clarification(field)
+
+
+def validate_action_for_turn(
+    action: FormAgentAction,
+    request: FormAgentRequest,
+) -> None:
+    intent = classify_turn_intent(request)
+    if intent in {"wording_clarification", "evidence_question"} and not (
+        isinstance(action, ExplainAction)
+    ):
+        raise FormAgentError(
+            "This conversational turn requires an explanation action"
+        )
 
 
 def normalize_action_message(
@@ -576,6 +703,44 @@ def _adapter_clarification(
             f"{clarification.accepted_shape}"
         ),
         field_id=field.id,
+    )
+
+
+def _progress_action(
+    request: FormAgentRequest,
+    active_field: FormAgentField,
+) -> ExplainAction:
+    total = len(request.fields)
+    confirmed = sum(field.status == "confirmed" for field in request.fields)
+    skipped = sum(field.status == "skipped" for field in request.fields)
+    proposed = int(request.conversation_state.pending_proposal is not None)
+    unanswered = max(0, total - confirmed - skipped - proposed)
+    question = truncate_text(field_question(active_field), 180).rstrip(" .?")
+
+    parts = [f"You have confirmed {confirmed} of {total} supported questions"]
+    if skipped:
+        parts.append(f"skipped {skipped}")
+    if proposed:
+        parts.append("and have 1 answer awaiting confirmation")
+    else:
+        parts.append(f"and have {unanswered} unanswered")
+
+    if proposed:
+        recovery = (
+            "You can review that proposal, ask me to explain the question, "
+            "reject it, or skip it."
+        )
+    else:
+        recovery = (
+            "You can answer it, ask me to explain it, or skip it for now."
+        )
+    return ExplainAction(
+        action="explain",
+        message=(
+            f"{', '.join(parts)}. We were working on “{question}”. "
+            f"{recovery}"
+        ),
+        field_id=active_field.id,
     )
 
 
