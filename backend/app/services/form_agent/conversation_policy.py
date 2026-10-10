@@ -282,6 +282,8 @@ def response_for_action(
     request: FormAgentRequest,
     guidance: tuple[OfficialGuidanceCitation, ...] = (),
     web_guidance: Optional[WebGuidanceMetadata] = None,
+    *,
+    preserve_conversation_phase: bool = False,
 ) -> FormAgentResponse:
     active_field_id = request_active_field_id(request)
     if isinstance(action, ProposeAction):
@@ -318,6 +320,8 @@ def response_for_action(
             phase="awaiting_clarification",
             active_field_id=action.field_id,
         )
+    elif isinstance(action, ExplainAction) and preserve_conversation_phase:
+        state = request.conversation_state
     elif isinstance(action, ExplainAction):
         state = ConversationState(
             phase="awaiting_answer",
@@ -344,6 +348,43 @@ def response_for_action(
                 else None
             ),
         }
+    )
+
+
+def insufficient_guidance_action(
+    request: FormAgentRequest,
+    web_guidance: WebGuidanceMetadata,
+) -> ExplainAction:
+    if web_guidance.status not in {"empty", "unavailable"}:
+        raise FormAgentError(
+            "Insufficient-guidance response requires empty or unavailable "
+            "web guidance"
+        )
+    active_field_id = request_active_field_id(request)
+    if active_field_id is None:
+        raise FormAgentError("Web guidance requires an active field")
+
+    subject = {
+        "meaning": "a verified meaning for this question",
+        "purpose": "the purpose of this question",
+        "requirements": "an authoritative requirement or rule for this question",
+        "where_to_find": "a verified place to find this information",
+    }[web_guidance.topic]
+    unavailable_prefix = (
+        "Live web guidance is unavailable right now. "
+        if web_guidance.status == "unavailable"
+        else ""
+    )
+    return ExplainAction(
+        action="explain",
+        message=(
+            f"{unavailable_prefix}The available form schema and verified "
+            f"guidance do not establish {subject}, so I won't infer one. "
+            "Check the form's own instructions or ask the issuing "
+            "organisation. You can retry guidance, answer from your own "
+            "knowledge, skip this field, or continue manually."
+        ),
+        field_id=active_field_id,
     )
 
 

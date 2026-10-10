@@ -216,6 +216,16 @@ plus active-field evidence. Results that explicitly identify a different form
 version are rejected. Discarded results never enter Nemotron context or
 response citations.
 
+If no relevant result remains, the orchestrator returns a deterministic
+`explain` action with web-guidance status `empty` before prompt construction;
+Nemotron is not called. If Tavily is unconfigured or cannot complete the
+lookup, the same safe response boundary uses the distinct `unavailable` status
+and a provider-specific recovery notice. Both outcomes state that the form
+schema and verified guidance cannot establish the requested meaning, purpose,
+rule, or information source, preserve the current active field and conversation
+phase, and offer retry, skip, or manual continuation. They contain no source
+citations and cannot infer a purpose or change form state.
+
 ## Canonical field state
 
 Every input surface operates on the same field records identified by the IDs

@@ -964,7 +964,7 @@ Do not implement:
 
 # Milestone 6.13.3 — Deterministic insufficient-guidance response
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Return a safe, useful, deterministic response when neither reviewed local

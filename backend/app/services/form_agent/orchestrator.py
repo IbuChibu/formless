@@ -4,7 +4,11 @@ from collections.abc import Callable
 from typing import Optional
 
 from app.services.nemotron_service import NemotronService
-from app.services.tavily_service import TavilyService
+from app.services.tavily_service import (
+    TavilyConfigurationError,
+    TavilyService,
+    TavilyServiceError,
+)
 
 from .answer_adapters import (
     AnswerAdapterResult,
@@ -12,6 +16,7 @@ from .answer_adapters import (
 )
 from .conversation_policy import (
     deterministic_action,
+    insufficient_guidance_action,
     invalid_value_clarification,
     normalize_action_message,
     response_for_action,
@@ -24,7 +29,6 @@ from .models import (
     FormAgentField,
     FormAgentRequest,
     FormAgentResponse,
-    request_active_field_id,
     truncate_text,
 )
 from .official_guidance import (
@@ -45,6 +49,7 @@ from .response_parser import (
 from .web_guidance import (
     plan_web_guidance_lookup,
     prepare_web_guidance,
+    unavailable_web_guidance,
     validate_web_guidance_action,
 )
 
@@ -87,30 +92,33 @@ class FormAgentService:
         web_guidance = None
         web_lookup = plan_web_guidance_lookup(request, guidance)
         if web_lookup is not None and self._tavily_service is not None:
-            web_results = await self._tavily_service.search(web_lookup.query)
-            web_guidance = prepare_web_guidance(
-                request,
-                web_lookup,
-                web_results,
-            )
-            if web_guidance.status == "empty":
-                active_field_id = request_active_field_id(request)
-                if active_field_id is None:
-                    raise FormAgentError(
-                        "Web guidance requires an active field"
-                    )
+            try:
+                web_results = await self._tavily_service.search(
+                    web_lookup.query
+                )
+            except TavilyConfigurationError:
+                web_guidance = unavailable_web_guidance(
+                    web_lookup,
+                    "not_configured",
+                )
+            except TavilyServiceError:
+                web_guidance = unavailable_web_guidance(
+                    web_lookup,
+                    "provider_failure",
+                )
+            else:
+                web_guidance = prepare_web_guidance(
+                    request,
+                    web_lookup,
+                    web_results,
+                )
+
+            if web_guidance.status in {"empty", "unavailable"}:
                 return response_for_action(
-                    ExplainAction(
-                        action="explain",
-                        message=(
-                            "Tavily found no usable public web guidance for "
-                            "this question. No form value was changed; you can "
-                            "retry the search or continue manually."
-                        ),
-                        field_id=active_field_id,
-                    ),
+                    insufficient_guidance_action(request, web_guidance),
                     request,
                     web_guidance=web_guidance,
+                    preserve_conversation_phase=True,
                 )
 
         guidance_action = authoritative_guidance_action(request, guidance)

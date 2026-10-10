@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app, get_form_agent_service
 from app.services.form_agent import (
+    ConversationPhase,
     ConversationState,
     FormAgentField,
     FormAgentFormContext,
@@ -160,7 +161,11 @@ def _w9_request(message: str) -> FormAgentRequest:
     )
 
 
-def _sample_request(message: str) -> FormAgentRequest:
+def _sample_request(
+    message: str,
+    *,
+    phase: ConversationPhase = "awaiting_answer",
+) -> FormAgentRequest:
     return FormAgentRequest(
         form_context=FormAgentFormContext(
             title="Sample application",
@@ -175,14 +180,18 @@ def _sample_request(message: str) -> FormAgentRequest:
             )
         ],
         conversation_state=ConversationState(
-            phase="awaiting_answer",
+            phase=phase,
             active_field_id="full_name",
         ),
         event={"type": "message", "content": message},
     )
 
 
-def _household_request(message: str) -> FormAgentRequest:
+def _household_request(
+    message: str,
+    *,
+    phase: ConversationPhase = "awaiting_answer",
+) -> FormAgentRequest:
     return FormAgentRequest(
         form_context=FormAgentFormContext(
             title="Household Stability Support Review",
@@ -200,7 +209,7 @@ def _household_request(message: str) -> FormAgentRequest:
             )
         ],
         conversation_state=ConversationState(
-            phase="awaiting_answer",
+            phase=phase,
             active_field_id="applicant_full_legal_name",
         ),
         event={"type": "message", "content": message},
@@ -683,6 +692,11 @@ def test_empty_search_returns_explanation_without_model_call() -> None:
     assert response.action.action == "explain"
     assert response.web_guidance is not None
     assert response.web_guidance.status == "empty"
+    assert (
+        "available form schema and verified guidance do not establish"
+        in response.action.message
+    )
+    assert "I won't infer one" in response.action.message
     assert nemotron.calls == []
     assert len(tavily.queries) == 1
 
@@ -714,8 +728,65 @@ def test_irrelevant_results_do_not_reach_nemotron_or_response_citations() -> Non
     assert response.web_guidance is not None
     assert response.web_guidance.status == "empty"
     assert response.web_guidance.sources == []
+    assert response.conversation_state == _sample_request(
+        "What does full name mean on this form?"
+    ).conversation_state
+    assert (
+        "available form schema and verified guidance do not establish"
+        in response.action.message
+    )
     assert nemotron.calls == []
     assert len(tavily.queries) == 1
+
+
+def test_household_purpose_abstention_is_grounded_and_preserves_phase() -> None:
+    request = _household_request(
+        "Why does this form ask for my full legal name?",
+        phase="awaiting_clarification",
+    )
+    nemotron = StubNemotronService("not used")
+    tavily = StubTavilyService(
+        (
+            TavilySearchResult(
+                title="Boston Office of Housing Stability",
+                url="https://www.boston.gov/departments/housing-stability",
+                content=(
+                    "Household support services may request an applicant's "
+                    "legal name when reviewing assistance applications."
+                ),
+                score=0.9,
+            ),
+        )
+    )
+
+    response = asyncio.run(
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            tavily,
+        ).respond(request)
+    )
+
+    assert response.action.action == "explain"
+    assert response.conversation_state == request.conversation_state
+    assert response.web_guidance is not None
+    assert response.web_guidance.status == "empty"
+    assert response.web_guidance.sources == []
+    assert "do not establish the purpose of this question" in (
+        response.action.message
+    )
+    assert "I won't infer one" in response.action.message
+    assert all(
+        invented_phrase not in response.action.message.casefold()
+        for invented_phrase in (
+            "administrative",
+            "benefits",
+            "eligibility",
+            "identity matching",
+            "legal requirement",
+            "records",
+        )
+    )
+    assert nemotron.calls == []
 
 
 def test_local_guidance_is_used_without_tavily_or_nemotron() -> None:
@@ -736,27 +807,25 @@ def test_local_guidance_is_used_without_tavily_or_nemotron() -> None:
 
 
 @pytest.mark.parametrize(
-    ("provider_error", "status_code", "detail"),
+    ("provider_error", "expected_notice"),
     [
         (
             TavilyConfigurationError("Live web guidance is not configured"),
-            503,
-            "Live web guidance is not configured",
+            "not configured",
         ),
         (
             TavilyServiceError("Tavily is temporarily rate limited"),
-            502,
-            "Tavily is temporarily rate limited",
+            "could not complete this lookup",
         ),
     ],
 )
-def test_endpoint_returns_controlled_web_guidance_errors(
+def test_endpoint_returns_typed_unavailable_web_guidance(
     provider_error: Exception,
-    status_code: int,
-    detail: str,
+    expected_notice: str,
 ) -> None:
+    nemotron = StubNemotronService("not used")
     service = FormAgentService(  # type: ignore[arg-type]
-        StubNemotronService("not used"),
+        nemotron,
         StubTavilyService(error=provider_error),
     )
     app.dependency_overrides[get_form_agent_service] = lambda: service
@@ -768,5 +837,13 @@ def test_endpoint_returns_controlled_web_guidance_errors(
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == status_code
-    assert response.json() == {"detail": detail}
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action"]["action"] == "explain"
+    assert payload["web_guidance"]["status"] == "unavailable"
+    assert payload["web_guidance"]["sources"] == []
+    assert expected_notice in payload["web_guidance"]["notice"]
+    assert "Live web guidance is unavailable right now" in (
+        payload["action"]["message"]
+    )
+    assert nemotron.calls == []

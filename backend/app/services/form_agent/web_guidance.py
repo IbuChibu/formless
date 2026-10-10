@@ -36,6 +36,10 @@ WebGuidanceTopic = Literal[
     "requirements",
     "where_to_find",
 ]
+WebGuidanceUnavailableReason = Literal[
+    "not_configured",
+    "provider_failure",
+]
 
 MAX_WEB_QUERY_CHARS = 420
 MAX_WEB_RESULTS = 3
@@ -380,6 +384,28 @@ def prepare_web_guidance(
         topic=lookup.topic,
         notice=notice,
         sources=selected,
+    )
+
+
+def unavailable_web_guidance(
+    lookup: WebGuidanceLookup,
+    reason: WebGuidanceUnavailableReason,
+) -> WebGuidanceMetadata:
+    notice = {
+        "not_configured": (
+            "Live web guidance is not configured. You can continue manually "
+            "or configure Tavily and retry."
+        ),
+        "provider_failure": (
+            "Tavily could not complete this lookup. You can retry without "
+            "changing any form answer or continue manually."
+        ),
+    }[reason]
+    return WebGuidanceMetadata(
+        status="unavailable",
+        topic=lookup.topic,
+        notice=notice,
+        sources=[],
     )
 
 

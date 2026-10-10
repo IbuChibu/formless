@@ -95,7 +95,7 @@ type WebGuidanceCitation = {
 
 type WebGuidanceMetadata = {
   provider: "tavily";
-  status: "used" | "limited" | "empty";
+  status: "used" | "limited" | "empty" | "unavailable";
   topic: "meaning" | "purpose" | "requirements" | "where_to_find";
   notice: string;
   sources: WebGuidanceCitation[];
@@ -609,7 +609,9 @@ function App() {
         fieldId: action.field_id,
         guidance: agentResponse.guidance,
         webGuidance: agentResponse.web_guidance,
-        ...(agentResponse.web_guidance?.status === "empty"
+        ...(["empty", "unavailable"].includes(
+          agentResponse.web_guidance?.status ?? "",
+        )
           ? { webGuidanceRetry: request }
           : {}),
         ...(action.action === "propose"
@@ -1139,7 +1141,9 @@ function App() {
                                   </small>
                                 </article>
                               ))}
-                              {message.webGuidance.status === "empty" &&
+                              {["empty", "unavailable"].includes(
+                                message.webGuidance.status,
+                              ) &&
                               message.webGuidanceRetry ? (
                                 <button
                                   type="button"
@@ -1948,7 +1952,9 @@ function parseWebGuidance(payload: unknown): WebGuidanceMetadata | null {
   if (
     !isRecord(payload) ||
     payload.provider !== "tavily" ||
-    !["used", "limited", "empty"].includes(String(payload.status)) ||
+    !["used", "limited", "empty", "unavailable"].includes(
+      String(payload.status),
+    ) ||
     !["meaning", "purpose", "requirements", "where_to_find"].includes(
       String(payload.topic),
     ) ||
@@ -1988,9 +1994,10 @@ function parseWebGuidance(payload: unknown): WebGuidanceMetadata | null {
   });
 
   const status = payload.status as WebGuidanceMetadata["status"];
+  const hasNoSources = ["empty", "unavailable"].includes(status);
   if (
-    (status === "empty" && sources.length > 0) ||
-    (status !== "empty" && sources.length === 0)
+    (hasNoSources && sources.length > 0) ||
+    (!hasNoSources && sources.length === 0)
   ) {
     throw new Error("The API returned invalid live web guidance.");
   }

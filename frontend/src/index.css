@@ -970,7 +970,8 @@ h1 {
   background: #fff9ec;
 }
 
-.agent-web-guidance.empty {
+.agent-web-guidance.empty,
+.agent-web-guidance.unavailable {
   border-style: dashed;
 }
 
