@@ -61,8 +61,21 @@ type PdfExtractionResponse = {
 };
 
 type FormContext = {
-  title?: string;
+  title?: string | null;
   instructions: string[];
+  form_id?: string | null;
+  form_version?: string | null;
+};
+
+type OfficialGuidanceCitation = {
+  source_id: string;
+  title: string;
+  organization: string;
+  url: string;
+  form_version: string;
+  retrieved_at: string;
+  excerpt: string;
+  excerpt_kind: "paraphrase";
 };
 
 type AgentRequestField = {
@@ -142,6 +155,7 @@ type AgentAction =
 type AgentResponse = {
   action: AgentAction;
   conversation_state: ConversationState;
+  guidance: OfficialGuidanceCitation[];
 };
 
 type ConversationMessage = AgentHistoryMessage & {
@@ -149,6 +163,7 @@ type ConversationMessage = AgentHistoryMessage & {
   action?: AgentActionKind;
   fieldId?: string | null;
   proposedValue?: FieldValue;
+  guidance?: OfficialGuidanceCitation[];
 };
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -560,6 +575,7 @@ function App() {
         content: action.message,
         action: action.action,
         fieldId: action.field_id,
+        guidance: agentResponse.guidance,
         ...(action.action === "propose"
           ? { proposedValue: action.value }
           : {}),
@@ -1009,7 +1025,33 @@ function App() {
                               </span>
                             ) : null}
                           </div>
+                          {message.guidance?.length ? (
+                            <span className="agent-explanation-label">
+                              Assistant explanation
+                            </span>
+                          ) : null}
                           <p>{message.content}</p>
+                          {message.guidance?.map((citation) => (
+                            <aside
+                              className="agent-guidance"
+                              key={`${message.id}-${citation.source_id}-${citation.excerpt}`}
+                            >
+                              <span>Official guidance · paraphrased</span>
+                              <p>{citation.excerpt}</p>
+                              <a
+                                href={citation.url}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                {citation.title}
+                              </a>
+                              <small>
+                                {citation.organization} · Form version{" "}
+                                {citation.form_version} · Retrieved{" "}
+                                {citation.retrieved_at}
+                              </small>
+                            </aside>
+                          ))}
                           {message.action === "propose" &&
                           message.proposedValue !== undefined ? (
                             <div className="agent-proposal">
@@ -1740,8 +1782,52 @@ function parseAgentResponse(
     payload.conversation_state,
     requestFields,
   );
+  const guidance = parseOfficialGuidance(payload.guidance);
   validateAgentResponseState(action, conversationState, requestFields);
-  return { action, conversation_state: conversationState };
+  return {
+    action,
+    conversation_state: conversationState,
+    guidance,
+  };
+}
+
+function parseOfficialGuidance(
+  payload: unknown,
+): OfficialGuidanceCitation[] {
+  if (payload === undefined) {
+    return [];
+  }
+  if (!Array.isArray(payload) || payload.length > 2) {
+    throw new Error("The API returned invalid official guidance.");
+  }
+
+  return payload.map((citation) => {
+    if (
+      !isRecord(citation) ||
+      typeof citation.source_id !== "string" ||
+      typeof citation.title !== "string" ||
+      typeof citation.organization !== "string" ||
+      typeof citation.url !== "string" ||
+      !citation.url.startsWith("https://") ||
+      typeof citation.form_version !== "string" ||
+      typeof citation.retrieved_at !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(citation.retrieved_at) ||
+      typeof citation.excerpt !== "string" ||
+      citation.excerpt_kind !== "paraphrase"
+    ) {
+      throw new Error("The API returned invalid official guidance.");
+    }
+    return {
+      source_id: citation.source_id,
+      title: citation.title,
+      organization: citation.organization,
+      url: citation.url,
+      form_version: citation.form_version,
+      retrieved_at: citation.retrieved_at,
+      excerpt: citation.excerpt,
+      excerpt_kind: citation.excerpt_kind,
+    };
+  });
 }
 
 function parseAgentAction(
@@ -1962,7 +2048,30 @@ function isValidFormContext(value: unknown): value is FormContext {
   if (!isRecord(value) || !Array.isArray(value.instructions)) {
     return false;
   }
-  if (value.title !== undefined && typeof value.title !== "string") {
+  if (
+    value.title !== undefined &&
+    value.title !== null &&
+    typeof value.title !== "string"
+  ) {
+    return false;
+  }
+  if (
+    value.form_id !== undefined &&
+    value.form_id !== null &&
+    typeof value.form_id !== "string"
+  ) {
+    return false;
+  }
+  if (
+    value.form_version !== undefined &&
+    value.form_version !== null &&
+    typeof value.form_version !== "string"
+  ) {
+    return false;
+  }
+  const hasFormId = typeof value.form_id === "string";
+  const hasFormVersion = typeof value.form_version === "string";
+  if (hasFormId !== hasFormVersion) {
     return false;
   }
   return value.instructions.every(

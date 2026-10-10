@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 import re
@@ -10,6 +10,8 @@ import pymupdf
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError, PyPdfError
 from pypdf.generic import NameObject, TextStringObject
+
+from app.services.form_catalog import identify_known_form
 
 
 PdfFieldValue = Union[str, bool]
@@ -41,6 +43,8 @@ class PdfField:
 class PdfFormContext:
     title: Optional[str] = None
     instructions: tuple[str, ...] = ()
+    form_id: Optional[str] = None
+    form_version: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -111,6 +115,7 @@ class _NativeFieldContext:
 class _NativePdfContext:
     fields: dict[str, _NativeFieldContext]
     form_context: PdfFormContext
+    identity_text: str
 
 
 _SIMPLE_SUM_PATTERN = re.compile(
@@ -146,6 +151,7 @@ _INSTRUCTION_TEXT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _MAX_FORM_INSTRUCTIONS = 8
+_MAX_IDENTITY_TEXT_LENGTH = 100_000
 
 
 def extract_acroform_fields(pdf_data: bytes) -> list[PdfField]:
@@ -189,13 +195,24 @@ def extract_acroform(pdf_data: bytes) -> PdfExtraction:
             )
         )
 
-    return PdfExtraction(
-        fields=[
-            field
-            for _, field in sorted(extracted_fields, key=lambda item: item[0])
-        ],
-        form_context=native_context.form_context,
+    ordered_fields = [
+        field
+        for _, field in sorted(extracted_fields, key=lambda item: item[0])
+    ]
+    identity = identify_known_form(
+        native_context.form_context.title,
+        [field.id for field in ordered_fields],
+        native_context.identity_text,
     )
+    form_context = native_context.form_context
+    if identity is not None:
+        form_context = replace(
+            form_context,
+            form_id=identity.form_id,
+            form_version=identity.form_version,
+        )
+
+    return PdfExtraction(fields=ordered_fields, form_context=form_context)
 
 
 def fill_acroform_fields(
@@ -372,6 +389,8 @@ def _extract_native_pdf_context(
     field_contexts: dict[str, _NativeFieldContext] = {}
     form_title: Optional[str] = None
     form_instructions: list[str] = []
+    identity_text_parts: list[str] = []
+    identity_text_length = 0
     try:
         for page in document:
             widgets = list(page.widgets() or [])
@@ -380,6 +399,13 @@ def _extract_native_pdf_context(
             ]
             lines = _native_text_lines(page, widget_rectangles)
             groups = _native_text_groups(lines)
+            for group in groups:
+                if identity_text_length >= _MAX_IDENTITY_TEXT_LENGTH:
+                    break
+                remaining = _MAX_IDENTITY_TEXT_LENGTH - identity_text_length
+                text = group.text[:remaining]
+                identity_text_parts.append(text)
+                identity_text_length += len(text)
             page_title = _page_title(groups, page.rect.height)
             if form_title is None and page_title is not None:
                 form_title = page_title
@@ -427,6 +453,7 @@ def _extract_native_pdf_context(
             title=form_title,
             instructions=tuple(form_instructions),
         ),
+        identity_text="\n".join(identity_text_parts),
     )
 
 

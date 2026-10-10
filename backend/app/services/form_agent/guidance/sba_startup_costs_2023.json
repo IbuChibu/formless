@@ -1,0 +1,37 @@
+{
+  "form_id": "sba-startup-costs",
+  "form_version": "2023-07-17",
+  "source": {
+    "source_id": "sba-startup-costs-worksheet-2023",
+    "title": "Startup Costs Worksheet",
+    "organization": "U.S. Small Business Administration",
+    "url": "https://legacy.sba.gov/sites/default/files/2023-07/Startup%20Costs%20Worksheet.pdf",
+    "retrieved_at": "2026-10-10"
+  },
+  "entries": [
+    {
+      "entry_id": "worksheet-purpose",
+      "topics": ["purpose"],
+      "applies_to_all": true,
+      "excerpt": "The worksheet helps a business owner estimate the startup funds needed for their own business."
+    },
+    {
+      "entry_id": "budget-and-actual",
+      "topics": ["field", "requirements"],
+      "field_id_prefixes": ["Monthly ", "One-time "],
+      "excerpt": "Estimated costs belong in the Budget column, while amounts actually spent belong in the Actual column."
+    },
+    {
+      "entry_id": "monthly-expenses",
+      "topics": ["field"],
+      "field_id_prefixes": ["Monthly "],
+      "excerpt": "Monthly expenses are entered in the monthly section, with expense categories changed or added to fit the business."
+    },
+    {
+      "entry_id": "one-time-expenses",
+      "topics": ["field"],
+      "field_id_prefixes": ["One-time "],
+      "excerpt": "One-time expenses are entered in their own section, with categories changed or added to fit the business."
+    }
+  ]
+}

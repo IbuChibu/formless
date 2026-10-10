@@ -785,7 +785,7 @@ Do not implement:
 
 # Milestone 6.13 — Official instruction grounding
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Ground explanations in bounded, attributable instructions from approved official

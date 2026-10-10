@@ -67,6 +67,20 @@ class FormAgentFormContext(_AgentModel):
         default_factory=list,
         max_length=MAX_FORM_INSTRUCTIONS,
     )
+    form_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    form_version: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+    )
+
+    @model_validator(mode="after")
+    def validate_form_identity(self) -> FormAgentFormContext:
+        if (self.form_id is None) != (self.form_version is None):
+            raise ValueError(
+                "Form ID and form version must be supplied together"
+            )
+        return self
 
 
 class FormAgentField(_AgentModel):
@@ -338,6 +352,21 @@ class RejectedAction(_AgentModel):
     field_id: str = Field(min_length=1, max_length=500)
 
 
+class OfficialGuidanceCitation(_AgentModel):
+    source_id: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=300)
+    organization: str = Field(min_length=1, max_length=300)
+    url: str = Field(
+        min_length=1,
+        max_length=1000,
+        pattern=r"^https://",
+    )
+    form_version: str = Field(min_length=1, max_length=100)
+    retrieved_at: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    excerpt: str = Field(min_length=1, max_length=600)
+    excerpt_kind: Literal["paraphrase"] = "paraphrase"
+
+
 FormAgentAction = Annotated[
     Union[
         ExplainAction,
@@ -366,6 +395,10 @@ ModelAction = Annotated[
 class FormAgentResponse(_AgentModel):
     action: FormAgentAction
     conversation_state: ConversationState
+    guidance: list[OfficialGuidanceCitation] = Field(
+        default_factory=list,
+        max_length=2,
+    )
 
 
 def request_active_field_id(request: FormAgentRequest) -> Optional[str]:

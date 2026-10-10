@@ -31,6 +31,7 @@ from .models import (
     FormAgentTransitionError,
     MessageEvent,
     NextAction,
+    OfficialGuidanceCitation,
     PendingProposal,
     ProposeAction,
     RejectEvent,
@@ -84,25 +85,6 @@ _SKIP_REQUEST_PATTERNS = (
         re.IGNORECASE,
     ),
 )
-_PURPOSE_QUESTION_PATTERNS = (
-    re.compile(r"^why\??$", re.IGNORECASE),
-    re.compile(
-        r"\bwhy\b.{0,80}\b(?:ask|need(?:ed)?|require(?:d)?|request(?:ed)?|"
-        r"collect(?:ed)?|want|information)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\bwhat\b.{0,60}\b(?:used for|use this for)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:purpose|reason)\b.{0,60}\b(?:field|question|information|"
-        r"request)\b",
-        re.IGNORECASE,
-    ),
-)
-
-
 def validate_event_transition(request: FormAgentRequest) -> None:
     phase = request.conversation_state.phase
     event_type = request.event.type
@@ -169,27 +151,6 @@ def validate_event_transition(request: FormAgentRequest) -> None:
             raise FormAgentTransitionError(
                 "Only an unanswered field can become active"
             )
-
-
-def unsupported_purpose_action(
-    request: FormAgentRequest,
-) -> Optional[ExplainAction]:
-    active_field_id = request_active_field_id(request)
-    if active_field_id is None:
-        return None
-    if not _asks_for_unsupported_purpose(request_message(request)):
-        return None
-
-    return ExplainAction(
-        action="explain",
-        message=(
-            "The available form context explains what to provide, but it "
-            "does not provide an authoritative reason why the organisation "
-            "requests it. Check the form's official instructions or ask "
-            "the organisation for that reason."
-        ),
-        field_id=active_field_id,
-    )
 
 
 def deterministic_action(
@@ -318,6 +279,7 @@ def deterministic_action(
 def response_for_action(
     action: FormAgentAction,
     request: FormAgentRequest,
+    guidance: tuple[OfficialGuidanceCitation, ...] = (),
 ) -> FormAgentResponse:
     active_field_id = request_active_field_id(request)
     if isinstance(action, ProposeAction):
@@ -370,7 +332,11 @@ def response_for_action(
         raise FormAgentError("Form Agent changed the active field unexpectedly")
 
     return _RESPONSE_ADAPTER.validate_python(
-        {"action": action.model_dump(), "conversation_state": state.model_dump()}
+        {
+            "action": action.model_dump(),
+            "conversation_state": state.model_dump(),
+            "guidance": [citation.model_dump() for citation in guidance],
+        }
     )
 
 
@@ -603,12 +569,4 @@ def _asks_to_skip(message: str) -> bool:
     return any(
         pattern.fullmatch(normalized_message)
         for pattern in _SKIP_REQUEST_PATTERNS
-    )
-
-
-def _asks_for_unsupported_purpose(message: str) -> bool:
-    normalized_message = message.strip()
-    return any(
-        pattern.search(normalized_message)
-        for pattern in _PURPOSE_QUESTION_PATTERNS
     )

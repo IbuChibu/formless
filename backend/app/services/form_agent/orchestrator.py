@@ -15,14 +15,19 @@ from .conversation_policy import (
     normalize_action_message,
     response_for_action,
     unexpected_navigation_clarification,
-    unsupported_purpose_action,
     validate_event_transition,
 )
 from .models import (
+    ExplainAction,
     FormAgentError,
     FormAgentField,
     FormAgentRequest,
     FormAgentResponse,
+)
+from .official_guidance import (
+    authoritative_guidance_action,
+    select_official_guidance,
+    validate_guidance_action,
 )
 from .prompt_builder import (
     build_correction_user_prompt,
@@ -52,9 +57,14 @@ class FormAgentService:
     async def respond(self, request: FormAgentRequest) -> FormAgentResponse:
         validate_event_transition(request)
 
-        purpose_action = unsupported_purpose_action(request)
-        if purpose_action is not None:
-            return response_for_action(purpose_action, request)
+        guidance = select_official_guidance(request)
+        guidance_action = authoritative_guidance_action(request, guidance)
+        if guidance_action is not None:
+            return response_for_action(
+                guidance_action,
+                request,
+                guidance,
+            )
 
         policy_action = deterministic_action(
             request,
@@ -63,7 +73,7 @@ class FormAgentService:
         if policy_action is not None:
             return response_for_action(policy_action, request)
 
-        user_prompt = build_user_prompt(request)
+        user_prompt = build_user_prompt(request, guidance)
         validation_error: Optional[FormAgentError] = None
         attempt_user_prompt = user_prompt
 
@@ -77,6 +87,7 @@ class FormAgentService:
             try:
                 action = parse_action(raw_action)
                 action = canonicalize_proposal_value(action, request)
+                validate_guidance_action(action, guidance)
                 navigation_clarification = (
                     unexpected_navigation_clarification(action, request)
                 )
@@ -99,6 +110,7 @@ class FormAgentService:
             return response_for_action(
                 normalize_action_message(action, request),
                 request,
+                guidance if isinstance(action, ExplainAction) else (),
             )
 
         if validation_error is None:

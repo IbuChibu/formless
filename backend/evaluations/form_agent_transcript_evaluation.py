@@ -812,10 +812,11 @@ async def run_transcript_evaluation(
 
             if turn.purpose_safety_check:
                 normalized_message = action.message.casefold()
-                if not (
+                has_missing_guidance_fallback = (
                     "authoritative reason" in normalized_message
                     and "official instructions" in normalized_message
-                ):
+                )
+                if not response.guidance and not has_missing_guidance_fallback:
                     invented_purpose_failures += 1
                     failures.append(
                         _failure(
@@ -1027,6 +1028,8 @@ def _load_transcript_fields(
         FormAgentFormContext(
             title=extraction.form_context.title,
             instructions=list(extraction.form_context.instructions),
+            form_id=extraction.form_context.form_id,
+            form_version=extraction.form_context.form_version,
         ),
         fields,
     )

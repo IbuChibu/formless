@@ -899,6 +899,42 @@ h1 {
   line-height: 1.5;
 }
 
+.agent-explanation-label,
+.agent-guidance > span {
+  color: #4f725b;
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-guidance {
+  display: grid;
+  gap: 5px;
+  margin-top: 2px;
+  padding: 9px 10px;
+  border: 1px solid #cbdccd;
+  border-radius: 8px;
+  background: #f3f8f4;
+}
+
+.agent-guidance p {
+  color: #354a3c;
+  font-size: 0.7rem;
+}
+
+.agent-guidance a {
+  color: #27623d;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.agent-guidance small {
+  color: #68786e;
+  font-size: 0.6rem;
+  line-height: 1.4;
+}
+
 .agent-proposal {
   display: grid;
   gap: 3px;

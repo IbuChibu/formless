@@ -53,6 +53,8 @@ class PdfFieldResponse(BaseModel):
 class PdfFormContextResponse(BaseModel):
     title: Optional[str] = None
     instructions: list[str] = Field(default_factory=list)
+    form_id: Optional[str] = None
+    form_version: Optional[str] = None
 
 
 class PdfExtractionResponse(BaseModel):
@@ -176,6 +178,8 @@ async def extract_pdf_fields(file: UploadFile = File(...)) -> PdfExtractionRespo
         form_context=PdfFormContextResponse(
             title=extraction.form_context.title,
             instructions=list(extraction.form_context.instructions),
+            form_id=extraction.form_context.form_id,
+            form_version=extraction.form_context.form_version,
         ),
     )
 

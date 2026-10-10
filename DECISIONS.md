@@ -73,3 +73,18 @@ Reason:
 A single state model prevents conflicting answers, allows every input mode to
 reuse the existing PDF filling endpoint, and makes correction and review
 consistent across the product.
+
+---
+
+## 2026-10-10 — Official guidance is local, allowlisted, and version-specific
+
+Decision:
+Official guidance used by the Form Agent will come from small reviewed local
+resources selected only for an exact recognized form ID and version. Guidance
+responses expose the source and keep the official excerpt separate from the
+assistant's plain-language explanation.
+
+Reason:
+This gives users attributable help without runtime crawling or general RAG,
+prevents silently applying instructions from the wrong form edition, and keeps
+external text inside the same untrusted-data boundary as PDF and user content.

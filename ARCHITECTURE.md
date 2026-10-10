@@ -15,12 +15,12 @@ Voice / Text / PDF field click / Manual drawer
           |                   |
           v                   v
      PDF Service          Form Agent
-                              |
-                              v
-                      Nemotron Service
-                              |
-                              v
-                    Nebius Token Factory
+                         /          \
+                        v            v
+          Local official guidance  Nemotron Service
+                 registry                 |
+                                          v
+                                Nebius Token Factory
 
 ## Frontend
 
@@ -29,6 +29,7 @@ Responsible for:
 - displaying questions
 - recording voice
 - displaying conversation
+- displaying attributable official-guidance sources returned by the backend
 - showing progress
 - keeping the current uploaded form's ephemeral field state
 - keeping AI-proposed values separate from confirmed values
@@ -53,6 +54,7 @@ Responsible for:
 Responsible for:
 - extracting PDF fields
 - returning stable field IDs and display metadata
+- identifying explicitly supported form editions from exact local signatures
 - returning widget geometry when direct-on-form editing is implemented
 - filling PDF fields
 - producing completed PDFs
@@ -71,6 +73,7 @@ Responsible for:
 - processing bounded conversation state received with each request
 - validating explicit conversation events and state transitions
 - deciding what context goes to Nemotron
+- selecting bounded official guidance for an exact allowlisted form version
 - processing model actions
 - deciding when clarification is needed
 - marking proposed changes as requiring confirmation
@@ -90,12 +93,38 @@ The Form Agent is one service boundary with small internal modules:
   field metadata and returns a matched value, a specific clarification, or a
   signal that model interpretation is still needed
 - `prompt_builder` prepares bounded untrusted context for Nemotron
+- `official_guidance` loads the local allowlist, selects relevant excerpts, and
+  prepares source attribution
 - `response_parser` parses, canonicalizes, and validates model actions
 - `value_normalizer` validates and safely normalizes field values
 
 FastAPI and evaluation code import the public Form Agent package rather than
 depending on those internal modules. The internal split does not create
 multiple agents or allow any module to bypass the Nemotron Service.
+
+## Official guidance
+
+Known form identity is deterministic metadata produced during PDF extraction.
+The neutral form catalog requires a matching title, field count, and small
+field-ID signature before assigning a form ID and version. It does not download
+instructions or call an AI service.
+
+Official guidance is stored as small local JSON resources keyed by that exact
+form ID and version. Every resource records its title, issuing organisation,
+HTTPS source URL, form version, retrieval date, and scoped paraphrased
+excerpts. Source hosts are allowlisted in backend code. Selection uses exact
+field IDs, field-ID prefixes, sections, and a small fixed topic vocabulary; it
+does not use embeddings, a vector database, or runtime web retrieval.
+
+At most two excerpts and 1,000 excerpt characters can enter one Form Agent
+turn. The prompt places them inside the same untrusted context boundary as PDF
+text and user content. Guidance may support an explanation, but it can never
+supply or confirm the user's personal field value. The response returns the
+selected excerpts and source metadata separately from the assistant's
+plain-language explanation, allowing the frontend to label and link the
+official source. If no exact source is available for an official-purpose or
+rule question, the agent says so instead of substituting another form version
+or inferring an answer.
 
 ## Canonical field state
 
@@ -161,18 +190,21 @@ weakening invention checks.
 For agent or voice input:
 1. The frontend sends the explicit event, conversation state, and bounded form
    context to the Form Agent.
-2. The Form Agent first asks the selected field-type adapter to match or clarify
+2. For explanatory turns, the Form Agent may select bounded local guidance for
+   an exact allowlisted form version and active field.
+3. The Form Agent first asks the selected field-type adapter to match or clarify
    common answers; genuinely complex interpretation can fall through to
    Nemotron.
-3. The Form Agent returns a typed action and resulting conversation state.
-4. Backend code validates every deterministic or model proposal through the
+4. The Form Agent returns a typed action, resulting conversation state, and any
+   attributable guidance used by the explanation.
+5. Backend code validates every deterministic or model proposal through the
    field adapter and the field's ID, type, and available options.
-5. The frontend asks the user to confirm, edit, reject, or skip the proposal.
-6. A separate confirmation event is validated before the value enters shared
+6. The frontend asks the user to confirm, edit, reject, or skip the proposal.
+7. A separate confirmation event is validated before the value enters shared
    field state exactly once. Rejection keeps the same field active.
-7. Confirmation, edited confirmation, and skip deterministically transition to
+8. Confirmation, edited confirmation, and skip deterministically transition to
    the next unanswered field, or to form complete, without another model call.
-8. The frontend sends confirmed values to the existing PDF filling endpoint.
+9. The frontend sends confirmed values to the existing PDF filling endpoint.
 
 For manual or direct-on-form input, the explicit user edit is already a
 confirmation. It updates the same shared state and uses the same PDF filling

@@ -394,6 +394,8 @@ def _request_for_scenario(scenario: EvaluationScenario) -> FormAgentRequest:
         form_context=FormAgentFormContext(
             title=extraction.form_context.title,
             instructions=list(extraction.form_context.instructions),
+            form_id=extraction.form_context.form_id,
+            form_version=extraction.form_context.form_version,
         ),
         fields=fields,
         active_field_id=scenario.active_field_id,

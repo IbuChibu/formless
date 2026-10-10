@@ -1,0 +1,64 @@
+{
+  "form_id": "uscis-i9",
+  "form_version": "01/20/25",
+  "source": {
+    "source_id": "uscis-i9-form-2025",
+    "title": "Form I-9, Employment Eligibility Verification",
+    "organization": "U.S. Citizenship and Immigration Services",
+    "url": "https://www.uscis.gov/sites/default/files/document/forms/i-9.pdf",
+    "retrieved_at": "2026-10-10"
+  },
+  "entries": [
+    {
+      "entry_id": "form-purpose",
+      "topics": ["purpose"],
+      "applies_to_all": true,
+      "excerpt": "Form I-9 documents verification of a new employee's identity and authorization to work in the United States."
+    },
+    {
+      "entry_id": "employee-information",
+      "topics": ["field", "requirements"],
+      "section_terms": ["Section 1. Employee Information and Attestation"],
+      "excerpt": "Employees complete and sign Section 1 by their first day of employment, but not before accepting a job offer."
+    },
+    {
+      "entry_id": "status-attestation",
+      "topics": ["field", "requirements"],
+      "field_ids": [
+        "CB_1",
+        "CB_2",
+        "CB_3",
+        "3 A lawful permanent resident Enter USCIS or ANumber",
+        "CB_4",
+        "Exp Date mmddyyyy",
+        "USCIS ANumber",
+        "Form I94 Admission Number",
+        "Foreign Passport Number and Country of IssuanceRow1"
+      ],
+      "excerpt": "The employee selects one citizenship or immigration status and supplies the additional identifier or expiration information required by that selection."
+    },
+    {
+      "entry_id": "employer-document-review",
+      "topics": ["field", "requirements"],
+      "section_terms": ["Section 2. Employer Review and Verification"],
+      "excerpt": "The employer or authorized representative examines either one List A document or a combination of one List B and one List C document."
+    },
+    {
+      "entry_id": "preparer-translator",
+      "topics": ["field", "requirements"],
+      "section_terms": ["Supplement A"],
+      "excerpt": "Each preparer or translator who helped with Section 1 completes, signs, and dates a separate certification area in Supplement A."
+    },
+    {
+      "entry_id": "reverification-rehire",
+      "topics": ["field", "requirements"],
+      "field_id_prefixes": [
+        "Date of Rehire",
+        "Name of Emp or Auth Rep",
+        "Signature of Emp Rep",
+        "Addtl Info"
+      ],
+      "excerpt": "Supplement B is used for reverification, qualifying rehire, or documenting a legal name change, as described by the form instructions."
+    }
+  ]
+}
