@@ -620,7 +620,7 @@ Do not implement:
 
 # Milestone 6.8 — Modular Form Agent internals
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Split the remaining Form Agent implementation into focused internal modules

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, get_form_agent_service
-from app.services.form_agent_service import (
+from app.services.form_agent import (
     MAX_AGENT_CONTEXT_CHARS,
     FormAgentError,
     FormAgentRequest,

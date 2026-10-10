@@ -80,6 +80,18 @@ Must not:
 - bypass field validation
 - convert an unconfirmed proposal into a confirmed value
 
+The Form Agent is one service boundary with small internal modules:
+- `models` owns validated request, field, message, and action contracts
+- `orchestrator` coordinates one turn and is the package's public service
+- `conversation_policy` owns deterministic routing and response wording
+- `prompt_builder` prepares bounded untrusted context for Nemotron
+- `response_parser` parses, canonicalizes, and validates model actions
+- `value_normalizer` validates and safely normalizes field values
+
+FastAPI and evaluation code import the public Form Agent package rather than
+depending on those internal modules. The internal split does not create
+multiple agents or allow any module to bypass the Nemotron Service.
+
 ## Canonical field state
 
 Every input surface operates on the same field records identified by the IDs

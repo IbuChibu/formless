@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from pydantic import ValidationError
 
-from app.services.form_agent_service import (
+from app.services.form_agent import (
     FormAgentAction,
     FormAgentError,
     FormAgentField,

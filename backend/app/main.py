@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app.services.form_agent_service import (
+from app.services.form_agent import (
     FormAgentAction,
     FormAgentError,
     FormAgentRequest,
