@@ -297,7 +297,10 @@ def test_plain_field_explanation_uses_bounded_context_without_guidance() -> None
     assert response.action.action == "explain"
     assert response.guidance == []
     assert context["official_guidance"] == []
-    assert context["conversation"]["turn_objective"] == "paraphrase"
+    assert (
+        context["conversation"]["turn_objective"]
+        == "initial_paraphrase"
+    )
     assert len(json.dumps(context, ensure_ascii=False)) <= (
         MAX_AGENT_CONTEXT_CHARS
     )

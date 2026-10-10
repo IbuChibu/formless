@@ -1373,7 +1373,7 @@ Do not implement:
 
 # Milestone 6.13.8 — Adaptive explanations and conversation repair
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Problem to solve:
 The assistant now routes ordinary wording questions to Nemotron with bounded

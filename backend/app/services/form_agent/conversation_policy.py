@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from difflib import SequenceMatcher
 import re
 from collections.abc import Callable
 from typing import Literal, Optional
@@ -99,10 +101,25 @@ TurnObjective = Literal[
     "deterministic_command",
     "interpret_answer",
     "clarify_answer",
-    "paraphrase",
+    "initial_paraphrase",
+    "simplify_previous_explanation",
+    "clarify_what_is_confusing",
     "evidence_grounded_explanation",
     "progress_help",
 ]
+
+ExplanationObjective = Literal[
+    "initial_paraphrase",
+    "simplify_previous_explanation",
+    "clarify_what_is_confusing",
+]
+
+
+@dataclass(frozen=True)
+class ExplanationRepairContext:
+    objective: ExplanationObjective
+    depth: int
+    previous_explanation: Optional[str]
 
 _PROGRESS_QUESTION_PATTERN = re.compile(
     r"\b(?:what|which)\s+(?:have\s+we|did\s+we|is)\s+"
@@ -142,10 +159,31 @@ _WORDING_CLARIFICATION_PATTERN = re.compile(
     r"what\s+should\s+i\s+(?:put|enter|write|answer|choose))\b",
     re.IGNORECASE,
 )
+_CONVERSATION_REPAIR_PATTERN = re.compile(
+    r"\b(?:again|another\s+way|more\s+simply|simpler\s+words?|"
+    r"still\s+(?:do\s+not|don't|cannot|can't)\s+understand|"
+    r"(?:i\s+)?(?:do\s+not|don't|cannot|can't)\s+understand|"
+    r"still\s+confused|confusing|does(?:\s+not|n't)\s+make\s+sense)\b",
+    re.IGNORECASE,
+)
 _UNCERTAIN_ANSWER_PATTERN = re.compile(
     r"\b(?:about|approximately|around|roughly|maybe|perhaps|not\s+sure|"
     r"unsure|i\s+think|probably|possibly|sometime|between)\b",
     re.IGNORECASE,
+)
+_UNRELATED_WORKFLOW_PATTERN = re.compile(
+    r"\b(?:first|next)\s+unanswered\s+field\b|"
+    r"\bthis\s+is\s+(?:the\s+)?(?:first|next)\s+(?:field|question)\b|"
+    r"\byou\s+have\s+confirmed\s+\d+\b|"
+    r"\bform\s+progress\b",
+    re.IGNORECASE,
+)
+
+_REPEATED_EXPLANATION_ERROR = (
+    "Form Agent repeated the previous explanation"
+)
+_UNRELATED_WORKFLOW_ERROR = (
+    "Form Agent added unrelated workflow commentary to an explanation"
 )
 
 
@@ -153,13 +191,18 @@ def classify_turn_intent(request: FormAgentRequest) -> TurnIntent:
     if not isinstance(request.event, (MessageEvent, FocusFieldEvent)):
         return "command"
 
-    message = request_message(request).strip()
+    return _classify_message(request_message(request))
+
+
+def _classify_message(message: str) -> TurnIntent:
+    message = message.strip()
     if _PROGRESS_QUESTION_PATTERN.search(message) is not None:
         return "progress_question"
     if _EXTERNAL_GUIDANCE_PATTERN.search(message) is not None:
         return "evidence_question"
     if (
         _WORDING_CLARIFICATION_PATTERN.search(message) is not None
+        or _CONVERSATION_REPAIR_PATTERN.search(message) is not None
         or message.endswith("?")
     ):
         return "wording_clarification"
@@ -169,14 +212,130 @@ def classify_turn_intent(request: FormAgentRequest) -> TurnIntent:
 
 
 def turn_objective(request: FormAgentRequest) -> TurnObjective:
+    intent = classify_turn_intent(request)
+    if intent == "wording_clarification":
+        return explanation_repair_context(request).objective
     return {
         "command": "deterministic_command",
         "field_answer": "interpret_answer",
         "uncertain_answer": "clarify_answer",
-        "wording_clarification": "paraphrase",
         "evidence_question": "evidence_grounded_explanation",
         "progress_question": "progress_help",
-    }[classify_turn_intent(request)]
+    }[intent]
+
+
+def explanation_repair_context(
+    request: FormAgentRequest,
+) -> ExplanationRepairContext:
+    explanations: list[str] = []
+    awaiting_explanation = False
+
+    for message in request.history:
+        if message.role == "user":
+            awaiting_explanation = (
+                _classify_message(message.content) == "wording_clarification"
+            )
+            continue
+        if awaiting_explanation:
+            explanations.append(message.content.strip())
+        awaiting_explanation = False
+
+    if (
+        not explanations
+        and request.conversation_state.phase == "awaiting_clarification"
+        and _CONVERSATION_REPAIR_PATTERN.search(request_message(request))
+        is not None
+    ):
+        previous_assistant_message = next(
+            (
+                message.content.strip()
+                for message in reversed(request.history)
+                if message.role == "assistant"
+            ),
+            None,
+        )
+        if previous_assistant_message:
+            explanations.append(previous_assistant_message)
+
+    depth = min(3, len(explanations) + 1)
+    objective: ExplanationObjective = {
+        1: "initial_paraphrase",
+        2: "simplify_previous_explanation",
+        3: "clarify_what_is_confusing",
+    }[depth]
+    return ExplanationRepairContext(
+        objective=objective,
+        depth=depth,
+        previous_explanation=(explanations[-1] if explanations else None),
+    )
+
+
+def explanations_are_near_duplicate(first: str, second: str) -> bool:
+    first_words = _comparison_words(first)
+    second_words = _comparison_words(second)
+    if not first_words or not second_words:
+        return False
+
+    first_text = " ".join(first_words)
+    second_text = " ".join(second_words)
+    if first_text == second_text:
+        return True
+
+    sequence_similarity = SequenceMatcher(
+        None,
+        first_text,
+        second_text,
+    ).ratio()
+    first_tokens = set(first_words)
+    second_tokens = set(second_words)
+    shared_tokens = first_tokens & second_tokens
+    union_tokens = first_tokens | second_tokens
+    token_similarity = len(shared_tokens) / len(union_tokens)
+    containment = len(shared_tokens) / min(
+        len(first_tokens),
+        len(second_tokens),
+    )
+    return sequence_similarity >= 0.82 or (
+        token_similarity >= 0.72 and containment >= 0.88
+    )
+
+
+def explanation_repair_fallback(
+    error: FormAgentError,
+    request: FormAgentRequest,
+) -> Optional[ExplainAction]:
+    if str(error) not in {
+        _REPEATED_EXPLANATION_ERROR,
+        _UNRELATED_WORKFLOW_ERROR,
+    }:
+        return None
+    if classify_turn_intent(request) != "wording_clarification":
+        return None
+
+    active_field_id = request_active_field_id(request)
+    if active_field_id is None:
+        return None
+    field = next(
+        (field for field in request.fields if field.id == active_field_id),
+        None,
+    )
+    if field is None:
+        return None
+
+    question = truncate_text(field_question(field), 220).rstrip(" .?")
+    return ExplainAction(
+        action="explain",
+        message=(
+            "I don't want to repeat the same explanation. Which word or "
+            f'phrase in “{question}” is unclear? Tell me that part and I’ll '
+            "explain just that. Your form answer has not changed."
+        ),
+        field_id=field.id,
+    )
+
+
+def _comparison_words(value: str) -> list[str]:
+    return re.findall(r"[\w']+", value.casefold(), re.UNICODE)
 
 
 def message_needs_external_guidance(request: FormAgentRequest) -> bool:
@@ -577,6 +736,21 @@ def validate_action_for_turn(
         raise FormAgentError(
             "This conversational turn requires an explanation action"
         )
+    if intent != "wording_clarification" or not isinstance(
+        action,
+        ExplainAction,
+    ):
+        return
+
+    repair_context = explanation_repair_context(request)
+    previous_explanation = repair_context.previous_explanation
+    if previous_explanation is not None and explanations_are_near_duplicate(
+        previous_explanation,
+        action.message,
+    ):
+        raise FormAgentError(_REPEATED_EXPLANATION_ERROR)
+    if _UNRELATED_WORKFLOW_PATTERN.search(action.message) is not None:
+        raise FormAgentError(_UNRELATED_WORKFLOW_ERROR)
 
 
 def normalize_action_message(

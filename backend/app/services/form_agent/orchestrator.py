@@ -17,6 +17,7 @@ from .answer_adapters import (
 from .conversation_policy import (
     conflicting_guidance_action,
     deterministic_action,
+    explanation_repair_fallback,
     insufficient_guidance_action,
     invalid_value_clarification,
     normalize_action_message,
@@ -203,6 +204,12 @@ class FormAgentService:
 
         if validation_error is None:
             raise FormAgentError("Form Agent returned an invalid action")
+        repair_fallback = explanation_repair_fallback(
+            validation_error,
+            request,
+        )
+        if repair_fallback is not None:
+            return response_for_action(repair_fallback, request)
         clarification = invalid_value_clarification(
             validation_error,
             request,
