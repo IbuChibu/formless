@@ -716,7 +716,7 @@ Do not implement:
 
 # Milestone 6.11 — Field-type answer adapters
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Convert common conversational answers into form-compatible proposals through

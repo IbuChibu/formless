@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Optional
 
 from app.services.nemotron_service import NemotronService
 
+from .answer_adapters import (
+    AnswerAdapterResult,
+    interpret_answer,
+)
 from .conversation_policy import (
     deterministic_action,
     invalid_value_clarification,
@@ -13,7 +18,12 @@ from .conversation_policy import (
     unsupported_purpose_action,
     validate_event_transition,
 )
-from .models import FormAgentError, FormAgentRequest, FormAgentResponse
+from .models import (
+    FormAgentError,
+    FormAgentField,
+    FormAgentRequest,
+    FormAgentResponse,
+)
 from .prompt_builder import (
     build_correction_user_prompt,
     build_user_prompt,
@@ -27,8 +37,17 @@ from .response_parser import (
 
 
 class FormAgentService:
-    def __init__(self, nemotron_service: NemotronService) -> None:
+    def __init__(
+        self,
+        nemotron_service: NemotronService,
+        *,
+        answer_interpreter: Callable[
+            [FormAgentField, str],
+            AnswerAdapterResult,
+        ] = interpret_answer,
+    ) -> None:
         self._nemotron_service = nemotron_service
+        self._answer_interpreter = answer_interpreter
 
     async def respond(self, request: FormAgentRequest) -> FormAgentResponse:
         validate_event_transition(request)
@@ -37,7 +56,10 @@ class FormAgentService:
         if purpose_action is not None:
             return response_for_action(purpose_action, request)
 
-        policy_action = deterministic_action(request)
+        policy_action = deterministic_action(
+            request,
+            self._answer_interpreter,
+        )
         if policy_action is not None:
             return response_for_action(policy_action, request)
 

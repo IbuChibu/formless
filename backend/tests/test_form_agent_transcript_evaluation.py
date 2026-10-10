@@ -5,6 +5,7 @@ from dataclasses import replace
 from typing import Any
 
 from evaluations.form_agent_transcript_evaluation import (
+    run_adapter_comparison,
     run_transcript_evaluation,
     transcript_fixtures,
 )
@@ -55,15 +56,29 @@ def test_offline_transcripts_cover_complete_multiform_conversations() -> None:
     assert report.metrics.form_completion_rate == 1.0
     assert report.metrics.first_attempt_accepted_proposal_rate == 0.889
     assert report.metrics.average_turns_per_confirmed_field == 3.667
-    assert report.metrics.repeated_question_rate == 0.0
+    assert report.metrics.repeated_question_rate == 0.2
     assert report.metrics.clarification_rate == 0.07
     assert report.metrics.invalid_action_rate == 0.0
+    assert report.metrics.invalid_proposal_rate == 0.0
     assert report.metrics.confirmation_boundary_failure_rate == 0.0
     assert report.metrics.invented_fact_failures == 0
     assert report.metrics.invented_purpose_failures == 0
     assert report.metrics.total_model_calls is None
     assert report.metrics.average_model_latency_ms is None
     assert report.metrics.model_calls_per_field is None
+
+
+def test_adapter_comparison_improves_reprompts_and_invalid_proposals() -> None:
+    comparison = asyncio.run(run_adapter_comparison())
+
+    assert comparison.repeated_question_rate_before == 0.286
+    assert comparison.repeated_question_rate_after == 0.2
+    assert comparison.invalid_proposal_rate_before == 0.023
+    assert comparison.invalid_proposal_rate_after == 0.0
+    assert comparison.invention_failures_before == 0
+    assert comparison.invention_failures_after == 0
+    assert comparison.legacy_failure_count > 0
+    assert comparison.adapter_failure_count == 0
 
 
 def test_every_transcript_turn_declares_expected_state_and_field_values() -> None:
@@ -125,7 +140,7 @@ def test_optional_live_mode_reports_latency_and_model_calls_per_field() -> None:
     )
 
     assert report.failures == ()
-    assert report.metrics.total_model_calls == 3
+    assert report.metrics.total_model_calls == 1
     assert report.metrics.average_model_latency_ms is not None
-    assert report.metrics.model_calls_per_field == 1.0
-    assert len(live_service.calls) == 3
+    assert report.metrics.model_calls_per_field == 0.333
+    assert len(live_service.calls) == 1

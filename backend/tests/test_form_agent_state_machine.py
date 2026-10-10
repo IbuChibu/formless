@@ -112,7 +112,7 @@ def test_answer_proposal_enters_awaiting_confirmation_with_pending_value() -> No
             "value": "Ada Lovelace",
         },
     }
-    assert len(nemotron.calls) == 1
+    assert len(nemotron.calls) == 0
 
 
 def test_typed_reply_cannot_confirm_or_duplicate_pending_proposal() -> None:

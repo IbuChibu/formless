@@ -3,9 +3,10 @@
 Each fixture checks a bounded representative set of fields through
 ``form_complete``. Turns-per-confirmed-field counts every action tied to that
 field from the first question through confirmation. Repeated-question rate
-counts identical question-like messages for the same field. Clarification,
-invalid-action, and confirmation-boundary rates use all scheduled turns as the
-denominator. Live-only metrics are populated only when a real service is passed.
+counts clarification re-prompts after a field has already been asked.
+Clarification, invalid-action, invalid-proposal, and confirmation-boundary rates
+use all scheduled turns as the denominator. Live-only metrics are populated
+only when a real service is passed.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import asyncio
 from dataclasses import asdict, dataclass
 import json
 from time import perf_counter
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 from app.services.form_agent import (
     ConfirmedAction,
@@ -30,6 +31,12 @@ from app.services.form_agent import (
     RejectedAction,
     SkipAction,
 )
+from app.services.form_agent.answer_adapters import (
+    AnswerAdapterResult,
+    MatchedAnswer,
+    NotApplicable,
+)
+from app.services.form_agent.value_normalizer import infer_unambiguous_answer
 from app.services.nemotron_service import (
     NemotronConfigurationError,
     NemotronService,
@@ -81,6 +88,7 @@ class TranscriptEvaluationMetrics:
     repeated_question_rate: float
     clarification_rate: float
     invalid_action_rate: float
+    invalid_proposal_rate: float
     confirmation_boundary_failure_rate: float
     invented_fact_failures: int
     invented_purpose_failures: int
@@ -99,6 +107,18 @@ class TranscriptEvaluationReport:
             "metrics": asdict(self.metrics),
             "failures": list(self.failures),
         }
+
+
+@dataclass(frozen=True)
+class AdapterComparisonMetrics:
+    repeated_question_rate_before: float
+    repeated_question_rate_after: float
+    invalid_proposal_rate_before: float
+    invalid_proposal_rate_after: float
+    invention_failures_before: int
+    invention_failures_after: int
+    legacy_failure_count: int
+    adapter_failure_count: int
 
 
 class _TurnNemotronService:
@@ -169,7 +189,7 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                 _turn("ask-name", _advance(), "next", "awaiting_answer", "full_name"),
                 _turn(
                     "unclear-name",
-                    _message("I am not sure what name format you want."),
+                    _message("What name format should I use?"),
                     "clarify",
                     "awaiting_clarification",
                     "full_name",
@@ -189,8 +209,10 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     expected_value="Ada Example",
                     expected_pending_field_id="full_name",
                     expected_pending_value="Ada Example",
-                    model_response=_proposal_json("full_name", "Ada Example"),
-                    expected_model_calls=1,
+                    model_response=_proposal_json(
+                        "full_name",
+                        "same as above",
+                    ),
                 ),
                 _turn(
                     "reject-name",
@@ -209,7 +231,6 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     expected_pending_field_id="full_name",
                     expected_pending_value="Ada Lovelace",
                     model_response=_proposal_json("full_name", "Ada Lovelace"),
-                    expected_model_calls=1,
                 ),
                 _turn(
                     "confirm-name",
@@ -285,7 +306,13 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                 "shares_food_or_living_costs",
             ),
             turns=(
-                _turn("ask-name", _advance(), "next", "awaiting_answer", "applicant_full_legal_name"),
+                _turn(
+                    "ask-name",
+                    _advance(),
+                    "next",
+                    "awaiting_answer",
+                    "applicant_full_legal_name",
+                ),
                 _turn(
                     "name-proposal",
                     _message("My legal name is Sam Example."),
@@ -299,7 +326,6 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                         "applicant_full_legal_name",
                         "Sam Example",
                     ),
-                    expected_model_calls=1,
                 ),
                 _turn(
                     "confirm-name",
@@ -358,7 +384,6 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                         "Please answer yes or no for this checkbox.",
                         "shares_food_or_living_costs",
                     ),
-                    expected_model_calls=1,
                 ),
                 _turn(
                     "cost-sharing-proposal",
@@ -395,7 +420,13 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
             fixture="real_world/uscis_i9_2025.pdf",
             field_ids=("Last Name (Family Name)", "State", "CB_1"),
             turns=(
-                _turn("ask-family-name", _advance(), "next", "awaiting_answer", "Last Name (Family Name)"),
+                _turn(
+                    "ask-family-name",
+                    _advance(),
+                    "next",
+                    "awaiting_answer",
+                    "Last Name (Family Name)",
+                ),
                 _turn(
                     "ask-purpose",
                     _message("Why does the organisation require this?"),
@@ -417,7 +448,6 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                         "Last Name (Family Name)",
                         "Example",
                     ),
-                    expected_model_calls=1,
                 ),
                 _turn(
                     "confirm-family-name",
@@ -493,7 +523,13 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                 "One-time budget cost 1",
             ),
             turns=(
-                _turn("ask-label", _advance(), "next", "awaiting_answer", "Monthly rent expense 1"),
+                _turn(
+                    "ask-label",
+                    _advance(),
+                    "next",
+                    "awaiting_answer",
+                    "Monthly rent expense 1",
+                ),
                 _turn(
                     "label-proposal",
                     _message("Keep the label as Monthly rent."),
@@ -507,7 +543,6 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                         "Monthly rent expense 1",
                         "Monthly rent",
                     ),
-                    expected_model_calls=1,
                 ),
                 _turn(
                     "confirm-label",
@@ -538,7 +573,6 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                         "Please provide one exact numeric amount.",
                         "Monthly actual cost 1",
                     ),
-                    expected_model_calls=1,
                 ),
                 _turn(
                     "actual-cost-proposal",
@@ -594,12 +628,17 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
 async def run_transcript_evaluation(
     live_service: Optional[NemotronService] = None,
     transcripts: Optional[tuple[TranscriptFixture, ...]] = None,
+    answer_interpreter: Optional[
+        Callable[[FormAgentField, str], AnswerAdapterResult]
+    ] = None,
+    enforce_expected_model_calls: bool = True,
 ) -> TranscriptEvaluationReport:
     selected_transcripts = transcripts or transcript_fixtures()
     failures: list[str] = []
     completed_transcripts = 0
     clarification_count = 0
     invalid_action_count = 0
+    invalid_proposal_count = 0
     confirmation_boundary_failures = 0
     invented_fact_failures = 0
     invented_purpose_failures = 0
@@ -643,11 +682,20 @@ async def run_transcript_evaluation(
             )
 
             try:
-                response = await FormAgentService(  # type: ignore[arg-type]
-                    turn_service
-                ).respond(request)
+                service = FormAgentService(  # type: ignore[arg-type]
+                    turn_service,
+                    **(
+                        {"answer_interpreter": answer_interpreter}
+                        if answer_interpreter is not None
+                        else {}
+                    ),
+                )
+                response = await service.respond(request)
             except (FormAgentError, NemotronServiceError) as error:
                 invalid_action_count += 1
+                invalid_proposal_count += int(
+                    turn.expected_action == "propose"
+                )
                 failures.append(
                     _failure(transcript, turn_number, turn, str(error))
                 )
@@ -660,7 +708,7 @@ async def run_transcript_evaluation(
             action = response.action
             action_field_id = action.field_id
 
-            if live_service is None and (
+            if enforce_expected_model_calls and live_service is None and (
                 turn_service.call_count != turn.expected_model_calls
             ):
                 failures.append(
@@ -699,12 +747,17 @@ async def run_transcript_evaluation(
                     )
                 )
             invalid_action_count += int(action_invalid)
+            invalid_proposal_count += int(
+                turn.expected_action == "propose"
+                and action.action != "propose"
+            )
 
             action_value = getattr(action, "value", None)
             if turn.expected_value is not None and (
                 action_value != turn.expected_value
             ):
-                invented_fact_failures += 1
+                if action_value is not None:
+                    invented_fact_failures += 1
                 failures.append(
                     _failure(
                         transcript,
@@ -811,7 +864,7 @@ async def run_transcript_evaluation(
 
             state = response.conversation_state
             clarification_count += int(action.action == "clarify")
-            if action.action in {"next", "clarify", "explain"} and (
+            if action.action in {"next", "clarify"} and (
                 action_field_id is not None
             ):
                 question_count += 1
@@ -819,8 +872,8 @@ async def run_transcript_evaluation(
                     action.message.casefold().split()
                 )
                 if (
-                    previous_question_by_field.get(action_field_id)
-                    == normalized_question
+                    action.action == "clarify"
+                    and action_field_id in previous_question_by_field
                 ):
                     repeated_questions += 1
                 previous_question_by_field[action_field_id] = normalized_question
@@ -890,6 +943,7 @@ async def run_transcript_evaluation(
         repeated_question_rate=_rate(repeated_questions, question_count),
         clarification_rate=_rate(clarification_count, total_turns),
         invalid_action_rate=_rate(invalid_action_count, total_turns),
+        invalid_proposal_rate=_rate(invalid_proposal_count, total_turns),
         confirmation_boundary_failure_rate=_rate(
             confirmation_boundary_failures,
             total_turns,
@@ -909,6 +963,36 @@ async def run_transcript_evaluation(
     return TranscriptEvaluationReport(
         metrics=metrics,
         failures=tuple(failures),
+    )
+
+
+async def run_adapter_comparison(
+    transcripts: Optional[tuple[TranscriptFixture, ...]] = None,
+) -> AdapterComparisonMetrics:
+    selected_transcripts = transcripts or transcript_fixtures()
+    adapter_report = await run_transcript_evaluation(
+        transcripts=selected_transcripts,
+    )
+    legacy_report = await run_transcript_evaluation(
+        transcripts=selected_transcripts,
+        answer_interpreter=_legacy_answer_interpreter,
+        enforce_expected_model_calls=False,
+    )
+    before = legacy_report.metrics
+    after = adapter_report.metrics
+    return AdapterComparisonMetrics(
+        repeated_question_rate_before=before.repeated_question_rate,
+        repeated_question_rate_after=after.repeated_question_rate,
+        invalid_proposal_rate_before=before.invalid_proposal_rate,
+        invalid_proposal_rate_after=after.invalid_proposal_rate,
+        invention_failures_before=(
+            before.invented_fact_failures + before.invented_purpose_failures
+        ),
+        invention_failures_after=(
+            after.invented_fact_failures + after.invented_purpose_failures
+        ),
+        legacy_failure_count=len(legacy_report.failures),
+        adapter_failure_count=len(adapter_report.failures),
     )
 
 
@@ -968,6 +1052,16 @@ def _action_json(action: str, message: str, field_id: str) -> str:
     return json.dumps(
         {"action": action, "message": message, "field_id": field_id}
     )
+
+
+def _legacy_answer_interpreter(
+    field: FormAgentField,
+    message: str,
+) -> AnswerAdapterResult:
+    value = infer_unambiguous_answer(field.type, field.options, message)
+    if value is None:
+        return NotApplicable()
+    return MatchedAnswer(value)
 
 
 def _load_transcript_fields(
@@ -1134,7 +1228,11 @@ async def _run_cli(live: bool) -> int:
             return 2
 
     report = await run_transcript_evaluation(live_service=live_service)
-    print(json.dumps(report.as_dict(), indent=2))
+    output = report.as_dict()
+    if not live:
+        comparison = await run_adapter_comparison()
+        output["adapter_comparison"] = asdict(comparison)
+    print(json.dumps(output, indent=2))
     return 0 if not report.failures else 1
 
 

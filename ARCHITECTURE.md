@@ -86,6 +86,9 @@ The Form Agent is one service boundary with small internal modules:
 - `orchestrator` coordinates one turn and is the package's public service
 - `conversation_policy` owns deterministic routing, allowed transitions, and
   response wording
+- `answer_adapters` selects focused field-type interpreters from deterministic
+  field metadata and returns a matched value, a specific clarification, or a
+  signal that model interpretation is still needed
 - `prompt_builder` prepares bounded untrusted context for Nemotron
 - `response_parser` parses, canonicalizes, and validates model actions
 - `value_normalizer` validates and safely normalizes field values
@@ -138,19 +141,26 @@ confirmed values, and skipped fields.
 Normal tests use deterministic Nemotron doubles and make no network requests.
 The transcript evaluator may be run explicitly in live mode with the configured
 Nebius credentials to report model latency and calls per evaluated field. It
-does not store transcripts or add production analytics.
+does not store transcripts or add production analytics. Its offline adapter
+comparison reruns the same transcripts with the previous narrow deterministic
+interpreter to measure clarification re-prompts and invalid proposals without
+weakening invention checks.
 
 ## Field update flow
 
 For agent or voice input:
 1. The frontend sends the explicit event, conversation state, and bounded form
    context to the Form Agent.
-2. The Form Agent returns a typed action and resulting conversation state.
-3. Backend code validates the proposal's field ID, type, and available options.
-4. The frontend asks the user to confirm, edit, reject, or skip the proposal.
-5. A separate confirmation event is validated before the value enters shared
+2. The Form Agent first asks the selected field-type adapter to match or clarify
+   common answers; genuinely complex interpretation can fall through to
+   Nemotron.
+3. The Form Agent returns a typed action and resulting conversation state.
+4. Backend code validates every deterministic or model proposal through the
+   field adapter and the field's ID, type, and available options.
+5. The frontend asks the user to confirm, edit, reject, or skip the proposal.
+6. A separate confirmation event is validated before the value enters shared
    field state.
-6. The frontend sends confirmed values to the existing PDF filling endpoint.
+7. The frontend sends confirmed values to the existing PDF filling endpoint.
 
 For manual or direct-on-form input, the explicit user edit is already a
 confirmation. It updates the same shared state and uses the same PDF filling

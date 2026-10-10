@@ -359,7 +359,8 @@ def test_negated_option_is_not_treated_as_an_answer() -> None:
     ).action
 
     assert action.action == "clarify"
-    assert len(nemotron.calls) == 1
+    assert "negated choice" in action.message
+    assert len(nemotron.calls) == 0
 
 
 def test_explicit_skip_is_reliable_without_model_call() -> None:
@@ -645,9 +646,9 @@ def test_repeated_invalid_proposal_value_becomes_clarification(
     assert response.json()["action"] == {
         "action": "clarify",
         "message": (
-            "I couldn't safely match that answer for “Which option best "
-            "describes where you live?” to an available option. "
-            "Please choose one of: Rent, Own, Staying with someone."
+            "For “Which option best describes where you live?”: I could not "
+            "safely validate one value for this field. Choose one available "
+            "option: Rent, Own, Staying with someone."
         ),
         "field_id": "living_arrangement",
     }
@@ -703,9 +704,9 @@ def test_model_cannot_silently_advance_past_an_active_field() -> None:
     assert response.json()["action"] == {
         "action": "clarify",
         "message": (
-            "I couldn't safely match that answer for “Which option best "
-            "describes where you live?” to an available option. "
-            "Please choose one of: Rent, Own, Staying with someone."
+            "For “Which option best describes where you live?”: I could not "
+            "safely validate one value for this field. Choose one available "
+            "option: Rent, Own, Staying with someone."
         ),
         "field_id": "living_arrangement",
     }

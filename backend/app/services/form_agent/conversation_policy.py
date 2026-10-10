@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Optional
 
 from pydantic import TypeAdapter
 
+from .answer_adapters import (
+    AnswerAdapterResult,
+    ClarificationNeeded,
+    MatchedAnswer,
+    clarification_for_field,
+    interpret_answer,
+)
 from .models import (
     AdvanceEvent,
     ClarifyAction,
@@ -36,7 +44,6 @@ from .models import (
 )
 from .value_normalizer import (
     canonicalize_field_value,
-    infer_unambiguous_answer,
     validate_field_value,
 )
 
@@ -187,6 +194,10 @@ def unsupported_purpose_action(
 
 def deterministic_action(
     request: FormAgentRequest,
+    answer_interpreter: Callable[
+        [FormAgentField, str],
+        AnswerAdapterResult,
+    ] = interpret_answer,
 ) -> Optional[FormAgentAction]:
     fields_by_id = {field.id: field for field in request.fields}
     active_field_id = request_active_field_id(request)
@@ -283,12 +294,10 @@ def deterministic_action(
             field_id=active_field.id,
         )
 
-    inferred_value = infer_unambiguous_answer(
-        active_field.type,
-        active_field.options,
-        message,
-    )
-    if inferred_value is None:
+    adapter_result = answer_interpreter(active_field, message)
+    if isinstance(adapter_result, ClarificationNeeded):
+        return _adapter_clarification(active_field, adapter_result)
+    if not isinstance(adapter_result, MatchedAnswer):
         return None
 
     return normalize_action_message(
@@ -296,7 +305,7 @@ def deterministic_action(
             action="propose",
             message="Proposal awaiting confirmation.",
             field_id=active_field.id,
-            value=inferred_value,
+            value=adapter_result.value,
         ),
         request,
     )
@@ -516,33 +525,20 @@ def _confirmed_action(
 
 
 def _build_field_clarification(field: FormAgentField) -> ClarifyAction:
-    question = truncate_text(field_question(field), 220)
-    if field.type == "dropdown":
-        visible_options = (field.options or [])[:8]
-        options = ", ".join(visible_options)
-        if len(field.options or []) > len(visible_options):
-            options += f", and {len(field.options or []) - len(visible_options)} more"
-        message = (
-            f'I couldn\'t safely match that answer for “{question}” to an '
-            f"available option. Please choose one of: {options}."
-        )
-    elif field.type == "checkbox":
-        message = (
-            f'For “{question}”, please answer yes or no so I know whether '
-            "the box should be checked."
-        )
-    elif field.type == "number":
-        message = (
-            f'For “{question}”, please provide one exact numeric value to enter.'
-        )
-    else:
-        message = (
-            f'For “{question}”, please tell me the exact text you want entered.'
-        )
+    return _adapter_clarification(field, clarification_for_field(field))
 
+
+def _adapter_clarification(
+    field: FormAgentField,
+    clarification: ClarificationNeeded,
+) -> ClarifyAction:
+    question = truncate_text(field_question(field), 220)
     return ClarifyAction(
         action="clarify",
-        message=message,
+        message=(
+            f'For “{question}”: {clarification.reason} '
+            f"{clarification.accepted_shape}"
+        ),
         field_id=field.id,
     )
 
