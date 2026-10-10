@@ -42,6 +42,8 @@ def test_extract_uscis_i9_returns_only_terminal_fields() -> None:
         "dropdown": 5,
         "checkbox": 8,
     }
+    assert all(field["supported"] for field in fields)
+    assert all(field["editable"] for field in fields)
     assert "List A" not in fields_by_id
     assert fields_by_id["Last Name Family Name from Section 1"]["type"] == "text"
     assert fields_by_id["Additional Information"]["type"] == "textarea"

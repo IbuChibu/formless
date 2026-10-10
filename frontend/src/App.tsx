@@ -43,9 +43,12 @@ type PdfField = {
   label: string;
   type: string;
   question?: string;
+  supported: boolean;
+  editable: boolean;
   page?: number;
   options?: string[];
   value?: FieldValue;
+  capability_reason?: string;
   help_text?: string;
   section?: string;
   page_context?: string;
@@ -466,7 +469,7 @@ function App() {
 
   function updateField(fieldId: string, value: FieldValue) {
     const field = fields.find((candidate) => candidate.id === fieldId);
-    if (!field) {
+    if (!field || !field.supported || !field.editable) {
       return;
     }
 
@@ -1548,6 +1551,21 @@ type FieldControlProps = {
 function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
   const label = field.label || humanizeFieldId(field.id);
 
+  if (!field.supported || !field.editable) {
+    return (
+      <div className="unsupported-field">
+        <span>
+          <span className="field-label">{label}</span>
+          <code>{field.id}</code>
+        </span>
+        <small>
+          {field.capability_reason ??
+            `${field.type} is not editable in this form.`}
+        </small>
+      </div>
+    );
+  }
+
   if (field.type === "text") {
     return (
       <label className="field-control" htmlFor={inputId}>
@@ -1632,6 +1650,29 @@ function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
           <span className="field-label">{label}</span>
           <code>{field.id}</code>
         </span>
+      </label>
+    );
+  }
+
+  if (field.type === "radio") {
+    return (
+      <label className="field-control" htmlFor={inputId}>
+        <span className="field-label">{label}</span>
+        <select
+          id={inputId}
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          <option value="" disabled>
+            Select an option
+          </option>
+          {(field.options ?? []).map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+        <code>{field.id}</code>
       </label>
     );
   }
@@ -1762,8 +1803,12 @@ function humanizeFieldId(fieldId: string): string {
 function isExplainableField(
   field: PdfField,
 ): field is PdfField & { type: AgentFieldType } {
-  return ["text", "textarea", "number", "dropdown", "checkbox"].includes(
-    field.type,
+  return (
+    field.supported &&
+    field.editable &&
+    ["text", "textarea", "number", "dropdown", "checkbox"].includes(
+      field.type,
+    )
   );
 }
 
@@ -1849,7 +1894,7 @@ function buildAgentRequestFields(
 }
 
 function isAgentValueCompatible(
-  field: PdfField & { type: AgentFieldType },
+  field: { type: AgentFieldType; options?: string[] },
   value: FieldValue,
 ): boolean {
   if (field.type === "checkbox") {

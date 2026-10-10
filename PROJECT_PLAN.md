@@ -1039,7 +1039,7 @@ Do not implement:
 
 # Milestone 6.13.5 — Selectable AcroForm capability validation
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Determine during extraction whether checkbox, radio, and other button widgets

@@ -31,9 +31,12 @@ class PdfField:
     label: str
     type: str
     question: str
+    supported: bool
+    editable: bool
     page: Optional[int] = None
     options: Optional[list[str]] = None
     value: Optional[PdfFieldValue] = None
+    capability_reason: Optional[str] = None
     help_text: Optional[str] = None
     section: Optional[str] = None
     page_context: Optional[str] = None
@@ -118,6 +121,15 @@ class _NativePdfContext:
     identity_text: str
 
 
+@dataclass(frozen=True)
+class _FieldCapability:
+    field_type: str
+    supported: bool
+    editable: bool
+    reason: Optional[str] = None
+    export_states: tuple[str, ...] = ()
+
+
 _SIMPLE_SUM_PATTERN = re.compile(
     r'^\s*AFSimple_Calculate\(\s*"SUM"\s*,\s*new\s+Array\s*\('
     r'(?P<field_names>(?:\s*"[^"]*"\s*,?)+)'
@@ -152,6 +164,8 @@ _INSTRUCTION_TEXT_PATTERN = re.compile(
 )
 _MAX_FORM_INSTRUCTIONS = 8
 _MAX_IDENTITY_TEXT_LENGTH = 100_000
+_BUTTON_RADIO_FLAG = 1 << 15
+_BUTTON_PUSH_FLAG = 1 << 16
 
 
 def extract_acroform_fields(pdf_data: bytes) -> list[PdfField]:
@@ -173,7 +187,8 @@ def extract_acroform(pdf_data: bytes) -> PdfExtraction:
         if _is_structural_field(field) or _is_calculated_field(field):
             continue
 
-        field_type = _field_type(field)
+        capability = _field_capability(field)
+        field_type = capability.field_type
         location = widget_locations.get(field_id)
         label = _field_label(field_id, field)
         context = native_context.fields.get(field_id, _NativeFieldContext())
@@ -185,9 +200,12 @@ def extract_acroform(pdf_data: bytes) -> PdfExtraction:
                     label=label,
                     type=field_type,
                     question=context.question or label,
+                    supported=capability.supported,
+                    editable=capability.editable,
                     page=location.page if location is not None else None,
-                    options=_field_options(field, field_type),
+                    options=_field_options(field, capability),
                     value=_field_value(field, field_type),
+                    capability_reason=capability.reason,
                     help_text=context.help_text,
                     section=context.section,
                     page_context=context.page_context,
@@ -281,25 +299,240 @@ def _read_pdf(pdf_data: bytes) -> PdfReader:
 
 
 def _field_type(field: dict[str, Any]) -> str:
-    pdf_type = str(field.get("/FT", ""))
-    flags = int(field.get("/Ff", 0))
+    return _field_capability(field).field_type
+
+
+def _field_capability(field: dict[str, Any]) -> _FieldCapability:
+    pdf_type = str(_inherited_field_value(field, "/FT") or "")
+    flags = _field_flags(field)
 
     if pdf_type == "/Tx":
         if _has_standard_number_format(field):
-            return "number"
-        return "textarea" if flags & (1 << 12) else "text"
+            return _FieldCapability("number", True, True)
+        field_type = "textarea" if flags & (1 << 12) else "text"
+        return _FieldCapability(field_type, True, True)
     if pdf_type == "/Ch":
-        return "dropdown" if flags & (1 << 17) else "list"
+        if flags & (1 << 17):
+            return _FieldCapability("dropdown", True, True)
+        return _FieldCapability(
+            "list",
+            True,
+            False,
+            "List fields are not editable in the current interface.",
+        )
     if pdf_type == "/Btn":
-        if flags & (1 << 16):
-            return "button"
-        if flags & (1 << 15):
-            return "radio"
-        return "checkbox"
+        return _button_field_capability(field, flags)
     if pdf_type == "/Sig":
-        return "signature"
+        return _FieldCapability(
+            "signature",
+            False,
+            False,
+            "Signature fields cannot be filled by Formless.",
+        )
 
-    return "unknown"
+    return _FieldCapability(
+        "unknown",
+        False,
+        False,
+        "This AcroForm field type is not supported.",
+    )
+
+
+def _button_field_capability(
+    field: dict[str, Any],
+    flags: int,
+) -> _FieldCapability:
+    if flags & _BUTTON_PUSH_FLAG:
+        return _FieldCapability(
+            "button",
+            False,
+            False,
+            "Push buttons are actions, not answerable form fields.",
+        )
+
+    widgets = _button_widgets(field)
+    widget_states = [
+        _normal_appearance_states(widget) for widget in widgets
+    ]
+    non_off_states = [
+        tuple(state for state in (states or ()) if state != "/Off")
+        for states in widget_states
+    ]
+    inferred_radio = (
+        len(widgets) > 1
+        and all(len(states) == 1 for states in non_off_states)
+        and len({states[0] for states in non_off_states}) == len(widgets)
+    )
+    is_radio = bool(flags & _BUTTON_RADIO_FLAG) or inferred_radio
+    field_type = "radio" if is_radio else "checkbox"
+
+    if not widgets:
+        return _FieldCapability(
+            field_type,
+            False,
+            False,
+            "The button field has no usable widget annotations.",
+        )
+    if any(states is None for states in widget_states):
+        return _FieldCapability(
+            field_type,
+            False,
+            False,
+            "The button field is missing normal appearance states.",
+        )
+    if any(
+        not _widget_has_off_state(widget, states or frozenset())
+        for widget, states in zip(widgets, widget_states)
+    ):
+        return _FieldCapability(
+            field_type,
+            False,
+            False,
+            "The button field has no usable off state.",
+        )
+
+    export_states = tuple(
+        dict.fromkeys(
+            state
+            for states in non_off_states
+            for state in states
+        )
+    )
+    if is_radio:
+        if (
+            len(export_states) < 2
+            or any(len(states) != 1 for states in non_off_states)
+            or len(export_states) != len(widgets)
+        ):
+            return _FieldCapability(
+                "radio",
+                False,
+                False,
+                "The radio group cannot be mapped to distinct options safely.",
+            )
+        return _FieldCapability(
+            "radio",
+            True,
+            True,
+            export_states=export_states,
+        )
+
+    if not export_states:
+        return _FieldCapability(
+            "checkbox",
+            False,
+            False,
+            "The checkbox has no usable non-off export state.",
+        )
+    if len(export_states) > 1:
+        return _FieldCapability(
+            "checkbox",
+            False,
+            False,
+            "The checkbox has ambiguous non-off export states.",
+        )
+    return _FieldCapability(
+        "checkbox",
+        True,
+        True,
+        export_states=export_states,
+    )
+
+
+def _field_flags(field: dict[str, Any]) -> int:
+    raw_flags = _inherited_field_value(field, "/Ff")
+    try:
+        return int(raw_flags or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _inherited_field_value(
+    field: dict[str, Any],
+    key: str,
+) -> Any:
+    current = _field_object(field)
+    visited: set[Union[tuple[int, int], int]] = set()
+    while current is not None:
+        marker = _pdf_object_marker(current)
+        if marker in visited:
+            break
+        visited.add(marker)
+
+        value = current.get(key)
+        if value is not None:
+            return value
+        parent_reference = current.get("/Parent")
+        current = (
+            _resolve_pdf_object(parent_reference)
+            if parent_reference is not None
+            else None
+        )
+
+    return field.get(key)
+
+
+def _button_widgets(field: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    widgets: list[dict[str, Any]] = []
+    visited: set[Union[tuple[int, int], int]] = set()
+
+    def visit(node: Any) -> None:
+        resolved = _resolve_pdf_object(node)
+        if not hasattr(resolved, "get"):
+            return
+        marker = _pdf_object_marker(resolved)
+        if marker in visited:
+            return
+        visited.add(marker)
+
+        if str(resolved.get("/Subtype")) == "/Widget":
+            widgets.append(resolved)
+        for child in resolved.get("/Kids", []):
+            visit(child)
+
+    visit(_field_object(field))
+    return tuple(widgets)
+
+
+def _normal_appearance_states(
+    widget: dict[str, Any],
+) -> Optional[frozenset[str]]:
+    appearance = _resolve_pdf_object(widget.get("/AP"))
+    if not hasattr(appearance, "get"):
+        return None
+    normal = _resolve_pdf_object(appearance.get("/N"))
+    if normal is None or hasattr(normal, "get_data"):
+        return None
+    if not hasattr(normal, "keys"):
+        return None
+    states = frozenset(str(state) for state in normal.keys())
+    return states or None
+
+
+def _widget_has_off_state(
+    widget: dict[str, Any],
+    appearance_states: frozenset[str],
+) -> bool:
+    if "/Off" in appearance_states:
+        return True
+    return str(_inherited_field_value(widget, "/AS")) == "/Off"
+
+
+def _field_object(field: dict[str, Any]) -> dict[str, Any]:
+    reference = getattr(field, "indirect_reference", None)
+    resolved = _resolve_pdf_object(reference) if reference is not None else field
+    return resolved if hasattr(resolved, "get") else field
+
+
+def _resolve_pdf_object(value: Any) -> Any:
+    return value.get_object() if hasattr(value, "get_object") else value
+
+
+def _pdf_object_marker(value: Any) -> Union[tuple[int, int], int]:
+    reference = getattr(value, "indirect_reference", None)
+    if reference is not None:
+        return (reference.idnum, reference.generation)
+    return id(value)
 
 
 def _normalize_fill_value(
@@ -307,7 +540,13 @@ def _normalize_fill_value(
     field: dict[str, Any],
     value: PdfFieldValue,
 ) -> str:
-    field_type = _field_type(field)
+    capability = _field_capability(field)
+    field_type = capability.field_type
+    if not capability.supported:
+        reason = capability.reason or "The field is not supported."
+        raise PdfFillingError(
+            f"Field '{field_id}' cannot be filled safely: {reason}"
+        )
 
     if field_type in {"text", "textarea"}:
         if not isinstance(value, str):
@@ -323,7 +562,7 @@ def _normalize_fill_value(
         if not isinstance(value, str):
             raise PdfFillingError(f"Field '{field_id}' requires a string value")
 
-        options = _field_options(field, field_type) or []
+        options = _field_options(field, capability) or []
         if value not in options:
             raise PdfFillingError(f"Invalid option for field '{field_id}': {value}")
         return value
@@ -332,21 +571,31 @@ def _normalize_fill_value(
         if not isinstance(value, bool):
             raise PdfFillingError(f"Field '{field_id}' requires a boolean value")
 
-        states = [str(state) for state in field.get("/_States_", [])]
-        selected_states = [state for state in states if state != "/Off"]
-        if value and not selected_states:
-            raise PdfFillingError(f"Field '{field_id}' has no selectable state")
-        return selected_states[0] if value else "/Off"
+        return capability.export_states[0] if value else "/Off"
+
+    if field_type == "radio":
+        if not isinstance(value, str):
+            raise PdfFillingError(f"Field '{field_id}' requires a string value")
+        options = _field_options(field, capability) or []
+        if value not in options:
+            raise PdfFillingError(f"Invalid option for field '{field_id}': {value}")
+        return capability.export_states[options.index(value)]
 
     raise PdfFillingError(
         f"Field '{field_id}' has unsupported type '{field_type}'"
     )
 
 
-def _field_options(field: dict[str, Any], field_type: str) -> Optional[list[str]]:
+def _field_options(
+    field: dict[str, Any],
+    capability: _FieldCapability,
+) -> Optional[list[str]]:
+    field_type = capability.field_type
+    if field_type == "radio":
+        options = [state.removeprefix("/") for state in capability.export_states]
+        return options or None
+
     raw_options = field.get("/Opt")
-    if raw_options is None and field_type == "radio":
-        raw_options = field.get("/_States_")
     if raw_options is None:
         return None
 
@@ -356,9 +605,7 @@ def _field_options(field: dict[str, Any], field_type: str) -> Optional[list[str]
             raw_option = raw_option[1]
 
         option = str(raw_option)
-        if field_type == "radio" and option == "/Off":
-            continue
-        options.append(option.removeprefix("/") if field_type == "radio" else option)
+        options.append(option)
 
     return options or None
 

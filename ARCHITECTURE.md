@@ -55,9 +55,13 @@ Responsible for:
 Responsible for:
 - extracting PDF fields
 - returning stable field IDs and display metadata
+- validating button-widget appearance/export states and returning deterministic
+  supported, editable, and capability-reason metadata
 - identifying explicitly supported form editions from exact local signatures
 - returning widget geometry when direct-on-form editing is implemented
 - filling PDF fields
+- validating submitted choice values against the same capability rules used
+  during extraction
 - producing completed PDFs
 
 Must not:

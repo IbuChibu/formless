@@ -47,9 +47,12 @@ class PdfFieldResponse(BaseModel):
     label: str
     type: str
     question: str
+    supported: bool
+    editable: bool
     page: Optional[int] = None
     options: Optional[list[str]] = None
     value: Optional[PdfFieldValue] = None
+    capability_reason: Optional[str] = None
     help_text: Optional[str] = None
     section: Optional[str] = None
     page_context: Optional[str] = None
@@ -178,9 +181,12 @@ async def extract_pdf_fields(file: UploadFile = File(...)) -> PdfExtractionRespo
                 label=field.label,
                 type=field.type,
                 question=field.question,
+                supported=field.supported,
+                editable=field.editable,
                 page=field.page,
                 options=field.options,
                 value=field.value,
+                capability_reason=field.capability_reason,
                 help_text=field.help_text,
                 section=field.section,
                 page_context=field.page_context,
