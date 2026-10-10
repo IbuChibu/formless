@@ -8,8 +8,23 @@ type ExtractionStatus = "idle" | "loading" | "ready" | "empty" | "error";
 type PreviewStatus = "idle" | "pending" | "updating" | "ready" | "error";
 type AgentStatus = "idle" | "loading" | "error";
 type FieldValue = string | boolean;
-type AgentActionKind = "explain" | "clarify" | "propose" | "skip" | "next";
+type AgentActionKind =
+  | "explain"
+  | "clarify"
+  | "propose"
+  | "skip"
+  | "next"
+  | "confirmed"
+  | "rejected";
 type AgentFieldStatus = "unanswered" | "confirmed" | "skipped";
+type ConversationPhase =
+  | "asking"
+  | "awaiting_answer"
+  | "awaiting_clarification"
+  | "awaiting_confirmation"
+  | "field_confirmed"
+  | "field_skipped"
+  | "form_complete";
 type AgentFieldType =
   | "text"
   | "textarea"
@@ -72,14 +87,37 @@ type AgentHistoryMessage = {
 type AgentRequest = {
   form_context: FormContext;
   fields: AgentRequestField[];
-  active_field_id: string | null;
-  message: string;
+  conversation_state: ConversationState;
+  event: AgentEvent;
   history: AgentHistoryMessage[];
 };
 
+type PendingProposal = {
+  field_id: string;
+  value: FieldValue;
+};
+
+type ConversationState = {
+  phase: ConversationPhase;
+  active_field_id: string | null;
+  pending_proposal: PendingProposal | null;
+};
+
+type AgentEvent =
+  | { type: "advance" }
+  | { type: "message"; content: string }
+  | { type: "focus_field"; field_id: string; content: string }
+  | { type: "confirm" }
+  | { type: "confirm_edit"; value: FieldValue }
+  | { type: "reject" }
+  | { type: "skip" };
+
 type AgentAction =
   | {
-      action: Exclude<AgentActionKind, "propose" | "next">;
+      action: Exclude<
+        AgentActionKind,
+        "propose" | "next" | "confirmed"
+      >;
       message: string;
       field_id: string;
     }
@@ -93,18 +131,24 @@ type AgentAction =
       action: "next";
       message: string;
       field_id: string | null;
+    }
+  | {
+      action: "confirmed";
+      message: string;
+      field_id: string;
+      value: FieldValue;
     };
+
+type AgentResponse = {
+  action: AgentAction;
+  conversation_state: ConversationState;
+};
 
 type ConversationMessage = AgentHistoryMessage & {
   id: number;
   action?: AgentActionKind;
   fieldId?: string | null;
   proposedValue?: FieldValue;
-};
-
-type PendingProposal = {
-  fieldId: string;
-  value: FieldValue;
 };
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -141,17 +185,14 @@ function App() {
   const [skippedFieldIds, setSkippedFieldIds] = useState<Set<string>>(
     new Set(),
   );
-  const [agentActiveFieldId, setAgentActiveFieldId] = useState<string | null>(
-    null,
-  );
+  const [agentConversationState, setAgentConversationState] =
+    useState<ConversationState>(createInitialConversationState());
   const [agentMessages, setAgentMessages] = useState<ConversationMessage[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
   const [agentInput, setAgentInput] = useState("");
   const [agentError, setAgentError] = useState<string | null>(null);
   const [failedAgentRequest, setFailedAgentRequest] =
     useState<AgentRequest | null>(null);
-  const [pendingProposal, setPendingProposal] =
-    useState<PendingProposal | null>(null);
   const [isEditingProposal, setIsEditingProposal] = useState(false);
   const [proposalEditValue, setProposalEditValue] =
     useState<FieldValue>("");
@@ -308,13 +349,12 @@ function App() {
     setPreviewError(null);
     setConfirmedFieldIds(new Set());
     setSkippedFieldIds(new Set());
-    setAgentActiveFieldId(null);
+    setAgentConversationState(createInitialConversationState());
     setAgentMessages([]);
     setAgentStatus("idle");
     setAgentInput("");
     setAgentError(null);
     setFailedAgentRequest(null);
-    setPendingProposal(null);
     setIsEditingProposal(false);
     setProposalEditValue("");
     setManualDrawerOpen(false);
@@ -382,8 +422,16 @@ function App() {
 
     writeFieldValue(fieldId, value, isConfirmed);
 
-    if (pendingProposal?.fieldId === fieldId) {
-      clearPendingProposal();
+    if (
+      agentConversationState.active_field_id === fieldId ||
+      agentConversationState.pending_proposal?.field_id === fieldId
+    ) {
+      setAgentConversationState({
+        phase: isConfirmed ? "field_confirmed" : "awaiting_answer",
+        active_field_id: fieldId,
+        pending_proposal: null,
+      });
+      resetProposalEditor();
     }
   }
 
@@ -408,26 +456,23 @@ function App() {
       next.delete(fieldId);
       return next;
     });
-    if (isConfirmed && agentActiveFieldId === fieldId) {
-      setAgentActiveFieldId(null);
-    }
     setPreviewError(null);
     setPreviewStatus("pending");
   }
 
-  function clearPendingProposal() {
-    setPendingProposal(null);
+  function resetProposalEditor() {
     setIsEditingProposal(false);
     setProposalEditValue("");
   }
 
   function confirmPendingProposal(value: FieldValue) {
+    const pendingProposal = agentConversationState.pending_proposal;
     if (!pendingProposal) {
       return;
     }
 
     const field = fields.find(
-      (candidate) => candidate.id === pendingProposal.fieldId,
+      (candidate) => candidate.id === pendingProposal.field_id,
     );
     if (
       !field ||
@@ -441,63 +486,25 @@ function App() {
       return;
     }
 
-    writeFieldValue(field.id, value, true);
-    appendAgentMessage({
-      role: "assistant",
-      content: `Confirmed — I added ${formatAgentValue(value)} to “${
-        field.label || humanizeFieldId(field.id)
-      }”. Continue when you’re ready.`,
-      fieldId: field.id,
-    });
-    clearPendingProposal();
-    setAgentActiveFieldId(null);
-    setAgentError(null);
-    setFailedAgentRequest(null);
-    setAgentStatus("idle");
+    sendAgentEvent(
+      value === pendingProposal.value
+        ? { type: "confirm" }
+        : { type: "confirm_edit", value },
+    );
   }
 
   function rejectPendingProposal() {
-    const rejectedFieldId = pendingProposal?.fieldId;
-    clearPendingProposal();
-    if (rejectedFieldId) {
-      appendAgentMessage({
-        role: "assistant",
-        content:
-          "No problem — I haven’t used that proposal. Tell me what you’d like to enter instead.",
-        fieldId: rejectedFieldId,
-      });
+    if (!agentConversationState.pending_proposal) {
+      return;
     }
-    setAgentError(null);
-    setFailedAgentRequest(null);
-    setAgentStatus("idle");
+    sendAgentEvent({ type: "reject" });
   }
 
   function skipPendingProposal() {
-    if (!pendingProposal) {
+    if (!agentConversationState.pending_proposal) {
       return;
     }
-
-    const fieldId = pendingProposal.fieldId;
-    const field = fields.find((candidate) => candidate.id === fieldId);
-    setConfirmedFieldIds((current) => {
-      const next = new Set(current);
-      next.delete(fieldId);
-      return next;
-    });
-    setSkippedFieldIds((current) => new Set(current).add(fieldId));
-    appendAgentMessage({
-      role: "assistant",
-      content: `No problem — I’ll leave “${
-        field?.label || humanizeFieldId(fieldId)
-      }” unanswered for now. Continue when you’re ready.`,
-      action: "skip",
-      fieldId,
-    });
-    clearPendingProposal();
-    setAgentActiveFieldId(null);
-    setAgentError(null);
-    setFailedAgentRequest(null);
-    setAgentStatus("idle");
+    sendAgentEvent({ type: "skip" });
   }
 
   function appendAgentMessage(message: Omit<ConversationMessage, "id">) {
@@ -528,7 +535,11 @@ function App() {
         throw new Error(await readApiError(response));
       }
 
-      const action = parseAgentAction(await response.json(), request.fields);
+      const agentResponse = parseAgentResponse(
+        await response.json(),
+        request.fields,
+      );
+      const { action, conversation_state: conversationState } = agentResponse;
 
       if (controller.signal.aborted) {
         return;
@@ -544,14 +555,14 @@ function App() {
           : {}),
       });
 
+      setAgentConversationState(conversationState);
+
       if (action.action === "propose") {
-        setPendingProposal({
-          fieldId: action.field_id,
-          value: action.value,
-        });
         setProposalEditValue(action.value);
         setIsEditingProposal(false);
-        setAgentActiveFieldId(action.field_id);
+      } else if (action.action === "confirmed") {
+        writeFieldValue(action.field_id, action.value, true);
+        resetProposalEditor();
       } else if (action.action === "skip") {
         const skippedField = request.fields.find(
           (field) => field.id === action.field_id,
@@ -561,12 +572,14 @@ function App() {
             new Set(current).add(action.field_id),
           );
         }
-        if (pendingProposal?.fieldId === action.field_id) {
-          clearPendingProposal();
-        }
-        setAgentActiveFieldId(null);
-      } else {
-        setAgentActiveFieldId(action.field_id);
+        setConfirmedFieldIds((current) => {
+          const next = new Set(current);
+          next.delete(action.field_id);
+          return next;
+        });
+        resetProposalEditor();
+      } else if (conversationState.phase !== "awaiting_confirmation") {
+        resetProposalEditor();
       }
       setAgentStatus("idle");
     } catch (error) {
@@ -584,12 +597,8 @@ function App() {
     }
   }
 
-  function sendAgentMessage(
-    message: string,
-    activeFieldOverride?: string | null,
-  ) {
-    const normalizedMessage = message.trim();
-    if (!normalizedMessage || agentStatus === "loading") {
+  function sendAgentEvent(event: AgentEvent, visibleMessage?: string) {
+    if (agentStatus === "loading") {
       return;
     }
 
@@ -610,19 +619,29 @@ function App() {
     const request: AgentRequest = {
       form_context: formContext,
       fields: requestFields,
-      active_field_id:
-        activeFieldOverride === undefined
-          ? agentActiveFieldId
-          : activeFieldOverride,
-      message: normalizedMessage,
+      conversation_state: agentConversationState,
+      event,
       history: agentMessages
         .slice(-maxAgentHistoryMessages)
         .map(({ role, content }) => ({ role, content })),
     };
 
-    appendAgentMessage({ role: "user", content: normalizedMessage });
+    if (visibleMessage) {
+      appendAgentMessage({ role: "user", content: visibleMessage });
+    }
     setAgentInput("");
     void requestAgent(request);
+  }
+
+  function sendAgentMessage(message: string) {
+    const normalizedMessage = message.trim();
+    if (!normalizedMessage) {
+      return;
+    }
+    sendAgentEvent(
+      { type: "message", content: normalizedMessage },
+      normalizedMessage,
+    );
   }
 
   function submitAgentMessage(event: FormEvent<HTMLFormElement>) {
@@ -648,6 +667,8 @@ function App() {
     ? `completed-${selectedFile.name}`
     : "completed-form.pdf";
   const fieldGroups = groupFieldsByPage(fields);
+  const agentActiveFieldId = agentConversationState.active_field_id;
+  const pendingProposal = agentConversationState.pending_proposal;
   const activeAgentField = fields.find(
     (field) => field.id === agentActiveFieldId,
   );
@@ -677,7 +698,7 @@ function App() {
     (field) => field.id === agentActiveFieldId,
   );
   const pendingProposalPdfField = fields.find(
-    (field) => field.id === pendingProposal?.fieldId,
+    (field) => field.id === pendingProposal?.field_id,
   );
   const pendingProposalField =
     pendingProposalPdfField && isExplainableField(pendingProposalPdfField)
@@ -689,6 +710,16 @@ function App() {
   );
   const canUseAgent =
     extractionStatus === "ready" && currentAgentFields.length > 0;
+  const canAdvanceAgent = [
+    "asking",
+    "field_confirmed",
+    "field_skipped",
+  ].includes(agentConversationState.phase);
+  const canSendAgentMessage = [
+    "awaiting_answer",
+    "awaiting_clarification",
+    "awaiting_confirmation",
+  ].includes(agentConversationState.phase);
 
   return (
     <div className="app-shell">
@@ -902,14 +933,15 @@ function App() {
                       </strong>
                     </div>
                     {activeAgentFieldState?.status === "unanswered" &&
-                    !pendingProposal ? (
+                    !pendingProposal &&
+                    ["awaiting_answer", "awaiting_clarification"].includes(
+                      agentConversationState.phase,
+                    ) ? (
                       <button
                         className="agent-skip-button"
                         type="button"
                         disabled={agentStatus === "loading"}
-                        onClick={() =>
-                          sendAgentMessage("Skip this field for now.")
-                        }
+                        onClick={() => sendAgentEvent({ type: "skip" })}
                       >
                         Skip
                       </button>
@@ -1113,20 +1145,13 @@ function App() {
                 ) : null}
 
                 {canUseAgent &&
-                !activeAgentField &&
+                canAdvanceAgent &&
                 hasUnansweredAgentField &&
                 agentStatus !== "loading" ? (
                   <button
                     className="agent-progress-button"
                     type="button"
-                    onClick={() =>
-                      sendAgentMessage(
-                        agentMessages.length === 0
-                          ? "Start with the first unanswered field."
-                          : "Continue to the next unanswered field.",
-                        null,
-                      )
-                    }
+                    onClick={() => sendAgentEvent({ type: "advance" })}
                   >
                     {agentMessages.length === 0
                       ? "Start guided form"
@@ -1135,8 +1160,7 @@ function App() {
                 ) : null}
 
                 {canUseAgent &&
-                !activeAgentField &&
-                !hasUnansweredAgentField ? (
+                agentConversationState.phase === "form_complete" ? (
                   <p className="agent-complete-state">
                     No unanswered supported fields remain.
                   </p>
@@ -1150,7 +1174,7 @@ function App() {
                     <label htmlFor="agent-message">
                       {activeAgentField
                         ? "Reply or ask a follow-up"
-                        : "Message the form assistant"}
+                        : "Start or continue the guided form"}
                     </label>
                     <div className="ai-question-controls">
                       <input
@@ -1163,13 +1187,17 @@ function App() {
                             : "Ask for help with the form"
                         }
                         value={agentInput}
-                        disabled={agentStatus === "loading"}
+                        disabled={
+                          agentStatus === "loading" || !canSendAgentMessage
+                        }
                         onChange={(event) => setAgentInput(event.target.value)}
                       />
                       <button
                         type="submit"
                         disabled={
-                          agentStatus === "loading" || !agentInput.trim()
+                          agentStatus === "loading" ||
+                          !agentInput.trim() ||
+                          !canSendAgentMessage
                         }
                       >
                         Send
@@ -1240,6 +1268,9 @@ function App() {
                             {group.fields.map(({ field, index }) => {
                               const isActiveForAgent =
                                 agentActiveFieldId === field.id;
+                              const agentFieldState = currentAgentFields.find(
+                                (candidate) => candidate.id === field.id,
+                              );
                               const isAskingAgent =
                                 isActiveForAgent &&
                                 agentStatus === "loading";
@@ -1267,16 +1298,22 @@ function App() {
                                       type="button"
                                       disabled={
                                         agentStatus === "loading" ||
-                                        pendingProposal !== null
+                                        pendingProposal !== null ||
+                                        agentFieldState?.status !== "unanswered"
                                       }
                                       aria-label={`Explain ${
                                         field.label || humanizeFieldId(field.id)
                                       } with AI`}
                                       onClick={() => {
-                                        setAgentActiveFieldId(field.id);
-                                        sendAgentMessage(
-                                          "Please explain this field in plain language.",
-                                          field.id,
+                                        const message =
+                                          "Please explain this field in plain language.";
+                                        sendAgentEvent(
+                                          {
+                                            type: "focus_field",
+                                            field_id: field.id,
+                                            content: message,
+                                          },
+                                          message,
                                         );
                                       }}
                                     >
@@ -1674,6 +1711,23 @@ function isPlaceholderDropdownOption(option: string): boolean {
   return dropdownPlaceholderPattern.test(normalizedOption);
 }
 
+function parseAgentResponse(
+  payload: unknown,
+  requestFields: AgentRequestField[],
+): AgentResponse {
+  if (!isRecord(payload)) {
+    throw new Error("The API returned an invalid form assistant response.");
+  }
+
+  const action = parseAgentAction(payload.action, requestFields);
+  const conversationState = parseConversationState(
+    payload.conversation_state,
+    requestFields,
+  );
+  validateAgentResponseState(action, conversationState);
+  return { action, conversation_state: conversationState };
+}
+
 function parseAgentAction(
   payload: unknown,
   requestFields: AgentRequestField[],
@@ -1708,7 +1762,7 @@ function parseAgentAction(
     throw new Error("The form assistant returned an unknown field.");
   }
 
-  if (payload.action === "propose") {
+  if (payload.action === "propose" || payload.action === "confirmed") {
     const value = payload.value;
     if (
       (typeof value !== "string" && typeof value !== "boolean") ||
@@ -1716,15 +1770,111 @@ function parseAgentAction(
     ) {
       throw new Error("The form assistant returned an invalid proposal.");
     }
-    return {
-      action: "propose",
-      message,
-      field_id: fieldId,
-      value,
-    };
+    return payload.action === "propose"
+      ? { action: "propose", message, field_id: fieldId, value }
+      : { action: "confirmed", message, field_id: fieldId, value };
   }
 
   return { action: payload.action, message, field_id: fieldId };
+}
+
+function parseConversationState(
+  payload: unknown,
+  requestFields: AgentRequestField[],
+): ConversationState {
+  if (
+    !isRecord(payload) ||
+    !isConversationPhase(payload.phase) ||
+    (payload.active_field_id !== null &&
+      typeof payload.active_field_id !== "string")
+  ) {
+    throw new Error("The API returned an invalid conversation state.");
+  }
+
+  const activeFieldId = payload.active_field_id;
+  if (
+    typeof activeFieldId === "string" &&
+    !findAgentField(requestFields, activeFieldId)
+  ) {
+    throw new Error("The conversation state referenced an unknown field.");
+  }
+
+  let pendingProposal: PendingProposal | null = null;
+  if (payload.pending_proposal !== null) {
+    if (!isRecord(payload.pending_proposal)) {
+      throw new Error("The API returned an invalid pending proposal.");
+    }
+    const pendingFieldId = payload.pending_proposal.field_id;
+    const pendingValue = payload.pending_proposal.value;
+    const pendingField =
+      typeof pendingFieldId === "string"
+        ? findAgentField(requestFields, pendingFieldId)
+        : undefined;
+    if (
+      !pendingField ||
+      (typeof pendingValue !== "string" &&
+        typeof pendingValue !== "boolean") ||
+      !isAgentValueCompatible(pendingField, pendingValue)
+    ) {
+      throw new Error("The API returned an invalid pending proposal.");
+    }
+    pendingProposal = { field_id: pendingField.id, value: pendingValue };
+  }
+
+  const state: ConversationState = {
+    phase: payload.phase,
+    active_field_id: activeFieldId,
+    pending_proposal: pendingProposal,
+  };
+  const phaseNeedsActiveField = [
+    "awaiting_answer",
+    "awaiting_clarification",
+    "awaiting_confirmation",
+    "field_confirmed",
+    "field_skipped",
+  ].includes(state.phase);
+  if (
+    (phaseNeedsActiveField && state.active_field_id === null) ||
+    (["asking", "form_complete"].includes(state.phase) &&
+      state.active_field_id !== null) ||
+    (state.phase === "awaiting_confirmation" &&
+      (state.pending_proposal === null ||
+        state.pending_proposal.field_id !== state.active_field_id)) ||
+    (state.phase !== "awaiting_confirmation" &&
+      state.pending_proposal !== null)
+  ) {
+    throw new Error("The API returned an invalid conversation state.");
+  }
+  return state;
+}
+
+function validateAgentResponseState(
+  action: AgentAction,
+  state: ConversationState,
+) {
+  if (action.field_id !== state.active_field_id) {
+    throw new Error("The assistant response and conversation state disagree.");
+  }
+
+  const validPhase =
+    (action.action === "propose" &&
+      state.phase === "awaiting_confirmation" &&
+      state.pending_proposal?.field_id === action.field_id &&
+      state.pending_proposal.value === action.value) ||
+    (action.action === "confirmed" && state.phase === "field_confirmed") ||
+    (action.action === "rejected" && state.phase === "awaiting_answer") ||
+    (action.action === "skip" && state.phase === "field_skipped") ||
+    (action.action === "explain" && state.phase === "awaiting_answer") ||
+    (action.action === "clarify" &&
+      ["awaiting_clarification", "awaiting_confirmation"].includes(
+        state.phase,
+      )) ||
+    (action.action === "next" &&
+      ((action.field_id === null && state.phase === "form_complete") ||
+        (action.field_id !== null && state.phase === "awaiting_answer")));
+  if (!validPhase) {
+    throw new Error("The assistant returned an invalid state transition.");
+  }
 }
 
 function findAgentField(
@@ -1735,9 +1885,27 @@ function findAgentField(
 }
 
 function isAgentActionKind(value: unknown): value is AgentActionKind {
-  return ["explain", "clarify", "propose", "skip", "next"].includes(
-    value as AgentActionKind,
-  );
+  return [
+    "explain",
+    "clarify",
+    "propose",
+    "skip",
+    "next",
+    "confirmed",
+    "rejected",
+  ].includes(value as AgentActionKind);
+}
+
+function isConversationPhase(value: unknown): value is ConversationPhase {
+  return [
+    "asking",
+    "awaiting_answer",
+    "awaiting_clarification",
+    "awaiting_confirmation",
+    "field_confirmed",
+    "field_skipped",
+    "form_complete",
+  ].includes(value as ConversationPhase);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1763,9 +1931,19 @@ function getAgentActionLabel(action?: AgentActionKind): string {
     propose: "Proposal",
     skip: "Skipped",
     next: "Next field",
+    confirmed: "Confirmed",
+    rejected: "Rejected",
   };
 
   return action ? labels[action] : "Form assistant";
+}
+
+function createInitialConversationState(): ConversationState {
+  return {
+    phase: "asking",
+    active_field_id: null,
+    pending_proposal: null,
+  };
 }
 
 function formatAgentValue(value: FieldValue): string {

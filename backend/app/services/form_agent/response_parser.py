@@ -9,14 +9,16 @@ from .models import (
     FormAgentAction,
     FormAgentError,
     FormAgentRequest,
+    ModelAction,
     NextAction,
     ProposeAction,
     SkipAction,
+    request_active_field_id,
 )
 from .value_normalizer import canonicalize_field_value, validate_field_value
 
 
-_ACTION_ADAPTER = TypeAdapter(FormAgentAction)
+_ACTION_ADAPTER = TypeAdapter(ModelAction)
 
 
 def parse_action(raw_action: str) -> FormAgentAction:
@@ -75,10 +77,11 @@ def validate_action_against_request(
             raise FormAgentError("Form Agent returned an invalid action")
         return
 
-    if (
-        request.active_field_id is None
-        and unanswered_fields
-        and not isinstance(action, NextAction)
+    active_field_id = request_active_field_id(request)
+
+    if active_field_id is None and unanswered_fields and not isinstance(
+        action,
+        NextAction,
     ):
         raise FormAgentError(
             "Form Agent returned an action without an active field"
@@ -89,9 +92,9 @@ def validate_action_against_request(
         raise FormAgentError("Form Agent returned an unknown field ID")
 
     if (
-        request.active_field_id is not None
+        active_field_id is not None
         and not isinstance(action, NextAction)
-        and action.field_id != request.active_field_id
+        and action.field_id != active_field_id
     ):
         raise FormAgentError(
             "Form Agent returned an action for the wrong active field"
@@ -117,6 +120,10 @@ def validate_action_against_request(
         )
 
     if isinstance(action, ProposeAction):
+        if field.status != "unanswered":
+            raise FormAgentError(
+                "Form Agent returned a resolved field as a proposal"
+            )
         try:
             validate_field_value(field.type, field.options, action.value)
         except ValueError as error:

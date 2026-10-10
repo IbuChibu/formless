@@ -8,10 +8,12 @@ from .conversation_policy import (
     deterministic_action,
     invalid_value_clarification,
     normalize_action_message,
+    response_for_action,
     unexpected_navigation_clarification,
     unsupported_purpose_action,
+    validate_event_transition,
 )
-from .models import FormAgentAction, FormAgentError, FormAgentRequest
+from .models import FormAgentError, FormAgentRequest, FormAgentResponse
 from .prompt_builder import (
     build_correction_user_prompt,
     build_user_prompt,
@@ -28,14 +30,16 @@ class FormAgentService:
     def __init__(self, nemotron_service: NemotronService) -> None:
         self._nemotron_service = nemotron_service
 
-    async def respond(self, request: FormAgentRequest) -> FormAgentAction:
+    async def respond(self, request: FormAgentRequest) -> FormAgentResponse:
+        validate_event_transition(request)
+
         purpose_action = unsupported_purpose_action(request)
         if purpose_action is not None:
-            return purpose_action
+            return response_for_action(purpose_action, request)
 
         policy_action = deterministic_action(request)
         if policy_action is not None:
-            return policy_action
+            return response_for_action(policy_action, request)
 
         user_prompt = build_user_prompt(request)
         validation_error: Optional[FormAgentError] = None
@@ -55,7 +59,10 @@ class FormAgentService:
                     unexpected_navigation_clarification(action, request)
                 )
                 if navigation_clarification is not None:
-                    return navigation_clarification
+                    return response_for_action(
+                        navigation_clarification,
+                        request,
+                    )
                 validate_action_against_request(action, request)
             except FormAgentError as error:
                 validation_error = error
@@ -67,7 +74,10 @@ class FormAgentService:
                     )
                 continue
 
-            return normalize_action_message(action, request)
+            return response_for_action(
+                normalize_action_message(action, request),
+                request,
+            )
 
         if validation_error is None:
             raise FormAgentError("Form Agent returned an invalid action")
@@ -76,5 +86,5 @@ class FormAgentService:
             request,
         )
         if clarification is not None:
-            return clarification
+            return response_for_action(clarification, request)
         raise validation_error

@@ -651,7 +651,7 @@ Do not implement:
 
 # Milestone 6.9 — Explicit conversation state machine
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Replace inferred conversation phases with an explicit, validated state machine

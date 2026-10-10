@@ -121,9 +121,10 @@ def test_agent_returns_a_validated_proposal_without_confirming_it() -> None:
     )
     request = FormAgentRequest.model_validate(agent_request_payload())
 
-    action = asyncio.run(
+    response = asyncio.run(
         FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
     )
+    action = response.action
 
     assert action.model_dump() == {
         "action": "propose",
@@ -134,6 +135,14 @@ def test_agent_returns_a_validated_proposal_without_confirming_it() -> None:
         ),
         "field_id": "living_arrangement",
         "value": "Rent",
+    }
+    assert response.conversation_state.model_dump() == {
+        "phase": "awaiting_confirmation",
+        "active_field_id": "living_arrangement",
+        "pending_proposal": {
+            "field_id": "living_arrangement",
+            "value": "Rent",
+        },
     }
     assert request.fields[1].status == "unanswered"
     assert request.fields[1].confirmed_value is None
@@ -165,7 +174,7 @@ def test_agent_retries_one_invalid_proposal_schema() -> None:
 
     action = asyncio.run(
         FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
-    )
+    ).action
 
     assert action.action == "propose"
     assert action.value == "Rent"
@@ -194,7 +203,7 @@ def test_agent_correction_retry_explains_an_invalid_proposal_value() -> None:
 
     action = asyncio.run(
         FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
-    )
+    ).action
 
     assert action.action == "propose"
     assert action.value == "Rent"
@@ -260,7 +269,7 @@ def test_agent_canonicalizes_safe_proposal_formatting(
         FormAgentService(nemotron).respond(  # type: ignore[arg-type]
             FormAgentRequest.model_validate(payload)
         )
-    )
+    ).action
 
     assert action.action == "propose"
     assert action.value == expected_value
@@ -308,7 +317,7 @@ def test_agent_handles_unambiguous_structured_answers_without_model_call(
         FormAgentService(nemotron).respond(  # type: ignore[arg-type]
             FormAgentRequest.model_validate(payload)
         )
-    )
+    ).action
 
     assert action.action == "propose"
     assert action.field_id == field_id
@@ -329,7 +338,7 @@ def test_option_in_an_explanatory_question_is_not_treated_as_an_answer() -> None
         FormAgentService(nemotron).respond(  # type: ignore[arg-type]
             FormAgentRequest.model_validate(payload)
         )
-    )
+    ).action
 
     assert action.action == "explain"
     assert len(nemotron.calls) == 1
@@ -347,7 +356,7 @@ def test_negated_option_is_not_treated_as_an_answer() -> None:
         FormAgentService(nemotron).respond(  # type: ignore[arg-type]
             FormAgentRequest.model_validate(payload)
         )
-    )
+    ).action
 
     assert action.action == "clarify"
     assert len(nemotron.calls) == 1
@@ -362,7 +371,7 @@ def test_explicit_skip_is_reliable_without_model_call() -> None:
         FormAgentService(nemotron).respond(  # type: ignore[arg-type]
             FormAgentRequest.model_validate(payload)
         )
-    )
+    ).action
 
     assert action.model_dump() == {
         "action": "skip",
@@ -405,7 +414,7 @@ def test_agent_supports_each_model_reasoning_action(
     )
 
     assert response.status_code == 200
-    assert response.json()["action"] == expected_action
+    assert response.json()["action"]["action"] == expected_action
 
 
 def test_next_asks_the_selected_field_instead_of_repeating_navigation() -> None:
@@ -421,7 +430,7 @@ def test_next_asks_the_selected_field_instead_of_repeating_navigation() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    assert response.json()["action"] == {
         "action": "next",
         "message": "Full name. What should be entered here?",
         "field_id": "full_name",
@@ -451,7 +460,7 @@ def test_next_prefers_the_grounded_question_over_the_field_label() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    assert response.json()["action"] == {
         "action": "next",
         "message": "Last Name (Family Name). What should be entered here?",
         "field_id": "full_name",
@@ -472,7 +481,7 @@ def test_next_dropdown_question_omits_placeholder_options() -> None:
     response = post_with_nemotron(nemotron, payload)
 
     assert response.status_code == 200
-    assert response.json() == {
+    assert response.json()["action"] == {
         "action": "next",
         "message": (
             "Which option best describes where you live? Choose one of: "
@@ -512,7 +521,7 @@ def test_purpose_question_uses_grounded_fallback_without_calling_model() -> None
 
     action = asyncio.run(
         FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
-    )
+    ).action
 
     assert action.action == "explain"
     assert action.field_id == "living_arrangement"
@@ -633,7 +642,7 @@ def test_repeated_invalid_proposal_value_becomes_clarification(
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    assert response.json()["action"] == {
         "action": "clarify",
         "message": (
             "I couldn't safely match that answer for “Which option best "
@@ -674,7 +683,7 @@ def test_next_can_finish_only_when_no_fields_are_unanswered() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    assert response.json()["action"] == {
         "action": "next",
         "message": "All supported fields have been reviewed.",
         "field_id": None,
@@ -691,7 +700,7 @@ def test_model_cannot_silently_advance_past_an_active_field() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    assert response.json()["action"] == {
         "action": "clarify",
         "message": (
             "I couldn't safely match that answer for “Which option best "
@@ -713,10 +722,8 @@ def test_agent_cannot_skip_a_confirmed_field() -> None:
         payload,
     )
 
-    assert response.status_code == 502
-    assert response.json() == {
-        "detail": "Form Agent returned a resolved field to skip"
-    }
+    assert response.status_code == 409
+    assert response.json() == {"detail": "The active field is no longer answerable"}
 
 
 def test_form_agent_error_is_a_controlled_service_failure() -> None:

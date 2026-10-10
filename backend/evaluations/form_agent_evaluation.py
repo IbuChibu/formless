@@ -304,9 +304,10 @@ async def run_evaluation(
             scenario.model_response
         )
         try:
-            action = await FormAgentService(service).respond(  # type: ignore[arg-type]
+            response = await FormAgentService(service).respond(  # type: ignore[arg-type]
                 request
             )
+            action = response.action
         except (FormAgentError, NemotronServiceError) as error:
             failures.append(f"{scenario.name}: {error}")
             continue

@@ -69,6 +69,7 @@ Responsible only for:
 
 Responsible for:
 - processing bounded conversation state received with each request
+- validating explicit conversation events and state transitions
 - deciding what context goes to Nemotron
 - processing model actions
 - deciding when clarification is needed
@@ -83,7 +84,8 @@ Must not:
 The Form Agent is one service boundary with small internal modules:
 - `models` owns validated request, field, message, and action contracts
 - `orchestrator` coordinates one turn and is the package's public service
-- `conversation_policy` owns deterministic routing and response wording
+- `conversation_policy` owns deterministic routing, allowed transitions, and
+  response wording
 - `prompt_builder` prepares bounded untrusted context for Nemotron
 - `response_parser` parses, canonicalizes, and validates model actions
 - `value_normalizer` validates and safely normalizes field values
@@ -105,14 +107,35 @@ This state may remain in the frontend for the hackathon MVP. It does not require
 a database. Conversation context can be sent explicitly to the Form Agent in a
 bounded request rather than introducing persistence.
 
+## Conversation state machine
+
+The frontend sends the complete ephemeral conversation state and one explicit
+event with each Form Agent request. The canonical phases are:
+- `asking`
+- `awaiting_answer`
+- `awaiting_clarification`
+- `awaiting_confirmation`
+- `field_confirmed`
+- `field_skipped`
+- `form_complete`
+
+An `awaiting_confirmation` state includes a pending proposal containing the
+field ID and proposed value. Confirmation, edited confirmation, rejection, and
+skip are explicit events; ordinary message events cannot confirm a proposal.
+Every Form Agent response contains both a typed action and the resulting state,
+so the frontend does not infer progression from assistant wording. The state is
+validated on every request and is never stored by the backend.
+
 ## Field update flow
 
 For agent or voice input:
-1. The frontend sends the user's message and bounded form context to the Form Agent.
-2. The Form Agent may return explanatory text or a structured field proposal.
+1. The frontend sends the explicit event, conversation state, and bounded form
+   context to the Form Agent.
+2. The Form Agent returns a typed action and resulting conversation state.
 3. Backend code validates the proposal's field ID, type, and available options.
 4. The frontend asks the user to confirm, edit, reject, or skip the proposal.
-5. A confirmed value enters the shared field state.
+5. A separate confirmation event is validated before the value enters shared
+   field state.
 6. The frontend sends confirmed values to the existing PDF filling endpoint.
 
 For manual or direct-on-form input, the explicit user edit is already a

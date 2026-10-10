@@ -10,10 +10,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.services.form_agent import (
-    FormAgentAction,
     FormAgentError,
     FormAgentRequest,
+    FormAgentResponse,
     FormAgentService,
+    FormAgentTransitionError,
 )
 from app.services.nemotron_service import (
     NemotronConfigurationError,
@@ -129,13 +130,15 @@ async def explain_field(
     )
 
 
-@app.post("/agent/respond", response_model=FormAgentAction)
+@app.post("/agent/respond", response_model=FormAgentResponse)
 async def respond_to_form_agent(
     request: FormAgentRequest,
     service: FormAgentService = Depends(get_form_agent_service),
-) -> FormAgentAction:
+) -> FormAgentResponse:
     try:
         return await service.respond(request)
+    except FormAgentTransitionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except (FormAgentError, NemotronServiceError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 

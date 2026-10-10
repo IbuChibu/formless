@@ -7,6 +7,8 @@ from .models import (
     FormAgentField,
     FormAgentRequest,
     field_question,
+    request_active_field_id,
+    request_message,
     truncate_text,
 )
 
@@ -105,9 +107,10 @@ def build_agent_context(request: FormAgentRequest) -> dict[str, object]:
         request.fields
     )
     fields_by_id = {field.id: field for field in request.fields}
+    active_field_id = request_active_field_id(request)
     active_field = (
-        fields_by_id.get(request.active_field_id)
-        if request.active_field_id is not None
+        fields_by_id.get(active_field_id)
+        if active_field_id is not None
         else None
     )
     next_unanswered_field = next(
@@ -136,7 +139,9 @@ def build_agent_context(request: FormAgentRequest) -> dict[str, object]:
             else None
         ),
         "conversation": {
-            "user_message": request.message,
+            "phase": request.conversation_state.phase,
+            "event_type": request.event.type,
+            "user_message": request_message(request),
             "recent_history": [
                 {
                     "role": message.role,
