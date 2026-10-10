@@ -813,6 +813,115 @@ Do not implement:
 - automatic form-version substitution
 - voice, authentication, persistence, or a database
 
+# Milestone 6.13.1 — Policy-gated web guidance with Tavily
+
+Status: NOT STARTED
+
+Goal:
+Use Tavily to find current, attributable web guidance when reviewed local
+guidance is insufficient, while preserving the existing privacy, grounding,
+and confirmation boundaries.
+
+User flow:
+- the user asks a normal explanatory question about the active field
+- reviewed local guidance remains the first source when it answers the question
+- when local guidance is insufficient and the request meets a deterministic
+  lookup policy, the backend performs a bounded Tavily search
+- the backend builds the search query from non-personal form and field metadata
+  plus a controlled explanation topic
+- Nemotron produces a concise plain-language explanation from bounded search
+  results
+- the UI labels Tavily material as live web guidance, links every source, and
+  offers a manual search or retry control when appropriate
+
+Intended architecture:
+- Tavily is a retrieval tool inside the existing Form Agent turn; it is not a
+  second agent, a separate chat workflow, or a frontend integration
+- the frontend continues to call the existing Form Agent endpoint and never
+  communicates with Tavily directly
+- the Form Agent orchestrator validates the conversation event and checks
+  reviewed local guidance before considering live lookup
+- a small deterministic web-guidance policy classifies eligible informational
+  questions and builds the bounded non-personal search query
+- the dedicated Tavily Service owns credentials, HTTP transport, timeouts, and
+  provider-response parsing, but owns no conversation or PDF logic
+- a web-guidance module validates, deduplicates, ranks, labels, and bounds Tavily
+  results before they can enter the existing prompt builder
+- the prompt builder places normalized web snippets inside the existing
+  untrusted-context boundary alongside form and user text
+- Nemotron returns the existing typed explanation action; Tavily cannot return
+  an agent action or bypass the response parser
+- web-source citations are returned as typed response metadata and do not alter
+  conversation phase, proposal state, confirmed values, or PDF bytes
+- an eligible turn makes at most one Tavily request; any subsequent Nemotron
+  call follows the existing structured-output correction limit, and lookup
+  failure does not trigger recursive searches or an unnecessary model call
+
+Acceptance criteria:
+- the Tavily API key is read from `TAVILY_API_KEY` and remains server-side
+- a dedicated Tavily Service is the only component that communicates with the
+  Tavily API
+- Tavily is integrated through the existing Form Agent endpoint and
+  orchestrator rather than through a second public workflow
+- the implementation uses the existing HTTP client rather than adding an agent
+  framework or Tavily SDK without a demonstrated need
+- live lookup does not require a preconfigured issuer-domain allowlist or an
+  already recognized form ID
+- a deterministic backend policy, not the model, decides whether an
+  explanatory request qualifies for web lookup
+- lookup is triggered only by an informational user request when reviewed local
+  guidance is insufficient; it never runs for ordinary answers, confirmations,
+  navigation, or background prefetching
+- search queries are constructed server-side and contain no PDF bytes, entered
+  field values, proposed values, personal answers, or conversation history
+- queries use bounded form title, version when available, issuing organisation
+  when available, active-field question, and a controlled topic such as meaning,
+  instructions, or where to find the requested information
+- Tavily-generated answers and raw page content are disabled; only a small
+  bounded set of titled result snippets and URLs is accepted
+- result count, per-result text, and total live-guidance context have fixed
+  limits before content can reach Nemotron
+- returned URLs must use public HTTPS endpoints; private, local, malformed,
+  duplicate, and unsupported URLs are discarded
+- source selection prefers relevant primary and issuing-organisation material,
+  but general search results are never presented as reviewed or official merely
+  because Tavily returned them
+- claims about requirements or rules require clear source support; conflicting,
+  weak, or uncertain results produce an uncertainty message and source links
+  rather than a definitive answer
+- Tavily result text is treated as untrusted model data and cannot provide,
+  propose, confirm, or apply the user's personal factual answer
+- Nemotron remains the only model and produces a grounded explanation from the
+  bounded live results through the existing Form Agent safety rules
+- the response identifies that Tavily performed the lookup and includes source
+  title, URL, retrieval time, and form version when known for every result used
+- the UI clearly distinguishes live web guidance from reviewed official guidance
+  and provides visible searching, success, empty-result, retry, and error states
+- unavailable credentials, timeouts, authentication failures, rate limits,
+  empty results, and invalid provider responses return controlled errors without
+  blocking manual form completion
+- mocked backend tests require no network access and cover policy gating,
+  post-response URL validation, privacy boundaries, source-quality labeling,
+  conflicting results, prompt injection in result text, context bounds,
+  attribution, and provider failures
+- an optional live smoke test demonstrates one web-guidance lookup without
+  becoming part of the default test suite
+- existing safety, agent, PDF, transcript-evaluation, and frontend checks pass
+
+Do not implement:
+- autonomous tool selection or background search chosen by the model
+- proactive search before the user asks an informational question
+- presenting general web results as reviewed official guidance
+- news or image search
+- Tavily Crawl, Extract, Research, or general browsing tools
+- transmission of uploaded PDFs, field values, personal answers, or conversation
+  history to Tavily
+- automatic replacement of reviewed local guidance with live results
+- legal, financial, medical, tax, or eligibility advice
+- a vector database, embeddings, general RAG framework, or agent framework
+- caching, persistence, authentication, voice, or a database
+- new PDF-format compatibility or new recognized forms
+
 # Milestone 6.14 — Evaluation-gated model fallback
 
 Status: NOT STARTED

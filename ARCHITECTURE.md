@@ -126,6 +126,71 @@ official source. If no exact source is available for an official-purpose or
 rule question, the agent says so instead of substituting another form version
 or inferring an answer.
 
+## Planned Tavily integration (Milestone 6.13.1)
+
+Tavily will be a retrieval tool inside the existing Form Agent, not a second
+agent and not a frontend integration. The existing Form Agent endpoint remains
+the only conversational API:
+
+```text
+Form Agent request
+       |
+       v
+Validate state and event
+       |
+       v
+Select reviewed local guidance
+       |
+       +-- sufficient --------------------------+
+       |                                        |
+       v                                        |
+Deterministic web-guidance policy               |
+       |                                        |
+       +-- not eligible --> grounded fallback   |
+       |                                        |
+       v                                        |
+Tavily Service                                  |
+       |                                        |
+       v                                        |
+Validate, rank, label, and bound results        |
+       |                                        |
+       +----------------------------------------+
+       |
+       v
+Prompt builder -> Nemotron Service -> typed explanation response
+```
+
+The responsibilities remain separated:
+- `orchestrator` controls the turn and may request at most one Tavily lookup;
+  subsequent Nemotron processing retains the existing structured-output
+  correction limit
+- `web_guidance` owns deterministic eligibility policy, safe query construction,
+  result validation, source-quality labeling, deduplication, ranking, and bounds
+- `tavily_service` owns only Tavily configuration, HTTP transport, timeout and
+  provider-error handling, and response parsing
+- `prompt_builder` accepts only normalized bounded results and treats their text
+  as untrusted context
+- `models` keeps live web citations separate from reviewed official-guidance
+  citations while preserving the existing typed action contract
+
+The frontend continues to send ordinary Form Agent events. It does not receive
+the Tavily key, construct provider payloads, or call Tavily directly. Live web
+sources appear as metadata on an explanation and cannot alter conversation
+phase, create a proposal, confirm a value, or invoke the PDF Service.
+
+Reviewed local guidance remains the first choice. When it is insufficient, the
+deterministic policy may allow a bounded search only for an informational user
+request. Answer, confirmation, rejection, skip, navigation, and background
+turns never search. Search queries exclude uploaded PDF bytes, field values,
+proposals, personal answers, and conversation history.
+
+General web results are labeled as live web guidance, not reviewed official
+guidance. Provider text and URLs are validated outside the model, and only
+public HTTPS sources within fixed result and character limits can reach
+Nemotron. Failure, weak evidence, or conflicting sources produces a grounded
+uncertainty or unavailable response rather than another search, a personal
+answer, or an authoritative rule.
+
 ## Canonical field state
 
 Every input surface operates on the same field records identified by the IDs
