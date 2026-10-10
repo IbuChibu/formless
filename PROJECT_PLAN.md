@@ -618,6 +618,234 @@ Do not implement:
 - legal or financial advice
 - authentication, persistence, database, or an agent framework
 
+# Milestone 6.8 — Modular Form Agent internals
+
+Status: NOT STARTED
+
+Goal:
+Split the remaining Form Agent implementation into focused internal modules
+without changing its public API or user-visible behaviour.
+
+Intended structure:
+- `models.py` owns request, response, field, action, and conversation-state schemas
+- `orchestrator.py` coordinates one agent turn
+- `conversation_policy.py` owns deterministic routing and state-transition policy
+- `prompt_builder.py` prepares bounded, injection-resistant model context
+- `response_parser.py` parses, canonicalizes, and validates model output
+- `value_normalizer.py` contains the existing deterministic field-value logic
+
+Acceptance criteria:
+- Form Agent code lives in a dedicated backend package with the listed responsibilities separated clearly
+- FastAPI depends on one public Form Agent service boundary rather than importing internal modules directly
+- the Nemotron Service remains the only component that communicates with Nebius
+- the PDF Service remains independent from every Form Agent module
+- existing request and response payloads remain compatible during this refactor
+- prompt construction, response parsing, conversation policy, and value normalization can be tested independently
+- circular imports and duplicated field-value validation are not introduced
+- existing backend tests, offline evaluation, optional live evaluation, and frontend production build continue to pass
+
+Do not implement:
+- new conversation behaviour or UI changes
+- a second model, multi-agent orchestration, or an agent framework
+- voice, OCR, PDF changes, authentication, persistence, or a database
+
+# Milestone 6.9 — Explicit conversation state machine
+
+Status: NOT STARTED
+
+Goal:
+Replace inferred conversation phases with an explicit, validated state machine
+shared by the frontend and backend.
+
+Conversation phases:
+- asking a question
+- awaiting an answer
+- awaiting clarification
+- awaiting proposal confirmation
+- field confirmed
+- field skipped
+- form complete
+
+Acceptance criteria:
+- the agent contract contains a typed conversation phase and active field state
+- an awaiting-confirmation state includes the pending field ID and proposed value
+- each response declares the resulting phase instead of requiring the frontend to infer it from message text
+- allowed transitions are defined centrally and covered by backend tests
+- invalid or stale transitions return a controlled error without changing confirmed form state
+- ordinary typed replies cannot confirm a proposal; confirmation remains a distinct explicit user event
+- messages received while awaiting confirmation cannot create a duplicate proposal for the same answer
+- rejection returns the active field to an answerable state without losing confirmed values
+- skipped, confirmed, and completed fields cannot accidentally become active through a model action
+- state remains ephemeral and is sent explicitly with bounded requests; no server persistence is introduced
+- frontend and backend use the same canonical phase names and pending-proposal contract
+- existing confirmation safety, PDF filling, and live-preview behaviour remain unchanged
+- backend tests, state-transition tests, offline evaluation, and frontend production build pass
+
+Do not implement:
+- automatic confirmation from conversational phrases such as `yes` or `looks good`
+- automatic progression to the next field
+- voice, authentication, persistence, a database, or a second model
+
+# Milestone 6.10 — Transcript-level agent evaluation
+
+Status: NOT STARTED
+
+Goal:
+Measure complete multi-turn form-completion behaviour rather than evaluating
+only isolated agent responses.
+
+Acceptance criteria:
+- deterministic transcript fixtures cover complete conversations across the sample, household-support, USCIS I-9, and SBA forms
+- transcripts include ask, unclear answer, clarification, proposal, rejection, correction, confirmation, skip, next-field, and completion paths
+- state transitions and confirmed values are asserted after every turn
+- evaluation reports form completion rate
+- evaluation reports first-attempt accepted-proposal rate
+- evaluation reports average turns per confirmed field
+- evaluation reports repeated-question rate and clarification rate
+- evaluation reports invalid-action and confirmation-boundary failure rates
+- optional live evaluation reports latency and model calls per field
+- invented-fact and invented-purpose failures remain explicit zero-tolerance metrics
+- normal automated tests use deterministic model doubles and never require network access
+- optional live transcripts use environment credentials and are excluded from the normal test suite
+- evaluation output identifies the exact transcript and turn for every failure
+
+Do not implement:
+- prompt tuning solely to make scripted answers pass
+- a second model or fallback model
+- production analytics, user tracking, persistence, or a database
+
+# Milestone 6.11 — Field-type answer adapters
+
+Status: NOT STARTED
+
+Goal:
+Convert common conversational answers into form-compatible proposals through
+focused, independently tested field-type adapters.
+
+Initial adapters:
+- names and free text
+- dates
+- money and general numbers
+- yes/no and checkbox answers
+- dropdown options
+- addresses
+- postcodes
+- phone numbers
+
+Acceptance criteria:
+- adapters share a small result contract for matched value, clarification needed, or not applicable
+- every clarification result includes a specific user-facing reason and accepted answer shape
+- adapter selection uses deterministic field metadata and conservative semantic hints
+- adapters preserve the user's factual meaning and never supply missing personal information
+- ambiguous dates, numbers, addresses, and option matches request clarification rather than guessing
+- locale-sensitive formats are preserved or clarified when locale cannot be established safely
+- dropdown proposals always resolve to an exact available option
+- money proposals separate harmless display characters from the stored numeric value
+- phone numbers and postcodes are not reformatted destructively when the required format is unknown
+- free-text normalization removes conversational framing only when the intended value is unambiguous
+- the model remains available for ambiguous interpretation but cannot bypass adapter validation
+- adapter tests include positive, negative, ambiguous, negated, and adversarial examples
+- transcript evaluation demonstrates fewer repeated questions and invalid proposals without increasing invention failures
+- existing backend tests and frontend production build pass
+
+Do not implement:
+- external address, identity, or phone-number verification
+- geocoding or enrichment of user-supplied facts
+- legal or eligibility validation
+- a second model, voice, authentication, persistence, or a database
+
+# Milestone 6.12 — Confirmation-driven progression
+
+Status: NOT STARTED
+
+Goal:
+Make the conversation progress naturally after an explicit proposal decision
+without requiring a separate Continue action after every field.
+
+Acceptance criteria:
+- explicit confirmation applies the proposed value through the existing canonical field state
+- confirmation produces a concise acknowledgement and deterministically asks the next unanswered field
+- confirming an edited proposal follows the same transition and progression path
+- rejection acknowledges that no value was applied and immediately invites a corrected answer for the same field
+- skipping acknowledges the skipped field and deterministically asks the next unanswered field
+- completing or skipping the final supported field transitions to form complete
+- progression uses state-machine events rather than fabricated user messages
+- automatic progression does not make an additional model call when the next question can be generated from field context
+- rapid or repeated confirmation events cannot apply a proposal twice or skip multiple fields
+- confirmed values trigger the existing PDF fill and live-preview workflow exactly once per accepted change
+- the user can still pause, inspect the PDF, edit manually, or return to an earlier field
+- transcript tests cover confirm, edit-confirm, reject-correct, skip, duplicate-event, and final-completion flows
+- backend tests, transcript evaluation, and frontend production build pass
+
+Do not implement:
+- conversational or voice-only confirmation
+- automatic acceptance of model proposals
+- autonomous submission or download
+- voice, authentication, persistence, or a database
+
+# Milestone 6.13 — Official instruction grounding
+
+Status: NOT STARTED
+
+Goal:
+Ground explanations in bounded, attributable instructions from approved official
+sources when those instructions are available for a supported form.
+
+Acceptance criteria:
+- official guidance sources are explicitly allowlisted per supported form and version
+- each source records its title, issuing organisation, source URL, form version, and retrieval date
+- guidance is stored as small local structured resources suitable for the hackathon build
+- relevant excerpts are selected by form, field, and section without a vector database or retrieval framework
+- only bounded relevant excerpts are included in Form Agent context
+- official excerpts, like PDF text and user input, are treated as untrusted model data
+- responses distinguish official guidance from the assistant's plain-language explanation
+- the UI displays the source title and link when official guidance informed an answer
+- when no relevant official guidance is available, the assistant says so rather than inferring a purpose or rule
+- quoted or paraphrased guidance remains traceable to its source and version
+- tests cover correct source selection, missing guidance, mismatched form versions, prompt injection inside source text, and bounded context
+- no guidance source can provide or confirm the user's personal factual answer
+- existing safety, agent, PDF, and frontend checks pass
+
+Do not implement:
+- runtime web crawling or unrestricted internet retrieval
+- a vector database, embedding service, or general RAG framework
+- legal, financial, medical, or eligibility advice
+- automatic form-version substitution
+- voice, authentication, persistence, or a database
+
+# Milestone 6.14 — Evaluation-gated model fallback
+
+Status: NOT STARTED
+
+Goal:
+Add a stronger Nemotron fallback only for measured interpretation failures that
+remain after deterministic adapters, state handling, and prompt improvements.
+
+Entry criteria:
+- transcript evaluation identifies a repeatable class of ambiguous-answer failures
+- deterministic handling and the primary model cannot meet the documented reliability target
+- the chosen fallback model is available through Nebius Token Factory
+
+Acceptance criteria:
+- primary-model and fallback-model names are configured server-side through environment variables
+- deterministic interpretation always runs before either model
+- the existing fast Nemotron model remains the primary model
+- fallback is attempted only for explicitly classified ambiguity or repeated structured-output validation failure
+- at most one fallback call is made for a user turn
+- authentication, rate-limit, and general provider failures do not cause uncontrolled model cascades
+- fallback output uses the same action schema, validation, safety rules, and confirmation boundary as primary output
+- failure to obtain a valid fallback result produces a grounded clarification rather than an invented answer
+- transcript evaluation reports fallback frequency, success rate, latency, and model calls per field
+- live evaluation demonstrates a documented reliability improvement sufficient to justify the added latency and cost
+- if the entry criteria are not met, the milestone records that no fallback was added and preserves the single-model design
+- mocked backend tests require no network access and the optional live suite remains separate
+
+Do not implement:
+- two agents debating or reviewing every answer
+- parallel model calls for ordinary turns
+- an agent framework or autonomous tool selection
+- automatic confirmation, voice, authentication, persistence, or a database
+
 # Milestone 7 — Voice
 
 Status: NOT STARTED
