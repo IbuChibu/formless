@@ -76,12 +76,113 @@ _POSITIVE_REQUIREMENT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _SAFE_QUERY_CHARACTER_PATTERN = re.compile(r"[^\w\s.,()&/:'\-]", re.UNICODE)
+_RELEVANCE_TOKEN_PATTERN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+_FORM_CODE_PATTERN = re.compile(
+    r"\b(?:form[\s_-]*)?([a-z]{1,8})[\s_-]?(\d{1,5}[a-z]?)\b",
+    re.IGNORECASE,
+)
+_VERSION_MARKER_PATTERN = re.compile(
+    r"\b(?:version|edition|rev(?:ision)?\.?)\s*[:#-]?\s*"
+    r"([0-9][0-9./-]{3,15})",
+    re.IGNORECASE,
+)
 _PUBLIC_AUTHORITY_SUFFIXES = (
     ".gov",
     ".gov.uk",
     ".gc.ca",
     ".gov.au",
 )
+_FORM_CODE_PREFIX_EXCLUSIONS = frozenset(
+    {"box", "chapter", "line", "page", "part", "section"}
+)
+_GENERIC_FORM_TOKENS = frozenset(
+    {
+        "application",
+        "applications",
+        "document",
+        "documents",
+        "fillable",
+        "form",
+        "forms",
+        "guide",
+        "guidance",
+        "help",
+        "information",
+        "instructions",
+        "official",
+        "online",
+        "pdf",
+        "request",
+        "review",
+        "sample",
+        "support",
+        "worksheet",
+    }
+)
+_GENERIC_FIELD_TOKENS = frozenset(
+    {
+        "a",
+        "about",
+        "address",
+        "an",
+        "and",
+        "answer",
+        "amount",
+        "are",
+        "date",
+        "details",
+        "do",
+        "enter",
+        "field",
+        "for",
+        "form",
+        "full",
+        "here",
+        "how",
+        "information",
+        "is",
+        "name",
+        "number",
+        "of",
+        "on",
+        "question",
+        "requested",
+        "should",
+        "the",
+        "this",
+        "to",
+        "value",
+        "what",
+        "which",
+        "who",
+        "why",
+        "with",
+        "you",
+        "your",
+    }
+)
+_TOPIC_RELEVANCE_TOKENS: dict[WebGuidanceTopic, frozenset[str]] = {
+    "meaning": frozenset(
+        {"definition", "defines", "enter", "means", "meaning", "refers", "use"}
+    ),
+    "purpose": frozenset(
+        {"collect", "need", "purpose", "reason", "requested", "used", "why"}
+    ),
+    "requirements": frozenset(
+        {
+            "allowed",
+            "instructions",
+            "must",
+            "optional",
+            "require",
+            "required",
+            "requirements",
+        }
+    ),
+    "where_to_find": frozenset(
+        {"document", "find", "locate", "obtain", "record", "where"}
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -95,6 +196,7 @@ class _RankedResult:
     citation: WebGuidanceCitation
     score: float
     quality_rank: int
+    relevance_rank: int
 
 
 def plan_web_guidance_lookup(
@@ -179,7 +281,7 @@ def prepare_web_guidance(
     ranked_results: list[_RankedResult] = []
     seen_urls: set[str] = set()
 
-    for result in results:
+    for result in filter_relevant_web_results(request, lookup, results):
         normalized_url = normalize_public_https_url(result.url)
         if normalized_url is None or normalized_url in seen_urls:
             continue
@@ -214,11 +316,18 @@ def prepare_web_guidance(
                 citation=citation,
                 score=score,
                 quality_rank=quality_rank,
+                relevance_rank=(
+                    _result_relevance_rank(request, lookup, result) or 0
+                ),
             )
         )
 
     ranked_results.sort(
-        key=lambda result: (result.quality_rank, result.score),
+        key=lambda result: (
+            result.relevance_rank,
+            result.quality_rank,
+            result.score,
+        ),
         reverse=True,
     )
     selected: list[WebGuidanceCitation] = []
@@ -237,8 +346,8 @@ def prepare_web_guidance(
             status="empty",
             topic=lookup.topic,
             notice=(
-                "Tavily found no usable public HTTPS sources for this field. "
-                "You can retry without changing any form answer."
+                "Tavily found no relevant, usable public HTTPS sources for "
+                "this field. You can retry without changing any form answer."
             ),
             sources=[],
         )
@@ -271,6 +380,18 @@ def prepare_web_guidance(
         topic=lookup.topic,
         notice=notice,
         sources=selected,
+    )
+
+
+def filter_relevant_web_results(
+    request: FormAgentRequest,
+    lookup: WebGuidanceLookup,
+    results: tuple[TavilySearchResult, ...],
+) -> tuple[TavilySearchResult, ...]:
+    return tuple(
+        result
+        for result in results
+        if _result_relevance_rank(request, lookup, result) is not None
     )
 
 
@@ -339,6 +460,206 @@ def _safe_query_part(value: str, max_length: int) -> str:
     collapsed = " ".join(value.split())
     cleaned = _SAFE_QUERY_CHARACTER_PATTERN.sub(" ", collapsed)
     return truncate_text(" ".join(cleaned.split()), max_length)
+
+
+def _result_relevance_rank(
+    request: FormAgentRequest,
+    lookup: WebGuidanceLookup,
+    result: TavilySearchResult,
+) -> Optional[int]:
+    normalized_url = normalize_public_https_url(result.url)
+    title = " ".join(result.title.split())
+    snippet = " ".join(result.content.split())
+    if normalized_url is None or not title or not snippet:
+        return None
+
+    result_text = " ".join((normalized_url, title, snippet))
+    result_tokens = _relevance_tokens(result_text)
+    result_codes = _form_codes(result_text)
+    if _has_mismatched_explicit_version(
+        request.form_context.form_version,
+        result_text,
+    ):
+        return None
+
+    organization, issuer_host = _known_issuer(request)
+    result_host = urlparse(normalized_url).hostname or ""
+    issuer_host_match = bool(
+        issuer_host
+        and (
+            result_host == issuer_host
+            or result_host.endswith(f".{issuer_host}")
+        )
+    )
+    issuer_text_match = bool(
+        organization
+        and _strong_token_match(
+            _significant_tokens(organization, _GENERIC_FORM_TOKENS),
+            result_tokens,
+        )
+    )
+
+    form_reference_text = " ".join(
+        part
+        for part in (
+            request.form_context.form_id,
+            request.form_context.title,
+        )
+        if part
+    )
+    expected_codes = _form_codes(form_reference_text)
+    code_match = bool(expected_codes & result_codes)
+    form_title = request.form_context.title or ""
+    form_title_tokens = _significant_tokens(
+        form_title,
+        _GENERIC_FORM_TOKENS,
+    )
+    form_token_match = _strong_token_match(
+        form_title_tokens,
+        result_tokens,
+    )
+    title_phrase_match = bool(
+        len(form_title_tokens) >= 2
+        and _normalized_relevance_phrase(form_title)
+        in _normalized_relevance_phrase(result_text)
+    )
+    form_match = code_match or form_token_match or issuer_text_match
+
+    active_field_id = request_active_field_id(request)
+    active_field = next(
+        (
+            field
+            for field in request.fields
+            if field.id == active_field_id
+        ),
+        None,
+    )
+    if active_field is None:
+        return None
+    field_tokens = _significant_tokens(
+        " ".join(
+            part
+            for part in (
+                active_field.label,
+                field_question(active_field),
+            )
+            if part
+        ),
+        _GENERIC_FIELD_TOKENS,
+    )
+    field_match = _field_token_match(field_tokens, result_tokens)
+    topic_match = bool(
+        _TOPIC_RELEVANCE_TOKENS[lookup.topic] & result_tokens
+    )
+
+    if issuer_host_match:
+        if not (form_match or field_match):
+            return None
+    elif request.form_context.form_id is not None:
+        if not (form_match and field_match):
+            return None
+    elif not ((code_match or title_phrase_match) and field_match):
+        return None
+
+    version_match = _normalized_version(
+        request.form_context.form_version
+    ) in _explicit_versions(result_text)
+    return (
+        (4 if issuer_host_match else 0)
+        + (4 if code_match else 0)
+        + (3 if form_token_match or issuer_text_match else 0)
+        + (2 if field_match else 0)
+        + (1 if topic_match else 0)
+        + (1 if version_match else 0)
+    )
+
+
+def _relevance_tokens(value: str) -> frozenset[str]:
+    return frozenset(
+        match.group(0).casefold()
+        for match in _RELEVANCE_TOKEN_PATTERN.finditer(value)
+    )
+
+
+def _normalized_relevance_phrase(value: str) -> str:
+    return " ".join(
+        match.group(0).casefold()
+        for match in _RELEVANCE_TOKEN_PATTERN.finditer(value)
+    )
+
+
+def _significant_tokens(
+    value: str,
+    ignored_tokens: frozenset[str],
+) -> frozenset[str]:
+    return frozenset(
+        token
+        for token in _relevance_tokens(value)
+        if token not in ignored_tokens
+        and (len(token) >= 3 or any(character.isdigit() for character in token))
+    )
+
+
+def _strong_token_match(
+    expected_tokens: frozenset[str],
+    result_tokens: frozenset[str],
+) -> bool:
+    if len(expected_tokens) < 2:
+        return False
+    overlap = len(expected_tokens & result_tokens)
+    required_overlap = max(2, math.ceil(len(expected_tokens) * 0.5))
+    return overlap >= required_overlap
+
+
+def _field_token_match(
+    expected_tokens: frozenset[str],
+    result_tokens: frozenset[str],
+) -> bool:
+    if not expected_tokens:
+        return False
+    overlap = len(expected_tokens & result_tokens)
+    required_overlap = 1 if len(expected_tokens) <= 2 else 2
+    return overlap >= required_overlap
+
+
+def _form_codes(value: str) -> frozenset[str]:
+    codes = set()
+    for match in _FORM_CODE_PATTERN.finditer(value):
+        prefix = match.group(1).casefold()
+        if prefix in _FORM_CODE_PREFIX_EXCLUSIONS:
+            continue
+        codes.add(f"{prefix}{match.group(2).casefold()}")
+    return frozenset(codes)
+
+
+def _explicit_versions(value: str) -> frozenset[str]:
+    return frozenset(
+        _normalized_version(match.group(1))
+        for match in _VERSION_MARKER_PATTERN.finditer(value)
+    )
+
+
+def _normalized_version(value: Optional[str]) -> str:
+    if value is None:
+        return ""
+    return "".join(
+        character
+        for character in value.casefold()
+        if character.isalnum()
+    )
+
+
+def _has_mismatched_explicit_version(
+    expected_version: Optional[str],
+    result_text: str,
+) -> bool:
+    normalized_expected = _normalized_version(expected_version)
+    explicit_versions = _explicit_versions(result_text)
+    return bool(
+        normalized_expected
+        and explicit_versions
+        and normalized_expected not in explicit_versions
+    )
 
 
 def _known_issuer(request: FormAgentRequest) -> tuple[Optional[str], Optional[str]]:

@@ -924,7 +924,7 @@ Do not implement:
 
 # Milestone 6.13.2 — Live-guidance relevance gate
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Prevent unrelated Tavily results from entering the Nemotron prompt or being

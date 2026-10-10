@@ -205,6 +205,17 @@ Nemotron. Failure, weak evidence, or conflicting sources produces a grounded
 uncertainty or unavailable response rather than another search, a personal
 answer, or an authoritative rule.
 
+Before ranking or prompt construction, every Tavily result passes a
+deterministic relevance gate. The gate compares only bounded form identity,
+known issuer, explicit version, active-field question, and controlled topic
+metadata with the result title, public URL, and bounded snippet. Generic terms
+such as `name`, `address`, `application`, and `form` cannot establish
+relevance. Recognized forms require form or issuer evidence plus field context;
+unrecognized forms require an exact distinctive form-title match or form code
+plus active-field evidence. Results that explicitly identify a different form
+version are rejected. Discarded results never enter Nemotron context or
+response citations.
+
 ## Canonical field state
 
 Every input surface operates on the same field records identified by the IDs
