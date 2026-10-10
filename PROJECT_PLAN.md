@@ -922,6 +922,202 @@ Do not implement:
 - caching, persistence, authentication, voice, or a database
 - new PDF-format compatibility or new recognized forms
 
+# Milestone 6.13.2 — Live-guidance relevance gate
+
+Status: NOT STARTED
+
+Goal:
+Prevent unrelated Tavily results from entering the Nemotron prompt or being
+presented as evidence for an explanation.
+
+Acceptance criteria:
+- every Tavily result passes a deterministic relevance check before ranking,
+  prompt construction, or source attribution
+- relevance uses only bounded form identity, issuer, version, active-field
+  question, and controlled explanation-topic metadata
+- a result must match the target form or issuer when known, or contain a strong
+  combination of form-specific and active-question evidence when identity is
+  unavailable
+- generic terms such as `name`, `address`, `application`, or `form` cannot make
+  an otherwise unrelated result relevant
+- results about another form, agency, jurisdiction, benefit, or process are
+  discarded even when they share a field label
+- discarded results never reach Nemotron and never appear as response citations
+- an empty relevant-result set remains a normal typed outcome for the
+  orchestrator rather than a provider or parsing error
+- reviewed local guidance remains preferred and bypasses Tavily when sufficient
+- tests reject the unrelated IRS, Department of Labor, and housing results seen
+  during the sample and household-support demo flows
+- tests retain clearly relevant IRS W-9 results and preserve the existing local
+  USCIS I-9 guidance path
+- mocked backend tests require no network access, and the optional live smoke
+  test reports how many returned results passed the relevance gate
+- existing safety, agent, PDF, transcript-evaluation, and frontend checks pass
+
+Do not implement:
+- model-based source ranking or a second model call to judge relevance
+- a mandatory global domain allowlist
+- embeddings, a vector database, Tavily Crawl or Extract, or a general RAG
+  framework
+- changes to proposal confirmation, PDF filling, voice, authentication,
+  persistence, or a database
+
+# Milestone 6.13.3 — Deterministic insufficient-guidance response
+
+Status: NOT STARTED
+
+Goal:
+Return a safe, useful, deterministic response when neither reviewed local
+guidance nor relevant live evidence can answer the user's informational
+question.
+
+Acceptance criteria:
+- the orchestrator identifies insufficient guidance before prompt construction
+  when no relevant evidence remains after validation
+- insufficient guidance returns a typed explanation response without calling
+  Nemotron
+- the response clearly says that the available form schema and verified
+  guidance do not establish the requested meaning, purpose, or rule
+- the response may direct the user to the form's own instructions, issuing
+  organisation, or another clearly identified official source without claiming
+  what that source will say
+- deterministic wording never invents a purpose involving identity matching,
+  records, benefits, eligibility, legal requirements, or administrative need
+- the active field and conversation phase remain unchanged so the user can
+  answer, skip, retry guidance, or continue manually
+- irrelevant discarded sources are not displayed as supporting citations
+- Tavily unavailability and insufficient relevant evidence remain distinct
+  typed outcomes with clear recovery messages
+- regression tests cover the generic sample form and the fictional
+  household-support form and assert that Nemotron is not called
+- transcript evaluation keeps invented-purpose and invented-fact failures at
+  zero for insufficient-guidance turns
+- existing safety, agent, PDF, and frontend checks pass
+
+Do not implement:
+- guessing from general knowledge or asking Nemotron to soften an unsupported
+  explanation
+- legal, financial, medical, tax, benefit, or eligibility advice
+- changes to ordinary answer interpretation or field proposals
+- voice, authentication, persistence, or a database
+
+# Milestone 6.13.4 — Claim-scoped source conflict detection
+
+Status: NOT STARTED
+
+Goal:
+Report conflicts only when relevant sources make incompatible claims about the
+same active field, form version, and requested topic.
+
+Acceptance criteria:
+- conflict detection runs only over results that passed the live-guidance
+  relevance gate
+- each comparison is scoped to the active field and controlled topic, including
+  definition, purpose, requiredness, accepted values, or formatting
+- words such as `required` and `optional` conflict only when their surrounding
+  claims refer to the same target field and form context
+- a statement about a different line, section, field, form, or version cannot
+  mark the active-field evidence as conflicting
+- the detector produces a typed evidence status such as supported, limited,
+  conflicting, or unavailable with a deterministic reason
+- truly incompatible relevant claims still produce an uncertainty response and
+  attributable source links rather than a definitive rule
+- the IRS W-9 line 1 scenario is no longer marked conflicting because another
+  snippet describes a different optional line
+- tests cover same-field conflicts, different-field requiredness language,
+  mismatched versions, duplicate paraphrases, and unrelated snippet text
+- conflict classification does not use an LLM and cannot alter conversation
+  state, field proposals, or confirmed values
+- existing safety, agent, PDF, transcript-evaluation, and frontend checks pass
+
+Do not implement:
+- general fact checking or source-truth arbitration
+- model-based contradiction detection
+- autonomous additional searches to resolve a conflict
+- legal or eligibility conclusions
+- voice, authentication, persistence, or a database
+
+# Milestone 6.13.5 — Selectable AcroForm capability validation
+
+Status: NOT STARTED
+
+Goal:
+Determine during extraction whether checkbox, radio, and other button widgets
+have usable selectable states before the UI or Form Agent treats them as
+answerable fields.
+
+Acceptance criteria:
+- extraction inspects the effective field type, button flags, parent and child
+  widgets, and normal appearance states for every AcroForm button field
+- push buttons are not exposed as answerable form questions
+- a checkbox is supported only when it has an off state and at least one usable
+  non-off export state
+- radio groups expose their real mutually exclusive options when they can be
+  mapped safely; ambiguous groups are marked unsupported rather than converted
+  to booleans
+- extracted fields include a deterministic supported/editable capability and a
+  concise reason when a control cannot be filled safely
+- unsupported controls remain visible for transparency but are excluded from
+  agent progression, editable manual controls, and `/pdf/fill` submissions
+- the filling service validates submitted choice values against the same
+  extracted export-state rules so extraction and filling cannot disagree
+- the DS-11 `Selection` control is identified as unsupported or represented by
+  its actual selectable group before the agent can propose `true`
+- the sample, USCIS I-9, and existing supported checkbox/dropdown behavior
+  remains unchanged
+- tests cover missing appearance dictionaries, off-only widgets, multiple
+  export states, inherited parent state, radio groups, and push buttons
+- generated supported-choice PDFs are reopened to verify stored values and
+  effective widget states
+- existing backend tests and frontend production build pass
+
+Do not implement:
+- guessing a selectable state from nearby text
+- flattening PDFs, executing PDF JavaScript, or supporting XFA
+- DS-11 question-to-widget text alignment beyond the capability metadata
+- AI, voice, authentication, persistence, or a database
+
+# Milestone 6.13.6 — DS-11 field grouping and question alignment
+
+Status: NOT STARTED
+
+Goal:
+Make the bundled State Department DS-11 fixture present correctly grouped,
+human-readable, fillable questions through the existing PDF and Form Agent
+workflow.
+
+Acceptance criteria:
+- DS-11 widget parent/child relationships and repeated widgets are resolved into
+  stable logical fields without duplicate questions
+- passport book/card and regular/large-book controls are associated with their
+  correct visible option labels and selectable-state capabilities
+- `Applicant Last Name` is associated with the applicant-name question rather
+  than the adjacent large-book explanatory text
+- nearby help text is attached only when its geometry and section relationship
+  are unambiguous; uncertain text falls back to the humanized field label
+- question ordering follows the visible DS-11 page and section order
+- unsupported buttons remain clearly identified and are skipped by guided agent
+  progression without preventing manual completion of supported fields
+- the extracted schema passes the same frontend and Form Agent validation used
+  by the other fixtures, including removal of blank placeholder options
+- representative supported text and choice fields can be filled, reopened with
+  `pypdf`, and rendered with correct visible values
+- a typed DS-11 transcript reaches a valid proposal for the first supported
+  applicant field without a fill-time selectable-state error
+- deterministic tests assert the corrected labels, questions, grouping,
+  ordering, capabilities, and representative stored values
+- the sample, household-support, USCIS I-9, SBA, and W-9 fixture behavior does
+  not regress
+- existing backend tests, transcript evaluation, and frontend production build
+  pass
+
+Do not implement:
+- passport eligibility, legal guidance, application advice, or factual answers
+  for the user
+- electronic signatures, barcode generation, or PDF JavaScript execution
+- broad compatibility work for unrelated PDF formats, XFA, or scanned forms
+- OCR, voice, authentication, persistence, or a database
+
 # Milestone 6.14 — Evaluation-gated model fallback
 
 Status: NOT STARTED
