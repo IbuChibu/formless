@@ -388,7 +388,7 @@ def _request_for_scenario(scenario: EvaluationScenario) -> FormAgentRequest:
     fields = [
         agent_field
         for field in extraction.fields
-        if (agent_field := _agent_field(field)) is not None
+        if (agent_field := agent_field_from_pdf(field)) is not None
     ]
     return FormAgentRequest(
         form_context=FormAgentFormContext(
@@ -405,7 +405,7 @@ def _request_for_scenario(scenario: EvaluationScenario) -> FormAgentRequest:
     )
 
 
-def _agent_field(field: PdfField) -> Optional[FormAgentField]:
+def agent_field_from_pdf(field: PdfField) -> Optional[FormAgentField]:
     if field.type not in SUPPORTED_FIELD_TYPES:
         return None
     try:

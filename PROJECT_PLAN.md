@@ -688,7 +688,7 @@ Do not implement:
 
 # Milestone 6.10 — Transcript-level agent evaluation
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Measure complete multi-turn form-completion behaviour rather than evaluating

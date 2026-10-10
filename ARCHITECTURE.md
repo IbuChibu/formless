@@ -126,6 +126,20 @@ Every Form Agent response contains both a typed action and the resulting state,
 so the frontend does not infer progression from assistant wording. The state is
 validated on every request and is never stored by the backend.
 
+## Agent evaluation
+
+Agent evaluation is separate from runtime orchestration. The existing
+single-turn evaluation checks focused actions, while the transcript evaluation
+runs complete ephemeral state-machine conversations over bounded representative
+fields extracted from the sample, household-support, USCIS I-9, and SBA
+fixtures. Every scripted turn declares its expected action, conversation state,
+confirmed values, and skipped fields.
+
+Normal tests use deterministic Nemotron doubles and make no network requests.
+The transcript evaluator may be run explicitly in live mode with the configured
+Nebius credentials to report model latency and calls per evaluated field. It
+does not store transcripts or add production analytics.
+
 ## Field update flow
 
 For agent or voice input:
