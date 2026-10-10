@@ -1118,6 +1118,259 @@ Do not implement:
 - broad compatibility work for unrelated PDF formats, XFA, or scanned forms
 - OCR, voice, authentication, persistence, or a database
 
+# Milestone 6.13.7 — Conversational Form Agent experience
+
+Status: NOT STARTED
+
+Problem to solve:
+The current typed assistant is safe and state-aware, but it often feels like a
+form wizard presented as a chat. Too many ordinary messages are handled as
+commands, field answers, or requests for external guidance. This can produce
+canned replies, repeated questions, an unnecessary Tavily dependency for plain
+wording clarification, and duplicated unavailable-guidance messages.
+
+Adding voice before fixing this would create the same rigid experience through
+a microphone. The typed assistant must first become a useful conversational
+partner while preserving the existing field-validation and confirmation
+boundaries.
+
+Goal:
+Make the existing Form Agent feel like a natural, context-aware assistant that
+can discuss the active question, explain it in simpler language, handle
+uncertainty, answer progress questions, and return smoothly to form completion.
+Nemotron should be the conversational layer; deterministic code should remain
+the authority over navigation, field state, tool use, proposals, and
+confirmation.
+
+Conversation principles:
+- the user remains the source of every personal factual answer
+- Nemotron may paraphrase, explain, ask a focused follow-up, summarize progress,
+  and help format the user's stated information
+- conversational help and form mutation are separate: a natural response may
+  have no form-state effect
+- deterministic commands and clear field answers should stay fast and reliable
+  without requiring unnecessary model or web calls
+- a field proposal remains typed, validated, visibly pending, and separate from
+  confirmed state
+- Tavily is an evidence tool for external facts, current rules, requirements,
+  purposes, or information sources; it is not the general conversation engine
+- one conversational interruption must not lose the active field, pending
+  proposal, confirmed values, skipped fields, or recent context
+- safety should constrain factual effects without making harmless conversation
+  sound like an error message
+
+Turn-routing design:
+1. Explicit commands such as confirm, edit-confirm, reject, skip, next, and
+   focus-field are handled deterministically through the existing state machine.
+2. A clear answer to the active field is interpreted by the existing field-type
+   adapters first and becomes a validated proposal awaiting confirmation.
+3. A wording request such as `What does this mean?` or `Explain that more
+   simply` is sent to Nemotron with bounded field and form context. It does not
+   call Tavily merely to paraphrase text already present in the form schema.
+4. An uncertain or incomplete answer such as `around summer 2019` produces one
+   focused follow-up that identifies what is missing and never guesses the
+   missing value.
+5. A request about purpose, legal effect, requiredness, eligibility, official
+   instructions, or where to obtain information uses reviewed local guidance
+   first and the existing policy-gated Tavily path only when eligible.
+6. A progress or navigation question such as `What have we completed?` or `Can
+   we return to this later?` is answered from deterministic conversation and
+   field state without web search.
+7. After a non-mutating explanation or progress interruption, the assistant
+   keeps the active field and offers a natural path back to answering it.
+
+Intended backend shape:
+- keep `POST /agent/respond` as the single public conversational endpoint
+- keep one Form Agent and the existing direct Python orchestration; do not add a
+  second agent or an agent framework
+- extend deterministic conversation policy to distinguish commands, field
+  answers, wording clarification, uncertainty, progress questions, and
+  evidence-dependent questions before choosing a tool path
+- use the existing non-mutating explanation action for conversational help
+  unless implementation review demonstrates that one small typed conversational
+  action is materially clearer
+- give Nemotron bounded active-field context, a compact ordered form summary,
+  current progress, and at most the existing bounded recent history
+- add prompt modes with explicit turn objectives such as `paraphrase`,
+  `clarify_answer`, `progress_help`, and `evidence_grounded_explanation`
+- allow Nemotron to phrase conversational responses naturally, but continue to
+  parse and validate every structured action outside the model
+- keep backend policy, not Nemotron, responsible for deciding whether Tavily is
+  called
+- retain the current maximum of one initial model call and one structured-output
+  correction attempt for a model-handled turn
+- keep confirmation, PDF filling, and all canonical field-state changes outside
+  Nemotron
+
+Intended frontend experience:
+- present the assistant's useful sentence as the primary content of each bubble
+  rather than leading with internal action terminology
+- keep action types available as subtle status or accessible metadata where they
+  help the user understand a pending proposal or error
+- show source cards only when reviewed guidance or a live lookup was actually
+  used
+- show an unavailable lookup once, without repeating substantially the same
+  failure in both the assistant message and Tavily card
+- after an explanation, offer contextual actions such as `Answer now`, `Explain
+  more`, `Check official guidance`, and `Skip for now` when applicable
+- keep proposals and confirmation controls visually distinct from ordinary
+  conversation
+- preserve the current PDF preview, progress display, manual field drawer, and
+  shared confirmed-value state
+
+Target conversation examples:
+
+Example A — plain-language clarification without Tavily:
+
+```text
+Field: The date you began living at the address you ordinarily reside at
+User: What does this mean?
+Assistant: This is asking when you started living at your usual or main home
+address. If you are unsure of the exact date, tell me what you remember and I
+can help identify what is still missing without guessing it.
+```
+
+Expected behavior:
+- Nemotron receives the bounded field context
+- Tavily is not called
+- no field value is proposed or changed
+- the active field remains selected
+
+Example B — uncertainty becomes a focused follow-up:
+
+```text
+User: I think it was around summer 2019.
+Assistant: Do you remember the month, or only that it was during summer 2019?
+I will not supply a more exact date than the one you know.
+```
+
+Expected behavior:
+- the reply acknowledges the information already provided
+- only the missing precision is requested
+- no rejected or fabricated date is proposed
+- the same field remains active in `awaiting_clarification`
+
+Example C — a clear answer still becomes a proposal:
+
+```text
+User: I started living there on 12 June 2019.
+Assistant: I understood the date as 12 June 2019. It is ready for your review
+and has not been added to the form yet.
+```
+
+Expected behavior:
+- the date adapter preserves the user's factual meaning and normalizes only to
+  the format required by the field
+- a typed proposal enters `awaiting_confirmation`
+- the PDF is unchanged until explicit confirmation
+
+Example D — external rule or requirement uses guidance:
+
+```text
+User: Is this legally required, and why do they ask for it?
+Assistant: [Answer grounded in reviewed instructions or attributable live
+guidance, or a concise statement that verified guidance is unavailable.]
+```
+
+Expected behavior:
+- local reviewed guidance is preferred
+- Tavily may run once when policy allows and local guidance is insufficient
+- Nemotron cannot invent a purpose or requirement from the field wording
+- any sources used are displayed separately and attributed
+
+Example E — interruption and return to the form:
+
+```text
+User: What have we completed so far?
+Assistant: You have confirmed 4 of 12 supported questions and skipped 1. We
+were working on your move-in date. Would you like to answer it, explain it
+again, or skip it for now?
+```
+
+Expected behavior:
+- progress comes from deterministic field state
+- the active field and conversation phase remain valid
+- no model-proposed facts, Tavily lookup, or PDF update occurs
+
+Examples of behavior to remove:
+- returning `verified guidance is unavailable` for a harmless paraphrase of
+  wording already present in the active field
+- echoing the user's message or a `start`, `continue`, or `next` command as the
+  assistant reply
+- asking the identical question repeatedly without saying what part of the
+  answer could not be used
+- treating `yes`, `okay`, or `that makes sense` as confirmation of a pending
+  factual proposal
+- showing both a long assistant failure and a second Tavily card containing the
+  same unavailable message
+- invoking Tavily for ordinary field answers, navigation, progress summaries,
+  or wording simplification
+
+Acceptance criteria:
+- genuine wording-clarification turns call Nemotron once and do not call Tavily
+- Nemotron receives bounded active-field context, compact form context, progress
+  state, and no raw PDF bytes
+- a plain-language explanation directly paraphrases the available question
+  before offering workflow choices
+- wording explanations do not introduce a purpose, requirement, eligibility
+  rule, legal conclusion, or personal field value that is absent from supplied
+  context
+- purpose, requirement, eligibility, official-instruction, and information-
+  source questions remain on the reviewed-guidance and policy-gated Tavily path
+- the backend, not the model, decides whether a live lookup occurs
+- Tavily is not called for field answers, confirmations, navigation, progress
+  summaries, uncertainty follow-ups, or simple paraphrasing
+- uncertain or incomplete answers receive a specific follow-up that acknowledges
+  usable information and identifies only the missing or ambiguous part
+- the agent never converts uncertainty into a more precise factual proposal than
+  the user supplied
+- follow-up phrases such as `that`, `it`, `the previous question`, and `explain
+  more simply` resolve against bounded active-field and recent-turn context
+- explanations and progress questions preserve the active field and do not
+  change confirmed values, skipped fields, or pending proposals
+- after a non-mutating interruption, the assistant offers a natural return to
+  answering, further explanation, official guidance, or skipping
+- clear answers still produce type-compatible proposals that explicitly await
+  confirmation
+- proposal confirmation, edit-confirmation, rejection, skip, and automatic
+  next-field progression retain their current deterministic state transitions
+- a conversational acknowledgement can never count as confirmation
+- progress summaries use canonical field state and report supported confirmed,
+  unanswered, proposed, and skipped counts accurately
+- the UI makes ordinary assistant messages primary and keeps proposals visually
+  distinct
+- source cards appear only when their corresponding reviewed or live guidance
+  was actually used
+- unavailable or empty guidance is communicated once with a concise recovery
+  path and does not produce duplicated failure prose
+- model, Tavily, and validation failures leave manual editing and the current PDF
+  workflow usable
+- deterministic transcript tests cover wording clarification, explanation
+  follow-up, uncertain partial answers, correction, proposal, confirmation,
+  progress summary, interruption, resume, skip, and evidence-dependent questions
+- mocked tests assert model-call and Tavily-call counts for every routing class
+- existing transcript fixtures retain a 100% completion rate, zero invalid
+  actions, zero invalid proposals, zero confirmation-boundary failures, zero
+  invented facts, and zero invented purposes
+- an optional live Nemotron evaluation reports directness, contextual relevance,
+  useful next-step rate, latency, and model calls for a small fixed conversation
+  set without joining the default offline suite
+- existing backend tests and frontend production build pass
+
+Do not implement:
+- voice input or output in this milestone
+- a second model, model cascade, multi-agent debate, or agent framework
+- autonomous model-selected tools or recursive web searches
+- Tavily for ordinary conversation that can be answered by paraphrasing supplied
+  form context
+- invented personal facts, inferred purposes, legal advice, eligibility advice,
+  or unsupported official requirements
+- conversational confirmation of factual proposals
+- unbounded history, server-side conversation persistence, authentication, or a
+  database
+- OCR, new PDF-format compatibility, direct PDF editing, or changes to PDF
+  filling semantics
+
 # Milestone 6.14 — Evaluation-gated model fallback
 
 Status: NOT STARTED
