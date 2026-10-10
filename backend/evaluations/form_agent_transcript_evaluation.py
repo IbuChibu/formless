@@ -1,12 +1,13 @@
 """Deterministic complete-conversation evaluation for the Form Agent.
 
 Each fixture checks a bounded representative set of fields through
-``form_complete``. Turns-per-confirmed-field counts every action tied to that
-field from the first question through confirmation. Repeated-question rate
-counts clarification re-prompts after a field has already been asked.
-Clarification, invalid-action, invalid-proposal, and confirmation-boundary rates
-use all scheduled turns as the denominator. Live-only metrics are populated
-only when a real service is passed.
+``form_complete``, including the exact-version DS-11 profile. Turns-per-
+confirmed-field counts every action tied to that field from the first question
+through confirmation. Repeated-question rate counts clarification re-prompts
+after a field has already been asked. Clarification, invalid-action, invalid-
+proposal, and confirmation-boundary rates use all scheduled turns as the
+denominator. Live-only metrics are populated only when a real service is
+passed.
 """
 
 from __future__ import annotations
@@ -181,6 +182,7 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
     sba_label_actual = sba_label + (
         ("Monthly actual cost 1", "1050.50"),
     )
+    ds11_name = (("Applicant Last Name", "Example"),)
 
     return (
         TranscriptFixture(
@@ -537,6 +539,44 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     state_active_field_id=None,
                     confirmed=sba_label_actual,
                     skipped=("One-time budget cost 1",),
+                ),
+            ),
+        ),
+        TranscriptFixture(
+            name="ds11-first-applicant-field",
+            fixture="real_world/state_ds11_2025.pdf",
+            field_ids=("Applicant Last Name",),
+            turns=(
+                _turn(
+                    "ask-applicant-last-name",
+                    _advance(),
+                    "next",
+                    "awaiting_answer",
+                    "Applicant Last Name",
+                ),
+                _turn(
+                    "applicant-last-name-proposal",
+                    _message("My last name is Example."),
+                    "propose",
+                    "awaiting_confirmation",
+                    "Applicant Last Name",
+                    expected_value="Example",
+                    expected_pending_field_id="Applicant Last Name",
+                    expected_pending_value="Example",
+                    model_response=_proposal_json(
+                        "Applicant Last Name",
+                        "Example",
+                    ),
+                ),
+                _turn(
+                    "confirm-applicant-last-name",
+                    {"type": "confirm"},
+                    "confirmed",
+                    "form_complete",
+                    "Applicant Last Name",
+                    state_active_field_id=None,
+                    confirmed=ds11_name,
+                    expected_value="Example",
                 ),
             ),
         ),

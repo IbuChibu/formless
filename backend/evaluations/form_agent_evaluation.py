@@ -408,7 +408,11 @@ def _request_for_scenario(scenario: EvaluationScenario) -> FormAgentRequest:
 
 
 def agent_field_from_pdf(field: PdfField) -> Optional[FormAgentField]:
-    if field.type not in SUPPORTED_FIELD_TYPES:
+    if (
+        not field.supported
+        or not field.editable
+        or field.type not in SUPPORTED_FIELD_TYPES
+    ):
         return None
     try:
         options = [

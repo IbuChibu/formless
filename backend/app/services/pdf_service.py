@@ -11,7 +11,13 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError, PyPdfError
 from pypdf.generic import NameObject, TextStringObject
 
-from app.services.form_catalog import identify_known_form
+from app.services.form_catalog import KnownFormIdentity, identify_known_form
+from app.services.pdf_form_profiles import (
+    PdfFieldProfile,
+    PdfFormProfile,
+    get_pdf_form_profile,
+    profiled_choice_field_ids,
+)
 
 
 PdfFieldValue = Union[str, bool]
@@ -217,15 +223,28 @@ def extract_acroform(pdf_data: bytes) -> PdfExtraction:
         field
         for _, field in sorted(extracted_fields, key=lambda item: item[0])
     ]
-    identity = identify_known_form(
-        native_context.form_context.title,
-        [field.id for field in ordered_fields],
-        native_context.identity_text,
+    identity = _known_form_identity(
+        fields,
+        native_context,
     )
     form_context = native_context.form_context
     if identity is not None:
+        form_profile = get_pdf_form_profile(
+            identity.form_id,
+            identity.form_version,
+        )
+        if form_profile is not None:
+            ordered_fields = _apply_form_profile(
+                ordered_fields,
+                form_profile,
+            )
         form_context = replace(
             form_context,
+            title=(
+                form_profile.title
+                if form_profile is not None
+                else form_context.title
+            ),
             form_id=identity.form_id,
             form_version=identity.form_version,
         )
@@ -238,6 +257,12 @@ def fill_acroform_fields(
     values: Mapping[str, PdfFieldValue],
 ) -> bytes:
     reader = _read_pdf(pdf_data)
+    source_fields = reader.get_fields() or {}
+    form_profile = _form_profile_for_fill(
+        pdf_data,
+        source_fields,
+        values,
+    )
     writer = PdfWriter()
     writer.clone_document_from_reader(reader)
 
@@ -260,7 +285,12 @@ def fill_acroform_fields(
         )
 
     normalized_values = {
-        field_id: _normalize_fill_value(field_id, fields[field_id], value)
+        field_id: _normalize_fill_value(
+            field_id,
+            fields[field_id],
+            value,
+            _profile_field(form_profile, field_id),
+        )
         for field_id, value in values.items()
     }
     calculated_values = _calculate_standard_sums(fields, normalized_values)
@@ -286,6 +316,112 @@ def fill_acroform_fields(
         raise PdfFillingError("Could not fill the uploaded PDF") from error
 
     return output.getvalue()
+
+
+def _known_form_identity(
+    fields: Mapping[str, dict[str, Any]],
+    native_context: _NativePdfContext,
+) -> Optional[KnownFormIdentity]:
+    field_ids = [
+        field_id
+        for field_id, field in fields.items()
+        if not _is_structural_field(field) and not _is_calculated_field(field)
+    ]
+    return identify_known_form(
+        native_context.form_context.title,
+        field_ids,
+        native_context.identity_text,
+    )
+
+
+def _form_profile_for_fill(
+    pdf_data: bytes,
+    fields: Mapping[str, dict[str, Any]],
+    values: Mapping[str, PdfFieldValue],
+) -> Optional[PdfFormProfile]:
+    if not set(values).intersection(profiled_choice_field_ids()):
+        return None
+
+    identity = _known_form_identity(
+        fields,
+        _extract_native_pdf_context(pdf_data),
+    )
+    if identity is None:
+        return None
+    return get_pdf_form_profile(identity.form_id, identity.form_version)
+
+
+def _apply_form_profile(
+    fields: list[PdfField],
+    profile: PdfFormProfile,
+) -> list[PdfField]:
+    profiled_fields = []
+    fallback_order = len(profile.fields)
+
+    for current_order, field in enumerate(fields):
+        field_profile = profile.fields.get(field.id)
+        if field_profile is None:
+            fallback_label = _humanize_field_id(field.id)
+            profiled_fields.append(
+                (
+                    fallback_order + current_order,
+                    replace(
+                        field,
+                        label=fallback_label,
+                        question=fallback_label,
+                        help_text=None,
+                        section=None,
+                        page_context=profile.title,
+                    ),
+                )
+            )
+            continue
+
+        page_context = f"{profile.title} - {field_profile.section}"
+        profiled_fields.append(
+            (
+                field_profile.order,
+                replace(
+                    field,
+                    label=field_profile.label,
+                    question=field_profile.question,
+                    options=_profiled_display_options(
+                        field.options,
+                        field_profile,
+                    ),
+                    help_text=field_profile.help_text,
+                    section=field_profile.section,
+                    page_context=page_context,
+                ),
+            )
+        )
+
+    return [
+        field
+        for _, field in sorted(profiled_fields, key=lambda item: item[0])
+    ]
+
+
+def _profile_field(
+    form_profile: Optional[PdfFormProfile],
+    field_id: str,
+) -> Optional[PdfFieldProfile]:
+    if form_profile is None:
+        return None
+    return form_profile.fields.get(field_id)
+
+
+def _profiled_display_options(
+    options: Optional[list[str]],
+    field_profile: PdfFieldProfile,
+) -> Optional[list[str]]:
+    if options is None or not field_profile.choice_labels:
+        return options
+
+    export_values = [export for export, _ in field_profile.choice_labels]
+    if options != export_values:
+        return options
+    return [label for _, label in field_profile.choice_labels]
 
 
 def _read_pdf(pdf_data: bytes) -> PdfReader:
@@ -539,6 +675,7 @@ def _normalize_fill_value(
     field_id: str,
     field: dict[str, Any],
     value: PdfFieldValue,
+    field_profile: Optional[PdfFieldProfile] = None,
 ) -> str:
     capability = _field_capability(field)
     field_type = capability.field_type
@@ -562,7 +699,7 @@ def _normalize_fill_value(
         if not isinstance(value, str):
             raise PdfFillingError(f"Field '{field_id}' requires a string value")
 
-        options = _field_options(field, capability) or []
+        options = _field_options(field, capability, field_profile) or []
         if value not in options:
             raise PdfFillingError(f"Invalid option for field '{field_id}': {value}")
         return value
@@ -576,7 +713,7 @@ def _normalize_fill_value(
     if field_type == "radio":
         if not isinstance(value, str):
             raise PdfFillingError(f"Field '{field_id}' requires a string value")
-        options = _field_options(field, capability) or []
+        options = _field_options(field, capability, field_profile) or []
         if value not in options:
             raise PdfFillingError(f"Invalid option for field '{field_id}': {value}")
         return capability.export_states[options.index(value)]
@@ -589,10 +726,13 @@ def _normalize_fill_value(
 def _field_options(
     field: dict[str, Any],
     capability: _FieldCapability,
+    field_profile: Optional[PdfFieldProfile] = None,
 ) -> Optional[list[str]]:
     field_type = capability.field_type
     if field_type == "radio":
         options = [state.removeprefix("/") for state in capability.export_states]
+        if field_profile is not None:
+            return _profiled_display_options(options or None, field_profile)
         return options or None
 
     raw_options = field.get("/Opt")
@@ -621,6 +761,10 @@ def _field_label(field_id: str, field: dict[str, Any]) -> str:
         if label and label.casefold() not in _PLACEHOLDER_FIELD_LABELS:
             return label
 
+    return _humanize_field_id(field_id)
+
+
+def _humanize_field_id(field_id: str) -> str:
     humanized_id = " ".join(re.sub(r"[._-]+", " ", field_id).split())
     return humanized_id[:1].upper() + humanized_id[1:]
 

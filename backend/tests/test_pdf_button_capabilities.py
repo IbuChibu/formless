@@ -159,7 +159,11 @@ def test_ds11_selection_uses_actual_radio_options_and_push_is_unsupported() -> N
     assert response.status_code == 200
     fields = {field["id"]: field for field in response.json()["fields"]}
     assert fields["Selection"]["type"] == "radio"
-    assert fields["Selection"]["options"] == ["Book", "Card", "Both"]
+    assert fields["Selection"]["options"] == [
+        "U.S. Passport Book",
+        "U.S. Passport Card",
+        "Both",
+    ]
     assert fields["Selection"]["supported"] is True
     assert fields["Selection"]["editable"] is True
     assert fields["Clear"]["type"] == "button"
@@ -167,7 +171,10 @@ def test_ds11_selection_uses_actual_radio_options_and_push_is_unsupported() -> N
     assert fields["Clear"]["editable"] is False
     assert "not answerable" in fields["Clear"]["capability_reason"]
 
-    completed = fill_acroform_fields(original, {"Selection": "Book"})
+    completed = fill_acroform_fields(
+        original,
+        {"Selection": "U.S. Passport Book"},
+    )
     assert DS11_FIXTURE.read_bytes() == original
     completed_fields = PdfReader(BytesIO(completed)).get_fields() or {}
     selection = completed_fields["Selection"]

@@ -1079,7 +1079,7 @@ Do not implement:
 
 # Milestone 6.13.6 — DS-11 field grouping and question alignment
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Make the bundled State Department DS-11 fixture present correctly grouped,

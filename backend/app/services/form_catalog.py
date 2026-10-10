@@ -22,6 +22,23 @@ class _KnownFormDefinition:
 _KNOWN_FORMS = (
     _KnownFormDefinition(
         identity=KnownFormIdentity(
+            form_id="state-ds11",
+            form_version="04-2025",
+        ),
+        title_fragment="OMB Control No. 1405-0004",
+        field_count=84,
+        required_field_ids=frozenset(
+            {
+                "Selection",
+                "Regular or Large Book",
+                "Applicant Last Name",
+                "Ever Applied or Issued",
+            }
+        ),
+        version_marker="DS-11 04-2025",
+    ),
+    _KnownFormDefinition(
+        identity=KnownFormIdentity(
             form_id="uscis-i9",
             form_version="01/20/25",
         ),

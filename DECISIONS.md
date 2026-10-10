@@ -105,3 +105,20 @@ the model autonomous tool access or maintaining a large domain allowlist. The
 query excludes PDF bytes, field values, proposals, personal answers, and
 conversation history, while returned snippets and URLs are treated as
 untrusted data and cannot cross the existing proposal-confirmation boundary.
+
+---
+
+## 2026-10-10 — Exact form editions may use reviewed PDF presentation profiles
+
+Decision:
+An exactly recognized PDF edition may use a small static profile to correct its
+field labels, questions, visible order, narrowly scoped help text, and the
+display labels mapped to verified AcroForm export states. The generic extractor
+remains the fallback for every unrecognized PDF.
+
+Reason:
+Complex official AcroForms such as DS-11 can have stable widgets but ambiguous
+nearby text geometry and machine-oriented export names. A reviewed,
+version-specific mapping is deterministic, testable, and safer than asking an
+LLM to reinterpret the form or broadening geometry heuristics for unrelated
+PDFs.

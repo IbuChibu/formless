@@ -58,6 +58,8 @@ Responsible for:
 - validating button-widget appearance/export states and returning deterministic
   supported, editable, and capability-reason metadata
 - identifying explicitly supported form editions from exact local signatures
+- applying reviewed display metadata and visible-option mappings only for an
+  exact recognized form edition
 - returning widget geometry when direct-on-form editing is implemented
 - filling PDF fields
 - validating submitted choice values against the same capability rules used
@@ -126,6 +128,17 @@ Known form identity is deterministic metadata produced during PDF extraction.
 The neutral form catalog requires a matching title, field count, and small
 field-ID signature before assigning a form ID and version. It does not download
 instructions or call an AI service.
+
+An exact recognized edition may also have a reviewed PDF presentation profile.
+The profile can correct field labels, questions, section order, narrowly scoped
+help text, and the display labels for verified choice export states. It never
+changes stable PDF field IDs, invents form instructions, or weakens capability
+validation. During filling, a displayed choice is translated back to its real
+AcroForm export state only after the same exact-edition identity check. Unknown
+forms continue to use the generic geometry-based metadata path. The DS-11
+04-2025 profile uses this boundary to avoid attaching adjacent passport-book
+help text to the applicant-name field and to keep its multi-widget controls as
+single logical fields.
 
 Official guidance is stored as small local JSON resources keyed by that exact
 form ID and version. Every resource records its title, issuing organisation,
@@ -277,7 +290,7 @@ events, but the normal proposal-decision path progresses in one response.
 Agent evaluation is separate from runtime orchestration. The existing
 single-turn evaluation checks focused actions, while the transcript evaluation
 runs complete ephemeral state-machine conversations over bounded representative
-fields extracted from the sample, household-support, USCIS I-9, and SBA
+fields extracted from the sample, household-support, USCIS I-9, SBA, and DS-11
 fixtures. Every scripted turn declares its expected action, conversation state,
 confirmed values, and skipped fields.
 

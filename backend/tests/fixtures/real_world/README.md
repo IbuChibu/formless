@@ -3,7 +3,8 @@
 These official public forms are compatibility fixtures. They are intentionally
 kept separate from `sample_form.pdf`, which remains the small deterministic
 fixture used by the core unit tests. The I-9 and SBA worksheet also have
-focused automated compatibility coverage.
+focused automated compatibility coverage, and DS-11 has exact-version field
+alignment and filling coverage.
 
 Use dummy values only. The source URLs can publish newer revisions in place, so
 do not replace a fixture without reviewing its structure and updating its hash.
