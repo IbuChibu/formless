@@ -277,19 +277,35 @@ event with each Form Agent request. The canonical phases are:
 - `awaiting_answer`
 - `awaiting_clarification`
 - `awaiting_confirmation`
+- `awaiting_replacement`
+- `awaiting_replacement_confirmation`
 - `field_confirmed`
 - `field_skipped`
 - `form_complete`
 
 An `awaiting_confirmation` state includes a pending proposal containing the
-field ID and proposed value. Confirmation, edited confirmation, rejection, and
-skip are explicit events; ordinary message events cannot confirm a proposal.
+field ID and proposed value. An `awaiting_replacement_confirmation` state also
+retains the previous confirmed value and marks the pending operation as a
+replacement, allowing stale corrections to be rejected before any effect is
+returned. The existing confirmed value remains canonical while the assistant
+is in either replacement phase. Confirmation, edited confirmation, rejection,
+skip, and correction cancellation are explicit events; ordinary message events
+cannot confirm a proposal.
 Every Form Agent response contains a primary `assistant_message`, one closed
 typed `effect`, and the resulting state, so the frontend does not infer
 progression from assistant wording. A `none` effect represents successful
 non-mutating conversation. Other effects represent a pending proposal,
-confirmation, rejection, skip, field selection, or completion. The state is
+replacement proposal, confirmation, rejection, skip, field selection, skipped-
+field reopening, correction start or cancellation, or completion. The state is
 validated on every request and is never stored by the backend.
+
+Conversational field references are resolved deterministically against bounded
+question, label, and section text. Exact and normalized matches run before any
+model call. A single status-compatible match can produce a closed navigation,
+reopen, or correction effect; multiple matches produce a bounded clarification
+and no transition. Read-only review summaries and specifically requested
+confirmed values come directly from canonical field state and use a `none`
+effect.
 
 After an explicit confirmation, edited confirmation, or skip, the backend
 deterministically selects the next unanswered field. The response action still
@@ -343,7 +359,9 @@ For agent or voice input:
    then asks the user to confirm, edit, use the original when valid, reject, or
    skip the proposal.
 8. A separate confirmation event is validated before the value enters shared
-   field state exactly once. Rejection keeps the same field active.
+   field state exactly once. Rejection keeps the same field active. For a
+   replacement proposal, rejection or cancellation preserves the previous
+   confirmed value and the frontend does not update the PDF preview.
 9. Confirmation, edited confirmation, and skip deterministically transition to
    the next unanswered field, or to form complete, without another model call.
 10. The frontend sends confirmed values to the existing PDF filling endpoint.

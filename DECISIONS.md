@@ -180,3 +180,22 @@ The 11 October 2026 live comparison retained
 and state safety but reduced useful-next-step and conversation-repair rates and
 was 4.419 times slower on the fixed scenarios. Formless therefore keeps one
 Lightning model and adds no runtime fallback.
+
+---
+
+## 2026-10-11 — Navigation and corrections are closed state transitions
+
+Decision:
+Conversational references to fields are matched deterministically against the
+bounded form schema. Selecting an unanswered field, reopening a skipped field,
+and starting or cancelling a confirmed-value correction each return a distinct
+typed effect. Replacement proposals retain the previous confirmed value and
+use distinct replacement phases until an explicit confirmation event applies
+the new value.
+
+Reason:
+Users need to move around and correct a form naturally, but assistant wording
+must never become an implicit write operation. Keeping the old value canonical
+through discussion, rejection, failures, and stale events prevents premature
+PDF changes, while deterministic review responses avoid sending unrelated
+personal values to the model.

@@ -70,11 +70,9 @@ Required technology:
 
 ## Current implementation status
 
-- completed through Milestone 6.13.10
 - current typed workflow separates conversation from validated form effects
-- completed through Milestone 6.14
-- Milestone 6.15 is the next planned milestone before the guided-interview UI
-- Milestone 6.16 is planned after conversational navigation and before voice
+- completed through Milestone 6.15
+- Milestone 6.16 is the next planned milestone before voice
 - voice, deployment, persistence, and the later full-workflow milestone have
   not started
 
@@ -2193,7 +2191,7 @@ Do not implement:
 
 # Milestone 6.15 — Conversational navigation, correction, and review
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Let users move around the form, revisit skipped questions, safely correct
@@ -2311,6 +2309,32 @@ Acceptance criteria:
   rejection, edited confirmation, stale events, and post-completion review
 - existing PDF extraction and filling behavior, proposal safety tests, backend
   suite, and frontend production build continue to pass
+
+Verified implementation outcome:
+- deterministic normalized matching selects unambiguous unanswered fields and
+  returns a bounded clarification for ambiguous or missing references without a
+  model call
+- skipped fields reopen through a dedicated validated effect and then use the
+  existing answer-adapter, proposal, and confirmation path
+- confirmed-field corrections use distinct correction and replacement phases;
+  the pending replacement retains the previous canonical value, original
+  candidate, prepared value, and any visible transformation
+- typed acknowledgements cannot confirm replacements; rejection, cancellation,
+  model failure, and stale confirmation leave the previous confirmed value
+  unchanged
+- explicit confirmation or edited confirmation produces one existing
+  `confirmed` effect, after which the frontend updates shared field state and
+  the normal PDF preview flow once
+- deterministic read-only review can list confirmed, skipped, and unanswered
+  questions or return one specifically requested confirmed value during and
+  after form completion
+- the frontend validates every new phase, pending replacement, and effect
+  against the request schema and canonical value before applying it, and shows
+  the current value separately while a replacement awaits confirmation
+- multi-turn backend coverage exercises navigation, ambiguity, reopening,
+  correction, typed non-confirmation, rejection, cancellation, edited
+  confirmation, stale events, model failure, and post-completion review
+- all 305 backend tests and the frontend production build pass
 
 Do not implement:
 - voice input or output

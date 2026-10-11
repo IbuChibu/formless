@@ -21,6 +21,7 @@ from .answer_adapters import (
 )
 from .models import (
     AdvanceEvent,
+    CancelCorrectionEvent,
     ClarifyAction,
     ConfirmEditEvent,
     ConfirmEvent,
@@ -31,6 +32,13 @@ from .models import (
     ConversationPhase,
     ConversationState,
     ExplainAction,
+    CorrectionCancelledAction,
+    CorrectionCancelledEffect,
+    CorrectionStartedAction,
+    CorrectionStartedEffect,
+    FieldReopenedAction,
+    FieldReopenedEffect,
+    FieldSelectedAction,
     FocusFieldEvent,
     FormAgentAction,
     FormAgentError,
@@ -43,11 +51,16 @@ from .models import (
     NoFormEffect,
     OfficialGuidanceCitation,
     PendingProposal,
+    PendingReplacementProposal,
     ProposalEffect,
     ProposeAction,
     RejectEvent,
     RejectedAction,
     RejectedEffect,
+    ReplacementProposalEffect,
+    ReplacementProposeAction,
+    ReplacementRejectedAction,
+    ReplacementRejectedEffect,
     SkipAction,
     SkippedEffect,
     SkipEvent,
@@ -58,6 +71,7 @@ from .models import (
     request_message,
     truncate_text,
 )
+from .field_navigation import NavigationDecision, navigation_decision
 from .value_normalizer import (
     canonicalize_field_value,
     validate_field_value,
@@ -76,6 +90,17 @@ _ALLOWED_EVENTS: dict[ConversationPhase, set[str]] = {
         "confirm_edit",
         "reject",
         "skip",
+    },
+    "awaiting_replacement": {
+        "message",
+        "cancel_correction",
+    },
+    "awaiting_replacement_confirmation": {
+        "message",
+        "confirm",
+        "confirm_edit",
+        "reject",
+        "cancel_correction",
     },
     "field_confirmed": {"advance", "focus_field"},
     "field_skipped": {"advance", "focus_field"},
@@ -497,6 +522,14 @@ def validate_event_transition(request: FormAgentRequest) -> None:
             raise FormAgentTransitionError(
                 "The active field is no longer answerable"
             )
+    elif phase in {
+        "awaiting_replacement",
+        "awaiting_replacement_confirmation",
+    }:
+        if active_field is None or active_field.status != "confirmed":
+            raise FormAgentTransitionError(
+                "The confirmed field is no longer available for correction"
+            )
     elif phase == "field_confirmed":
         if active_field is None or active_field.status != "confirmed":
             raise FormAgentTransitionError(
@@ -514,7 +547,10 @@ def validate_event_transition(request: FormAgentRequest) -> None:
             "The form-complete state is stale"
         )
 
-    if phase == "awaiting_confirmation":
+    if phase in {
+        "awaiting_confirmation",
+        "awaiting_replacement_confirmation",
+    }:
         pending = request.conversation_state.pending_proposal
         if pending is None or active_field is None:
             raise FormAgentTransitionError(
@@ -530,6 +566,15 @@ def validate_event_transition(request: FormAgentRequest) -> None:
             raise FormAgentTransitionError(
                 "The pending proposal is no longer valid for its field"
             ) from error
+        if phase == "awaiting_replacement_confirmation":
+            if not isinstance(pending, PendingReplacementProposal):
+                raise FormAgentTransitionError(
+                    "The pending replacement is unavailable"
+                )
+            if pending.previous_confirmed_value != active_field.confirmed_value:
+                raise FormAgentTransitionError(
+                    "The pending replacement is stale"
+                )
 
     if isinstance(request.event, FocusFieldEvent):
         focused_field = fields_by_id[request.event.field_id]
@@ -559,6 +604,20 @@ def deterministic_action(
     if isinstance(event, AdvanceEvent):
         return _next_unanswered_action(request.fields)
 
+    if isinstance(event, CancelCorrectionEvent):
+        if active_field is None:
+            raise FormAgentTransitionError(
+                "There is no active correction to cancel"
+            )
+        return _correction_cancelled_action(active_field, request.fields)
+
+    if isinstance(event, MessageEvent):
+        navigation = navigation_decision(event.content, request.fields)
+        if navigation is not None:
+            navigation_action = _navigation_action(navigation, request)
+            if navigation_action is not None:
+                return navigation_action
+
     if (
         request.conversation_state.phase == "asking"
         and isinstance(event, MessageEvent)
@@ -581,6 +640,7 @@ def deterministic_action(
             fields_by_id[pending.field_id],
             pending.value,
             request.fields,
+            replacement=isinstance(pending, PendingReplacementProposal),
         )
 
     if isinstance(event, ConfirmEditEvent):
@@ -603,7 +663,15 @@ def deterministic_action(
             raise FormAgentTransitionError(
                 "The edited answer is not valid for this field"
             ) from error
-        return _confirmed_action(active_field, value, request.fields)
+        return _confirmed_action(
+            active_field,
+            value,
+            request.fields,
+            replacement=(
+                request.conversation_state.phase
+                == "awaiting_replacement_confirmation"
+            ),
+        )
 
     if isinstance(event, RejectEvent):
         if active_field is None:
@@ -614,6 +682,21 @@ def deterministic_action(
             field_question(active_field),
             180,
         ).rstrip(" .?")
+        if (
+            request.conversation_state.phase
+            == "awaiting_replacement_confirmation"
+        ):
+            return ReplacementRejectedAction(
+                action="replacement_rejected",
+                message=(
+                    "No change made — the current answer for "
+                    f'“{question}” remains '
+                    f"{format_agent_value(active_field.confirmed_value)}. "
+                    "Tell me the replacement you want, or cancel the "
+                    "correction."
+                ),
+                field_id=active_field.id,
+            )
         return RejectedAction(
             action="rejected",
             message=(
@@ -635,7 +718,8 @@ def deterministic_action(
         return _skip_action(active_field, request.fields)
 
     if (
-        request.conversation_state.phase == "awaiting_confirmation"
+        request.conversation_state.phase
+        in {"awaiting_confirmation", "awaiting_replacement_confirmation"}
         and isinstance(event, MessageEvent)
     ):
         if active_field is None:
@@ -658,20 +742,29 @@ def deterministic_action(
                 ),
                 field_id=active_field.id,
             )
+        correction_copy = (
+            "That replacement is still awaiting confirmation. Use Confirm, "
+            "Edit, Reject, or Cancel correction before sending another answer."
+            if request.conversation_state.phase
+            == "awaiting_replacement_confirmation"
+            else "That proposal is still awaiting confirmation. Use Confirm, "
+            "Edit, Reject, or Skip field before sending another answer."
+        )
         return ClarifyAction(
             action="clarify",
-            message=(
-                "That proposal is still awaiting confirmation. Use Confirm, "
-                "Edit, Reject, or Skip field before sending another answer."
-            ),
+            message=correction_copy,
             field_id=active_field.id,
         )
 
-    if active_field is None or active_field.status != "unanswered":
+    is_replacement = (
+        request.conversation_state.phase == "awaiting_replacement"
+    )
+    expected_status = "confirmed" if is_replacement else "unanswered"
+    if active_field is None or active_field.status != expected_status:
         return None
 
     message = request_message(request)
-    if _asks_to_skip(message):
+    if not is_replacement and _asks_to_skip(message):
         return _skip_action(active_field, request.fields)
 
     if turn_intent == "progress_question":
@@ -690,19 +783,32 @@ def deterministic_action(
     if not isinstance(adapter_result, MatchedAnswer):
         return None
 
-    return normalize_action_message(
-        prepare_proposal_action(
-            ProposeAction(
-                action="propose",
-                message="Proposal awaiting confirmation.",
-                field_id=active_field.id,
-                value=adapter_result.value,
-                original_value=adapter_result.original_value,
-            ),
-            request,
+    proposal = prepare_proposal_action(
+        ProposeAction(
+            action="propose",
+            message="Proposal awaiting confirmation.",
+            field_id=active_field.id,
+            value=adapter_result.value,
+            original_value=adapter_result.original_value,
         ),
         request,
     )
+    if is_replacement:
+        replacement = ReplacementProposeAction(
+            action="replacement_propose",
+            message=proposal.message,
+            field_id=proposal.field_id,
+            previous_confirmed_value=active_field.confirmed_value,
+            value=proposal.value,
+            original_value=(
+                proposal.original_value
+                if proposal.original_value is not None
+                else proposal.value
+            ),
+            transformation=proposal.transformation,
+        )
+        return normalize_action_message(replacement, request)
+    return normalize_action_message(proposal, request)
 
 
 def response_for_action(
@@ -723,11 +829,26 @@ def response_for_action(
                 value=action.value,
             ),
         )
+    elif isinstance(action, ReplacementProposeAction):
+        state = ConversationState(
+            phase="awaiting_replacement_confirmation",
+            active_field_id=action.field_id,
+            pending_proposal=PendingReplacementProposal(
+                field_id=action.field_id,
+                previous_confirmed_value=action.previous_confirmed_value,
+                value=action.value,
+            ),
+        )
     elif isinstance(action, ConfirmedAction):
         state = _state_after_resolution(action.field_id, request.fields)
     elif isinstance(action, RejectedAction):
         state = ConversationState(
             phase="awaiting_answer",
+            active_field_id=action.field_id,
+        )
+    elif isinstance(action, ReplacementRejectedAction):
+        state = ConversationState(
+            phase="awaiting_replacement",
             active_field_id=action.field_id,
         )
     elif isinstance(action, SkipAction):
@@ -737,17 +858,33 @@ def response_for_action(
             phase=("awaiting_answer" if action.field_id else "form_complete"),
             active_field_id=action.field_id,
         )
+    elif isinstance(action, (FieldSelectedAction, FieldReopenedAction)):
+        state = ConversationState(
+            phase="awaiting_answer",
+            active_field_id=action.field_id,
+        )
+    elif isinstance(action, CorrectionStartedAction):
+        state = ConversationState(
+            phase="awaiting_replacement",
+            active_field_id=action.field_id,
+        )
+    elif isinstance(action, CorrectionCancelledAction):
+        state = _state_after_correction(request.fields)
     elif (
         isinstance(action, ClarifyAction)
-        and request.conversation_state.phase == "awaiting_confirmation"
+        and request.conversation_state.phase
+        in {"awaiting_confirmation", "awaiting_replacement_confirmation"}
         and isinstance(request.event, MessageEvent)
     ):
         state = request.conversation_state
     elif isinstance(action, ClarifyAction):
-        state = ConversationState(
-            phase="awaiting_clarification",
-            active_field_id=action.field_id,
-        )
+        if request.conversation_state.phase == "awaiting_replacement":
+            state = request.conversation_state
+        else:
+            state = ConversationState(
+                phase="awaiting_clarification",
+                active_field_id=action.field_id,
+            )
     elif isinstance(action, ConversationAction):
         state = request.conversation_state
     elif isinstance(action, ExplainAction) and (
@@ -757,6 +894,8 @@ def response_for_action(
             "awaiting_answer",
             "awaiting_clarification",
             "awaiting_confirmation",
+            "awaiting_replacement",
+            "awaiting_replacement_confirmation",
         }
     ):
         state = request.conversation_state
@@ -772,6 +911,10 @@ def response_for_action(
         not isinstance(request.event, AdvanceEvent)
         and active_field_id is not None
         and action.field_id not in {active_field_id, None}
+        and not isinstance(
+            action,
+            (FieldSelectedAction, FieldReopenedAction, CorrectionStartedAction),
+        )
     ):
         raise FormAgentError("Form Agent changed the active field unexpectedly")
 
@@ -803,6 +946,14 @@ def _effect_for_action(action: FormAgentAction) -> dict[str, object]:
             prepared_value=action.value,
             transformation=action.transformation,
         ).model_dump()
+    if isinstance(action, ReplacementProposeAction):
+        return ReplacementProposalEffect(
+            field_id=action.field_id,
+            previous_confirmed_value=action.previous_confirmed_value,
+            original_value=action.original_value,
+            prepared_value=action.value,
+            transformation=action.transformation,
+        ).model_dump()
     if isinstance(action, ConfirmedAction):
         return ConfirmedEffect(
             field_id=action.field_id,
@@ -810,12 +961,22 @@ def _effect_for_action(action: FormAgentAction) -> dict[str, object]:
         ).model_dump()
     if isinstance(action, RejectedAction):
         return RejectedEffect(field_id=action.field_id).model_dump()
+    if isinstance(action, ReplacementRejectedAction):
+        return ReplacementRejectedEffect(field_id=action.field_id).model_dump()
     if isinstance(action, SkipAction):
         return SkippedEffect(field_id=action.field_id).model_dump()
     if isinstance(action, NextAction):
         if action.field_id is None:
             return CompletedEffect().model_dump()
         return FieldSelectedEffect(field_id=action.field_id).model_dump()
+    if isinstance(action, FieldSelectedAction):
+        return FieldSelectedEffect(field_id=action.field_id).model_dump()
+    if isinstance(action, FieldReopenedAction):
+        return FieldReopenedEffect(field_id=action.field_id).model_dump()
+    if isinstance(action, CorrectionStartedAction):
+        return CorrectionStartedEffect(field_id=action.field_id).model_dump()
+    if isinstance(action, CorrectionCancelledAction):
+        return CorrectionCancelledEffect(field_id=action.field_id).model_dump()
     return NoFormEffect(field_id=action.field_id).model_dump()
 
 
@@ -937,7 +1098,7 @@ def validate_action_for_turn(
         )
     if intent == "prose_polish" and not isinstance(
         action,
-        (ProposeAction, ClarifyAction),
+        (ProposeAction, ReplacementProposeAction, ClarifyAction),
     ):
         raise FormAgentError(
             "This prose request requires a reviewable proposal or clarification"
@@ -1017,6 +1178,29 @@ def normalize_action_message(
             )
         return action.model_copy(update={"message": message})
 
+    if isinstance(action, ReplacementProposeAction):
+        field = next(
+            field for field in request.fields if field.id == action.field_id
+        )
+        question = truncate_text(field_question(field), 180).rstrip(" .?")
+        previous = format_agent_value(action.previous_confirmed_value)
+        original = format_agent_value(action.original_value)
+        prepared = format_agent_value(action.value)
+        transformation = (
+            f" {action.transformation}" if action.transformation else ""
+        )
+        return action.model_copy(
+            update={
+                "message": (
+                    f'For “{question}”, the current confirmed answer is '
+                    f"{previous}. I understood your replacement as {original}."
+                    f"{transformation} I prepared {prepared} for review. It "
+                    "is awaiting explicit confirmation, so the current answer "
+                    "has not changed."
+                )
+            }
+        )
+
     if isinstance(action, SkipAction):
         field = next(
             field for field in request.fields if field.id == action.field_id
@@ -1050,6 +1234,182 @@ def build_next_field_question(field: FormAgentField) -> str:
     if len(options) > len(visible_options):
         option_text += f", and {len(options) - len(visible_options)} more"
     return f"{question} Choose one of: {option_text}."
+
+
+def _navigation_action(
+    decision: NavigationDecision,
+    request: FormAgentRequest,
+) -> Optional[FormAgentAction]:
+    phase = request.conversation_state.phase
+    active_field_id = request.conversation_state.active_field_id
+
+    if decision.kind == "cancel_correction":
+        if phase not in {
+            "awaiting_replacement",
+            "awaiting_replacement_confirmation",
+        }:
+            return ConversationAction(
+                action="conversation",
+                message="There is no active correction to cancel.",
+                field_id=active_field_id,
+            )
+        field = next(
+            field
+            for field in request.fields
+            if field.id == active_field_id
+        )
+        return _correction_cancelled_action(field, request.fields)
+
+    if decision.kind == "review_statuses":
+        return ConversationAction(
+            action="conversation",
+            message=_status_review_message(request.fields, decision.statuses),
+            field_id=active_field_id,
+        )
+
+    if decision.kind == "review_value":
+        if len(decision.matches) == 1:
+            field = decision.matches[0]
+            return ConversationAction(
+                action="conversation",
+                message=(
+                    f'Your confirmed answer for “{_field_display_name(field)}” '
+                    f"is {format_agent_value(field.confirmed_value)}. Nothing "
+                    "on the form has changed."
+                ),
+                field_id=active_field_id,
+            )
+        return ConversationAction(
+            action="conversation",
+            message=_field_match_clarification(
+                decision.matches,
+                "confirmed question",
+            ),
+            field_id=active_field_id,
+        )
+
+    if phase in {
+        "awaiting_confirmation",
+        "awaiting_replacement_confirmation",
+    }:
+        return ConversationAction(
+            action="conversation",
+            message=(
+                "Please resolve the answer awaiting confirmation first. "
+                "No field or value has changed."
+            ),
+            field_id=active_field_id,
+        )
+
+    if len(decision.matches) != 1:
+        required_kind = {
+            "select": "unanswered question",
+            "reopen": "skipped question",
+            "correct": "confirmed question",
+        }[decision.kind]
+        return ConversationAction(
+            action="conversation",
+            message=_field_match_clarification(
+                decision.matches,
+                required_kind,
+            ),
+            field_id=active_field_id,
+        )
+
+    field = decision.matches[0]
+    if decision.kind == "select":
+        return FieldSelectedAction(
+            action="field_selected",
+            message=f"Okay — {build_next_field_question(field)}",
+            field_id=field.id,
+        )
+    if decision.kind == "reopen":
+        return FieldReopenedAction(
+            action="field_reopened",
+            message=(
+                f'I reopened “{_field_display_name(field)}”. '
+                f"{build_next_field_question(field)}"
+            ),
+            field_id=field.id,
+        )
+    if decision.kind == "correct":
+        return CorrectionStartedAction(
+            action="correction_started",
+            message=(
+                f'Your current confirmed answer for “{_field_display_name(field)}” '
+                f"is {format_agent_value(field.confirmed_value)}. It will stay "
+                "on the form unless you explicitly confirm a replacement. "
+                "What should the replacement be?"
+            ),
+            field_id=field.id,
+        )
+    return None
+
+
+def _correction_cancelled_action(
+    field: FormAgentField,
+    fields: list[FormAgentField],
+) -> CorrectionCancelledAction:
+    next_field = _next_unanswered_field(fields)
+    return CorrectionCancelledAction(
+        action="correction_cancelled",
+        message=(
+            f'Correction cancelled. Your confirmed answer for '
+            f'“{_field_display_name(field)}” remains '
+            f"{format_agent_value(field.confirmed_value)}. "
+            f"{_progression_message(next_field)}"
+        ),
+        field_id=field.id,
+    )
+
+
+def _status_review_message(
+    fields: list[FormAgentField],
+    statuses: tuple[Literal["unanswered", "confirmed", "skipped"], ...],
+) -> str:
+    labels = {
+        "confirmed": "Confirmed",
+        "skipped": "Skipped",
+        "unanswered": "Unanswered",
+    }
+    sections: list[str] = []
+    for status in statuses:
+        matching = [field for field in fields if field.status == status]
+        visible = matching[:6]
+        names = "; ".join(_field_display_name(field) for field in visible)
+        if len(matching) > len(visible):
+            names += f"; and {len(matching) - len(visible)} more"
+        sections.append(
+            f"{labels[status]} ({len(matching)}): {names or 'none'}"
+        )
+    return ". ".join(sections) + ". Nothing on the form has changed."
+
+
+def _field_match_clarification(
+    matches: tuple[FormAgentField, ...],
+    required_kind: str,
+) -> str:
+    if not matches:
+        return (
+            f"I couldn't match that reference to a {required_kind}. "
+            "Please use wording from the question or its visible label. "
+            "Nothing on the form has changed."
+        )
+    visible = matches[:4]
+    options = "; ".join(_field_display_name(field) for field in visible)
+    remainder = (
+        f"; and {len(matches) - len(visible)} more"
+        if len(matches) > len(visible)
+        else ""
+    )
+    return (
+        f"I found more than one matching {required_kind}: {options}{remainder}. "
+        "Which one did you mean? Nothing on the form has changed."
+    )
+
+
+def _field_display_name(field: FormAgentField) -> str:
+    return truncate_text(field_question(field), 180).rstrip(" .?")
 
 
 def _next_unanswered_action(fields: list[FormAgentField]) -> NextAction:
@@ -1102,14 +1462,17 @@ def _confirmed_action(
     field: FormAgentField,
     value: str | bool,
     fields: list[FormAgentField],
+    *,
+    replacement: bool = False,
 ) -> ConfirmedAction:
     question = truncate_text(field_question(field), 180).rstrip(" .?")
     next_field = _next_unanswered_field(fields, resolved_field_id=field.id)
     progression = _progression_message(next_field)
+    verb = "replaced the answer with" if replacement else "added"
     return ConfirmedAction(
         action="confirmed",
         message=(
-            f'Confirmed — I added {format_agent_value(value)} to “{question}”. '
+            f'Confirmed — I {verb} {format_agent_value(value)} for “{question}”. '
             f"{progression}"
         ),
         field_id=field.id,
@@ -1198,6 +1561,14 @@ def _state_after_resolution(
         fields,
         resolved_field_id=resolved_field_id,
     )
+    return ConversationState(
+        phase="awaiting_answer" if next_field else "form_complete",
+        active_field_id=next_field.id if next_field else None,
+    )
+
+
+def _state_after_correction(fields: list[FormAgentField]) -> ConversationState:
+    next_field = _next_unanswered_field(fields)
     return ConversationState(
         phase="awaiting_answer" if next_field else "form_complete",
         active_field_id=next_field.id if next_field else None,

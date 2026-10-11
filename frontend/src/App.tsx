@@ -12,10 +12,15 @@ type FieldValue = string | boolean;
 type AgentEffectKind =
   | "none"
   | "proposal"
+  | "replacement_proposal"
   | "confirmed"
   | "rejected"
   | "skipped"
   | "field_selected"
+  | "field_reopened"
+  | "correction_started"
+  | "replacement_rejected"
+  | "correction_cancelled"
   | "completed";
 type AgentFieldStatus = "unanswered" | "confirmed" | "skipped";
 type ConversationPhase =
@@ -23,6 +28,8 @@ type ConversationPhase =
   | "awaiting_answer"
   | "awaiting_clarification"
   | "awaiting_confirmation"
+  | "awaiting_replacement"
+  | "awaiting_replacement_confirmation"
   | "field_confirmed"
   | "field_skipped"
   | "form_complete";
@@ -136,10 +143,17 @@ type AgentRequest = {
   history: AgentHistoryMessage[];
 };
 
-type PendingProposal = {
-  field_id: string;
-  value: FieldValue;
-};
+type PendingProposal =
+  | {
+      field_id: string;
+      value: FieldValue;
+    }
+  | {
+      operation: "replacement";
+      field_id: string;
+      previous_confirmed_value: FieldValue;
+      value: FieldValue;
+    };
 
 type ConversationState = {
   phase: ConversationPhase;
@@ -154,6 +168,7 @@ type AgentEvent =
   | { type: "confirm" }
   | { type: "confirm_edit"; value: FieldValue }
   | { type: "reject" }
+  | { type: "cancel_correction" }
   | { type: "skip"; field_id: string };
 
 type AgentEffect =
@@ -169,12 +184,27 @@ type AgentEffect =
       transformation: string | null;
     }
   | {
+      effect: "replacement_proposal";
+      field_id: string;
+      previous_confirmed_value: FieldValue;
+      original_value: FieldValue;
+      prepared_value: FieldValue;
+      transformation: string | null;
+    }
+  | {
       effect: "confirmed";
       field_id: string;
       value: FieldValue;
     }
   | {
-      effect: "rejected" | "skipped" | "field_selected";
+      effect:
+        | "rejected"
+        | "skipped"
+        | "field_selected"
+        | "field_reopened"
+        | "correction_started"
+        | "replacement_rejected"
+        | "correction_cancelled";
       field_id: string;
     }
   | {
@@ -188,6 +218,10 @@ type AgentResponse = {
   guidance: OfficialGuidanceCitation[];
   web_guidance: WebGuidanceMetadata | null;
 };
+
+type ProposalAgentEffect =
+  | Extract<AgentEffect, { effect: "proposal" }>
+  | Extract<AgentEffect, { effect: "replacement_proposal" }>;
 
 type ConversationMessage = AgentHistoryMessage & {
   id: number;
@@ -246,7 +280,7 @@ function App() {
   const [proposalEditValue, setProposalEditValue] =
     useState<FieldValue>("");
   const [pendingProposalDetails, setPendingProposalDetails] =
-    useState<Extract<AgentEffect, { effect: "proposal" }> | null>(null);
+    useState<ProposalAgentEffect | null>(null);
   const [manualDrawerOpen, setManualDrawerOpen] = useState(false);
 
   const originalUrlRef = useRef<string | null>(null);
@@ -611,6 +645,7 @@ function App() {
       const agentResponse = parseAgentResponse(
         await response.json(),
         request.fields,
+        request.conversation_state,
       );
       const {
         assistant_message: assistantMessage,
@@ -638,7 +673,10 @@ function App() {
 
       setAgentConversationState(conversationState);
 
-      if (effect.effect === "proposal") {
+      if (
+        effect.effect === "proposal" ||
+        effect.effect === "replacement_proposal"
+      ) {
         setProposalEditValue(effect.prepared_value);
         setPendingProposalDetails(effect);
         setIsEditingProposal(false);
@@ -660,7 +698,19 @@ function App() {
           return next;
         });
         resetProposalEditor();
-      } else if (conversationState.phase !== "awaiting_confirmation") {
+      } else if (effect.effect === "field_reopened") {
+        setSkippedFieldIds((current) => {
+          const next = new Set(current);
+          next.delete(effect.field_id);
+          return next;
+        });
+        resetProposalEditor();
+      } else if (
+        ![
+          "awaiting_confirmation",
+          "awaiting_replacement_confirmation",
+        ].includes(conversationState.phase)
+      ) {
         resetProposalEditor();
       }
       setAgentStatus("idle");
@@ -752,6 +802,11 @@ function App() {
   const fieldGroups = groupFieldsByPage(fields);
   const agentActiveFieldId = agentConversationState.active_field_id;
   const pendingProposal = agentConversationState.pending_proposal;
+  const isReplacementPending = Boolean(
+    pendingProposal &&
+      "operation" in pendingProposal &&
+      pendingProposal.operation === "replacement",
+  );
   const activeAgentField = fields.find(
     (field) => field.id === agentActiveFieldId,
   );
@@ -819,6 +874,8 @@ function App() {
     "awaiting_answer",
     "awaiting_clarification",
     "awaiting_confirmation",
+    "awaiting_replacement",
+    "awaiting_replacement_confirmation",
     "form_complete",
   ].includes(agentConversationState.phase);
 
@@ -1270,7 +1327,11 @@ function App() {
                   >
                     <div className="agent-confirmation-heading">
                       <div>
-                        <span>Review proposal</span>
+                        <span>
+                          {isReplacementPending
+                            ? "Review replacement"
+                            : "Review proposal"}
+                        </span>
                         <strong>
                           {pendingProposalField.label ||
                             humanizeFieldId(pendingProposalField.id)}
@@ -1322,6 +1383,17 @@ function App() {
                       </form>
                     ) : (
                       <>
+                        {activeProposalDetails?.effect ===
+                        "replacement_proposal" ? (
+                          <div className="agent-confirmation-value">
+                            <span>Current confirmed answer</span>
+                            <strong>
+                              {formatAgentValue(
+                                activeProposalDetails.previous_confirmed_value,
+                              )}
+                            </strong>
+                          </div>
+                        ) : null}
                         {activeProposalDetails?.transformation ? (
                           <div className="agent-preparation-comparison">
                             <div>
@@ -1353,8 +1425,9 @@ function App() {
                           </div>
                         )}
                         <p>
-                          Nothing changes until you choose Confirm or submit an
-                          edited answer.
+                          {isReplacementPending
+                            ? "The current answer stays on the form until you confirm this replacement or submit an edited replacement."
+                            : "Nothing changes until you choose Confirm or submit an edited answer."}
                         </p>
                         <div className="agent-confirmation-actions">
                           <button
@@ -1365,7 +1438,9 @@ function App() {
                               confirmPendingProposal(pendingProposal.value)
                             }
                           >
-                            Confirm
+                            {isReplacementPending
+                              ? "Confirm replacement"
+                              : "Confirm"}
                           </button>
                           <button
                             type="button"
@@ -1393,13 +1468,27 @@ function App() {
                           >
                             Reject
                           </button>
-                          <button
-                            type="button"
-                            disabled={agentStatus === "loading"}
-                            onClick={skipPendingProposal}
-                          >
-                            Skip field
-                          </button>
+                          {isReplacementPending ? (
+                            <button
+                              type="button"
+                              disabled={agentStatus === "loading"}
+                              onClick={() =>
+                                sendAgentEvent({
+                                  type: "cancel_correction",
+                                })
+                              }
+                            >
+                              Cancel correction
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={agentStatus === "loading"}
+                              onClick={skipPendingProposal}
+                            >
+                              Skip field
+                            </button>
+                          )}
                         </div>
                       </>
                     )}
@@ -2047,6 +2136,7 @@ function isPlaceholderDropdownOption(option: string): boolean {
 function parseAgentResponse(
   payload: unknown,
   requestFields: AgentRequestField[],
+  requestState: ConversationState,
 ): AgentResponse {
   if (!isRecord(payload)) {
     throw new Error("The API returned an invalid form assistant response.");
@@ -2065,7 +2155,12 @@ function parseAgentResponse(
   );
   const guidance = parseOfficialGuidance(payload.guidance);
   const webGuidance = parseWebGuidance(payload.web_guidance);
-  validateAgentResponseState(effect, conversationState, requestFields);
+  validateAgentResponseState(
+    effect,
+    conversationState,
+    requestFields,
+    requestState,
+  );
   return {
     assistant_message: payload.assistant_message.trim(),
     effect,
@@ -2215,7 +2310,10 @@ function parseAgentEffect(
     throw new Error("The form assistant returned an unknown field.");
   }
 
-  if (payload.effect === "proposal") {
+  if (
+    payload.effect === "proposal" ||
+    payload.effect === "replacement_proposal"
+  ) {
     const originalValue = payload.original_value;
     const preparedValue = payload.prepared_value;
     const transformation = payload.transformation;
@@ -2228,6 +2326,27 @@ function parseAgentEffect(
       (transformation !== null && typeof transformation !== "string")
     ) {
       throw new Error("The form assistant returned an invalid proposal.");
+    }
+    if (payload.effect === "replacement_proposal") {
+      const previousConfirmedValue = payload.previous_confirmed_value;
+      if (
+        field.status !== "confirmed" ||
+        (typeof previousConfirmedValue !== "string" &&
+          typeof previousConfirmedValue !== "boolean") ||
+        previousConfirmedValue !== field.confirmed_value
+      ) {
+        throw new Error(
+          "The form assistant returned an invalid replacement proposal.",
+        );
+      }
+      return {
+        effect: "replacement_proposal",
+        field_id: fieldId,
+        previous_confirmed_value: previousConfirmedValue,
+        original_value: originalValue,
+        prepared_value: preparedValue,
+        transformation,
+      };
     }
     return {
       effect: "proposal",
@@ -2292,7 +2411,29 @@ function parseConversationState(
     ) {
       throw new Error("The API returned an invalid pending proposal.");
     }
-    pendingProposal = { field_id: pendingField.id, value: pendingValue };
+    if (payload.pending_proposal.operation === "replacement") {
+      const previousConfirmedValue =
+        payload.pending_proposal.previous_confirmed_value;
+      if (
+        pendingField.status !== "confirmed" ||
+        (typeof previousConfirmedValue !== "string" &&
+          typeof previousConfirmedValue !== "boolean") ||
+        previousConfirmedValue !== pendingField.confirmed_value
+      ) {
+        throw new Error("The API returned an invalid pending replacement.");
+      }
+      pendingProposal = {
+        operation: "replacement",
+        field_id: pendingField.id,
+        previous_confirmed_value: previousConfirmedValue,
+        value: pendingValue,
+      };
+    } else {
+      if (payload.pending_proposal.operation !== undefined) {
+        throw new Error("The API returned an invalid pending proposal.");
+      }
+      pendingProposal = { field_id: pendingField.id, value: pendingValue };
+    }
   }
 
   const state: ConversationState = {
@@ -2304,6 +2445,8 @@ function parseConversationState(
     "awaiting_answer",
     "awaiting_clarification",
     "awaiting_confirmation",
+    "awaiting_replacement",
+    "awaiting_replacement_confirmation",
     "field_confirmed",
     "field_skipped",
   ].includes(state.phase);
@@ -2311,10 +2454,21 @@ function parseConversationState(
     (phaseNeedsActiveField && state.active_field_id === null) ||
     (["asking", "form_complete"].includes(state.phase) &&
       state.active_field_id !== null) ||
-    (state.phase === "awaiting_confirmation" &&
+    (["awaiting_confirmation", "awaiting_replacement_confirmation"].includes(
+      state.phase,
+    ) &&
       (state.pending_proposal === null ||
         state.pending_proposal.field_id !== state.active_field_id)) ||
-    (state.phase !== "awaiting_confirmation" &&
+    (state.phase === "awaiting_confirmation" &&
+      state.pending_proposal !== null &&
+      "operation" in state.pending_proposal) ||
+    (state.phase === "awaiting_replacement_confirmation" &&
+      (state.pending_proposal === null ||
+        !("operation" in state.pending_proposal))) ||
+    (![
+      "awaiting_confirmation",
+      "awaiting_replacement_confirmation",
+    ].includes(state.phase) &&
       state.pending_proposal !== null)
   ) {
     throw new Error("The API returned an invalid conversation state.");
@@ -2326,38 +2480,55 @@ function validateAgentResponseState(
   effect: AgentEffect,
   state: ConversationState,
   requestFields: AgentRequestField[],
+  requestState: ConversationState,
 ) {
-  const isResolutionEffect =
-    effect.effect === "confirmed" || effect.effect === "skipped";
   const effectFieldId = "field_id" in effect ? effect.field_id : null;
-  const resolutionField =
+  const effectField =
     effectFieldId === null
       ? undefined
       : findAgentField(requestFields, effectFieldId);
-  const resolutionFieldWasUnanswered =
-    resolutionField?.status === "unanswered";
-  const expectedNextField = isResolutionEffect
-    ? requestFields.find(
-        (field) =>
-          field.status === "unanswered" && field.id !== effectFieldId,
-      )
-    : undefined;
+  const isInitialResolution =
+    (effect.effect === "confirmed" &&
+      requestState.phase === "awaiting_confirmation" &&
+      effectField?.status === "unanswered") ||
+    (effect.effect === "skipped" && effectField?.status === "unanswered");
+  const isReplacementResolution =
+    effect.effect === "confirmed" &&
+    requestState.phase === "awaiting_replacement_confirmation" &&
+    effectField?.status === "confirmed";
+  const isResolutionEffect =
+    isInitialResolution || isReplacementResolution;
+  const expectedNextField = requestFields.find(
+    (field) =>
+      field.status === "unanswered" &&
+      (!isInitialResolution || field.id !== effectFieldId),
+  );
   const progressedToNextField =
     isResolutionEffect &&
-    resolutionFieldWasUnanswered &&
     expectedNextField !== undefined &&
     state.phase === "awaiting_answer" &&
     state.active_field_id === expectedNextField.id;
   const completedForm =
     isResolutionEffect &&
-    resolutionFieldWasUnanswered &&
     expectedNextField === undefined &&
     state.phase === "form_complete" &&
     state.active_field_id === null;
+  const correctionCancelled =
+    effect.effect === "correction_cancelled" &&
+    ["awaiting_replacement", "awaiting_replacement_confirmation"].includes(
+      requestState.phase,
+    ) &&
+    ((expectedNextField !== undefined &&
+      state.phase === "awaiting_answer" &&
+      state.active_field_id === expectedNextField.id) ||
+      (expectedNextField === undefined &&
+        state.phase === "form_complete" &&
+        state.active_field_id === null));
 
   if (
     !isResolutionEffect &&
     effect.effect !== "completed" &&
+    effect.effect !== "correction_cancelled" &&
     effectFieldId !== state.active_field_id
   ) {
     throw new Error("The assistant response and conversation state disagree.");
@@ -2365,22 +2536,47 @@ function validateAgentResponseState(
 
   const validPhase =
     (effect.effect === "proposal" &&
+      effectField?.status === "unanswered" &&
       state.phase === "awaiting_confirmation" &&
       state.pending_proposal?.field_id === effect.field_id &&
+      !("operation" in state.pending_proposal) &&
+      state.pending_proposal.value === effect.prepared_value) ||
+    (effect.effect === "replacement_proposal" &&
+      effectField?.status === "confirmed" &&
+      state.phase === "awaiting_replacement_confirmation" &&
+      state.pending_proposal?.field_id === effect.field_id &&
+      "operation" in state.pending_proposal &&
+      state.pending_proposal.previous_confirmed_value ===
+        effect.previous_confirmed_value &&
       state.pending_proposal.value === effect.prepared_value) ||
     (effect.effect === "confirmed" &&
       (progressedToNextField || completedForm)) ||
     (effect.effect === "rejected" && state.phase === "awaiting_answer") ||
+    (effect.effect === "replacement_rejected" &&
+      effectField?.status === "confirmed" &&
+      state.phase === "awaiting_replacement") ||
     (effect.effect === "skipped" &&
       (progressedToNextField || completedForm)) ||
     (effect.effect === "none" &&
       [
+        "asking",
         "awaiting_answer",
         "awaiting_clarification",
         "awaiting_confirmation",
+        "awaiting_replacement",
+        "awaiting_replacement_confirmation",
+        "form_complete",
       ].includes(state.phase)) ||
     (effect.effect === "field_selected" &&
+      effectField?.status === "unanswered" &&
       state.phase === "awaiting_answer") ||
+    (effect.effect === "field_reopened" &&
+      effectField?.status === "skipped" &&
+      state.phase === "awaiting_answer") ||
+    (effect.effect === "correction_started" &&
+      effectField?.status === "confirmed" &&
+      state.phase === "awaiting_replacement") ||
+    correctionCancelled ||
     (effect.effect === "completed" && state.phase === "form_complete");
   if (!validPhase) {
     throw new Error("The assistant returned an invalid state transition.");
@@ -2398,10 +2594,15 @@ function isAgentEffectKind(value: unknown): value is AgentEffectKind {
   return [
     "none",
     "proposal",
+    "replacement_proposal",
     "confirmed",
     "rejected",
     "skipped",
     "field_selected",
+    "field_reopened",
+    "correction_started",
+    "replacement_rejected",
+    "correction_cancelled",
     "completed",
   ].includes(value as AgentEffectKind);
 }
@@ -2412,6 +2613,8 @@ function isConversationPhase(value: unknown): value is ConversationPhase {
     "awaiting_answer",
     "awaiting_clarification",
     "awaiting_confirmation",
+    "awaiting_replacement",
+    "awaiting_replacement_confirmation",
     "field_confirmed",
     "field_skipped",
     "form_complete",
@@ -2461,10 +2664,15 @@ function getAgentEffectLabel(effect: AgentEffectKind): string {
   const labels: Record<AgentEffectKind, string> = {
     none: "Conversation",
     proposal: "Proposal",
+    replacement_proposal: "Replacement proposal",
     confirmed: "Confirmed",
     rejected: "Rejected",
     skipped: "Skipped",
     field_selected: "Question selected",
+    field_reopened: "Question reopened",
+    correction_started: "Correction started",
+    replacement_rejected: "Replacement rejected",
+    correction_cancelled: "Correction cancelled",
     completed: "Complete",
   };
 

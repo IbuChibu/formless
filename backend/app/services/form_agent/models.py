@@ -35,6 +35,8 @@ ConversationPhase = Literal[
     "awaiting_answer",
     "awaiting_clarification",
     "awaiting_confirmation",
+    "awaiting_replacement",
+    "awaiting_replacement_confirmation",
     "field_confirmed",
     "field_skipped",
     "form_complete",
@@ -145,10 +147,19 @@ class PendingProposal(_AgentModel):
     value: AgentFieldValue
 
 
+class PendingReplacementProposal(_AgentModel):
+    operation: Literal["replacement"] = "replacement"
+    field_id: str = Field(min_length=1, max_length=500)
+    previous_confirmed_value: AgentFieldValue
+    value: AgentFieldValue
+
+
 class ConversationState(_AgentModel):
     phase: ConversationPhase
     active_field_id: Optional[str] = Field(default=None, max_length=500)
-    pending_proposal: Optional[PendingProposal] = None
+    pending_proposal: Optional[
+        Union[PendingReplacementProposal, PendingProposal]
+    ] = None
 
     @model_validator(mode="after")
     def validate_phase_shape(self) -> ConversationState:
@@ -156,6 +167,8 @@ class ConversationState(_AgentModel):
             "awaiting_answer",
             "awaiting_clarification",
             "awaiting_confirmation",
+            "awaiting_replacement",
+            "awaiting_replacement_confirmation",
             "field_confirmed",
             "field_skipped",
         }
@@ -172,18 +185,32 @@ class ConversationState(_AgentModel):
                     f"{self.phase} cannot include an active field ID"
                 )
 
-        if self.phase == "awaiting_confirmation":
+        if self.phase in {
+            "awaiting_confirmation",
+            "awaiting_replacement_confirmation",
+        }:
             if self.pending_proposal is None:
                 raise ValueError(
-                    "awaiting_confirmation requires a pending proposal"
+                    f"{self.phase} requires a pending proposal"
                 )
             if self.pending_proposal.field_id != self.active_field_id:
                 raise ValueError(
                     "Pending proposal must match the active field ID"
                 )
+            is_replacement = isinstance(
+                self.pending_proposal,
+                PendingReplacementProposal,
+            )
+            if (
+                self.phase == "awaiting_replacement_confirmation"
+                and not is_replacement
+            ) or (self.phase == "awaiting_confirmation" and is_replacement):
+                raise ValueError(
+                    "Pending proposal kind does not match the conversation phase"
+                )
         elif self.pending_proposal is not None:
             raise ValueError(
-                "Only awaiting_confirmation may include a pending proposal"
+                "Only a confirmation phase may include a pending proposal"
             )
 
         return self
@@ -217,6 +244,10 @@ class RejectEvent(_AgentModel):
     type: Literal["reject"]
 
 
+class CancelCorrectionEvent(_AgentModel):
+    type: Literal["cancel_correction"]
+
+
 class SkipEvent(_AgentModel):
     type: Literal["skip"]
     field_id: str = Field(min_length=1, max_length=500)
@@ -230,6 +261,7 @@ FormAgentEvent = Annotated[
         ConfirmEvent,
         ConfirmEditEvent,
         RejectEvent,
+        CancelCorrectionEvent,
         SkipEvent,
     ],
     Field(discriminator="type"),
@@ -340,6 +372,20 @@ class ProposeAction(_AgentModel):
     )
 
 
+class ReplacementProposeAction(_AgentModel):
+    action: Literal["replacement_propose"]
+    message: str = Field(min_length=1, max_length=4000)
+    field_id: str = Field(min_length=1, max_length=500)
+    previous_confirmed_value: AgentFieldValue
+    value: AgentFieldValue
+    original_value: AgentFieldValue
+    transformation: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=500,
+    )
+
+
 class SkipAction(_AgentModel):
     action: Literal["skip"]
     message: str = Field(min_length=1, max_length=4000)
@@ -361,6 +407,36 @@ class ConfirmedAction(_AgentModel):
 
 class RejectedAction(_AgentModel):
     action: Literal["rejected"]
+    message: str = Field(min_length=1, max_length=4000)
+    field_id: str = Field(min_length=1, max_length=500)
+
+
+class ReplacementRejectedAction(_AgentModel):
+    action: Literal["replacement_rejected"]
+    message: str = Field(min_length=1, max_length=4000)
+    field_id: str = Field(min_length=1, max_length=500)
+
+
+class FieldSelectedAction(_AgentModel):
+    action: Literal["field_selected"]
+    message: str = Field(min_length=1, max_length=4000)
+    field_id: str = Field(min_length=1, max_length=500)
+
+
+class FieldReopenedAction(_AgentModel):
+    action: Literal["field_reopened"]
+    message: str = Field(min_length=1, max_length=4000)
+    field_id: str = Field(min_length=1, max_length=500)
+
+
+class CorrectionStartedAction(_AgentModel):
+    action: Literal["correction_started"]
+    message: str = Field(min_length=1, max_length=4000)
+    field_id: str = Field(min_length=1, max_length=500)
+
+
+class CorrectionCancelledAction(_AgentModel):
+    action: Literal["correction_cancelled"]
     message: str = Field(min_length=1, max_length=4000)
     field_id: str = Field(min_length=1, max_length=500)
 
@@ -441,10 +517,16 @@ FormAgentAction = Annotated[
         ClarifyAction,
         ConversationAction,
         ProposeAction,
+        ReplacementProposeAction,
         SkipAction,
         NextAction,
         ConfirmedAction,
         RejectedAction,
+        ReplacementRejectedAction,
+        FieldSelectedAction,
+        FieldReopenedAction,
+        CorrectionStartedAction,
+        CorrectionCancelledAction,
     ],
     Field(discriminator="action"),
 ]
@@ -479,6 +561,19 @@ class ProposalEffect(_AgentModel):
     )
 
 
+class ReplacementProposalEffect(_AgentModel):
+    effect: Literal["replacement_proposal"] = "replacement_proposal"
+    field_id: str = Field(min_length=1, max_length=500)
+    previous_confirmed_value: AgentFieldValue
+    original_value: AgentFieldValue
+    prepared_value: AgentFieldValue
+    transformation: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=500,
+    )
+
+
 class ConfirmedEffect(_AgentModel):
     effect: Literal["confirmed"] = "confirmed"
     field_id: str = Field(min_length=1, max_length=500)
@@ -500,6 +595,26 @@ class FieldSelectedEffect(_AgentModel):
     field_id: str = Field(min_length=1, max_length=500)
 
 
+class FieldReopenedEffect(_AgentModel):
+    effect: Literal["field_reopened"] = "field_reopened"
+    field_id: str = Field(min_length=1, max_length=500)
+
+
+class CorrectionStartedEffect(_AgentModel):
+    effect: Literal["correction_started"] = "correction_started"
+    field_id: str = Field(min_length=1, max_length=500)
+
+
+class ReplacementRejectedEffect(_AgentModel):
+    effect: Literal["replacement_rejected"] = "replacement_rejected"
+    field_id: str = Field(min_length=1, max_length=500)
+
+
+class CorrectionCancelledEffect(_AgentModel):
+    effect: Literal["correction_cancelled"] = "correction_cancelled"
+    field_id: str = Field(min_length=1, max_length=500)
+
+
 class CompletedEffect(_AgentModel):
     effect: Literal["completed"] = "completed"
 
@@ -508,10 +623,15 @@ FormAgentEffect = Annotated[
     Union[
         NoFormEffect,
         ProposalEffect,
+        ReplacementProposalEffect,
         ConfirmedEffect,
         RejectedEffect,
         SkippedEffect,
         FieldSelectedEffect,
+        FieldReopenedEffect,
+        CorrectionStartedEffect,
+        ReplacementRejectedEffect,
+        CorrectionCancelledEffect,
         CompletedEffect,
     ],
     Field(discriminator="effect"),

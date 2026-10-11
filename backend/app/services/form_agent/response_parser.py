@@ -14,6 +14,7 @@ from .models import (
     ModelAction,
     NextAction,
     ProposeAction,
+    ReplacementProposeAction,
     SkipAction,
     request_active_field_id,
 )
@@ -136,8 +137,17 @@ def validate_action_against_request(
             "Form Agent returned a resolved field to skip"
         )
 
-    if isinstance(action, ProposeAction):
-        if field.status != "unanswered":
+    if isinstance(action, (ProposeAction, ReplacementProposeAction)):
+        if isinstance(action, ReplacementProposeAction):
+            if (
+                request.conversation_state.phase != "awaiting_replacement"
+                or field.status != "confirmed"
+                or action.previous_confirmed_value != field.confirmed_value
+            ):
+                raise FormAgentError(
+                    "Form Agent returned an invalid replacement proposal"
+                )
+        elif field.status != "unanswered":
             raise FormAgentError(
                 "Form Agent returned a resolved field as a proposal"
             )

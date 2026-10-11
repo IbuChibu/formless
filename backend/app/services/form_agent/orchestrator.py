@@ -40,6 +40,7 @@ from .models import (
     FormAgentRequest,
     FormAgentResponse,
     ProposeAction,
+    ReplacementProposeAction,
     request_active_field_id,
     request_message,
     truncate_text,
@@ -218,6 +219,28 @@ class FormAgentService:
                                 ),
                             }
                         )
+                    if (
+                        request.conversation_state.phase
+                        == "awaiting_replacement"
+                        and active_field is not None
+                        and active_field.status == "confirmed"
+                        and active_field.confirmed_value is not None
+                    ):
+                        action = ReplacementProposeAction(
+                            action="replacement_propose",
+                            message=action.message,
+                            field_id=action.field_id,
+                            previous_confirmed_value=(
+                                active_field.confirmed_value
+                            ),
+                            value=action.value,
+                            original_value=(
+                                action.original_value
+                                if action.original_value is not None
+                                else action.value
+                            ),
+                            transformation=action.transformation,
+                        )
                 validate_guidance_action(action, guidance)
                 validate_web_guidance_action(action, web_guidance)
                 validate_action_for_turn(action, request)
@@ -274,17 +297,31 @@ class FormAgentService:
             and str(validation_error) == PROSE_POLISH_UNSAFE_ERROR
             and active_field is not None
         ):
-            fallback = ProposeAction(
-                action="propose",
-                message=(
-                    "I couldn't safely change that wording without risking "
-                    "its meaning, so I kept your original text for review. "
-                    "It has not been applied to the form."
-                ),
-                field_id=active_field.id,
-                value=requested_prose_candidate,
-                original_value=requested_prose_candidate,
+            fallback_message = (
+                "I couldn't safely change that wording without risking "
+                "its meaning, so I kept your original text for review. "
+                "It has not been applied to the form."
             )
+            if (
+                request.conversation_state.phase == "awaiting_replacement"
+                and active_field.confirmed_value is not None
+            ):
+                fallback = ReplacementProposeAction(
+                    action="replacement_propose",
+                    message=fallback_message,
+                    field_id=active_field.id,
+                    previous_confirmed_value=active_field.confirmed_value,
+                    value=requested_prose_candidate,
+                    original_value=requested_prose_candidate,
+                )
+            else:
+                fallback = ProposeAction(
+                    action="propose",
+                    message=fallback_message,
+                    field_id=active_field.id,
+                    value=requested_prose_candidate,
+                    original_value=requested_prose_candidate,
+                )
             validate_action_against_request(fallback, request)
             return response_for_action(fallback, request)
         repair_fallback = explanation_repair_fallback(
