@@ -72,8 +72,8 @@ Required technology:
 
 - completed through Milestone 6.13.10
 - current typed workflow separates conversation from validated form effects
-- Milestone 6.14 remains evaluation-gated and has not started
-- Milestone 6.15 is planned after the 6.14 evaluation decision and before voice
+- completed through Milestone 6.14
+- Milestone 6.15 is the next planned milestone before the guided-interview UI
 - Milestone 6.16 is planned after conversational navigation and before voice
 - voice, deployment, persistence, and the later full-workflow milestone have
   not started
@@ -2079,39 +2079,116 @@ Do not implement:
 - a new configuration framework, deployment infrastructure, Docker, or new
   application frameworks
 
-# Milestone 6.14 — Evaluation-gated model fallback
+# Milestone 6.14 — Controlled Nemotron model selection
 
-Status: NOT STARTED
+Status: COMPLETE
+
+Recorded live comparison outcome, 11 October 2026:
+- primary: `nvidia/Nemotron-3_5-Lightning`
+- candidate: `nvidia/Nemotron-3-Ultra-550b-a55b`
+- both models ran sequentially through the same 9 fixed conversation-quality
+  scenarios using the configured Nebius Token Factory account
+- both achieved 100% valid responses, 100% directness, 100% contextual
+  relevance, 0% repeated responses, and zero safety-boundary failures
+- Lightning achieved an 88.9% useful-next-step rate and 66.7% conversation-
+  repair success with 574.891 ms average model latency and 8 model calls
+- Ultra achieved a 66.7% useful-next-step rate and 0% conversation-repair
+  success with 2540.464 ms average model latency and 7 model calls
+- Ultra regressed useful-next-step rate by 22.2 percentage points, regressed
+  conversation-repair success by 66.7 percentage points, exceeded the 2500 ms
+  average latency budget, and was 4.419 times slower than Lightning
+- side-by-side review found Ultra's wording fluent and often concise, but it
+  omitted a useful next step in all three repair scenarios and occasionally
+  supplied more answer-format latitude than the bounded field context supported
+- decision: keep `nvidia/Nemotron-3_5-Lightning` as the single primary model;
+  do not add a runtime fallback or change the production default
 
 Goal:
-Add a stronger Nemotron fallback only for measured interpretation failures that
-remain after deterministic adapters, state handling, and prompt improvements.
+Compare the current fast Nemotron model with one stronger Nemotron candidate on
+the same fixed Form Agent evaluation, then select one primary production model
+from evidence. Prefer a direct primary-model replacement when it materially
+improves the experience within the latency budget; do not add a runtime model
+cascade merely because a larger model exists.
 
-Entry criteria:
-- Milestones 6.13.8 through 6.13.10 are complete and their live evaluation
-  results are recorded for the current primary model
-- transcript evaluation identifies a repeatable class of ambiguous-answer failures
-- deterministic handling and the primary model cannot meet the documented reliability target
-- the chosen fallback model is available through Nebius Token Factory
+Evaluation design:
+- the current `nvidia/Nemotron-3_5-Lightning` configuration remains the baseline
+- the candidate must be an NVIDIA open model available through the configured
+  Nebius Token Factory account
+- both models receive the same system prompt, user prompt, bounded form context,
+  recent history, state, sampling settings, token limit, and scenario order
+- deterministic routing and field adapters run normally, so scenarios that do
+  not require a model remain visible in the report but make no provider call
+- the comparison reports each model's existing conversation-quality and safety
+  metrics, average model latency, total calls, and per-scenario assistant output
+- metric deltas and the latency ratio are calculated deterministically
+- the automated recommendation requires no safety regression, no material
+  quality regression, at least one material measured improvement, and an
+  acceptable latency increase
+- side-by-side response samples remain available for a final qualitative review
+  of warmth, clarity, contextual understanding, and guided-interview usefulness
+- the selected model remains configurable through `NEBIUS_MODEL`
+
+Decision policy:
+- select the candidate as the single primary model only when it materially
+  improves the measured or reviewed conversation experience, retains zero
+  safety-boundary failures, and remains responsive enough for the later voice
+  interface
+- keep Lightning when the candidate is worse, tied without a meaningful
+  qualitative improvement, unavailable through Token Factory, or too slow
+- record the compared model IDs, fixed scenario count, metrics, latency, model
+  calls, representative response differences, and final decision
+- changing the selected primary model must not change the Form Agent contract,
+  deterministic routing, validation, explicit confirmation, or PDF boundaries
 
 Acceptance criteria:
-- primary-model and fallback-model names are configured server-side through environment variables
-- deterministic interpretation always runs before either model
-- the existing fast Nemotron model remains the primary model
-- fallback is attempted only for explicitly classified ambiguity or repeated structured-output validation failure
-- at most one fallback call is made for a user turn
-- authentication, rate-limit, and general provider failures do not cause uncontrolled model cascades
-- fallback output uses the same action schema, validation, safety rules, and confirmation boundary as primary output
-- failure to obtain a valid fallback result produces a grounded clarification rather than an invented answer
-- transcript evaluation reports fallback frequency, success rate, latency, and model calls per field
-- live evaluation demonstrates a documented reliability improvement sufficient to justify the added latency and cost
-- if the entry criteria are not met, the milestone records that no fallback was added and preserves the single-model design
-- mocked backend tests require no network access and the optional live suite remains separate
+- one explicit command runs the same live conversation-quality scenarios against
+  the configured primary model and one configured candidate model
+- primary and candidate model identifiers remain server-side and no credential
+  appears in evaluation output
+- the live comparison runs the models sequentially rather than sending parallel
+  duplicate requests
+- the report includes both complete conversation-quality reports, per-scenario
+  assistant messages, metric deltas, latency ratio, and an automated
+  recommendation with deterministic reasons
+- comparison logic treats safety-boundary failures as disqualifying
+- comparison logic prevents a faster or more fluent candidate from winning when
+  it regresses validity, contextual relevance, useful-next-step, repair, or
+  repetition metrics beyond the documented tolerance
+- comparison logic requires a material quality improvement rather than selecting
+  a larger model solely because of its size or name
+- the selected model is tested through the unchanged Nemotron Service, response
+  parser, typed effect validation, confirmation boundary, and Form Agent API
+- if the candidate wins, the default and example configuration are updated to
+  that single model; if it does not, Lightning remains the default
+- the final model-selection evidence and decision are recorded in this milestone
+- normal automated tests use deterministic model doubles and make no network
+  requests; the live comparison remains an explicit optional command
+- existing backend tests, transcript evaluation, PDF tests, and frontend
+  production build pass
+
+Verified implementation outcome:
+- `python -m evaluations.form_agent_model_selection` compares the configured
+  `NEBIUS_MODEL` and `NEBIUS_CANDIDATE_MODEL` sequentially
+- the report contains both metric sets, every scenario message, model-call and
+  latency measurements, metric deltas, deterministic thresholds, reasons, and
+  the recommendation
+- candidate configuration stays server-side and no credential appears in the
+  report
+- deterministic tests cover material improvement, safety and quality
+  regression, latency rejection, tied-result review, distinct configuration,
+  and sequential execution
+- the live recommendation was `keep_primary`, so the production default and
+  runtime architecture remain unchanged
 
 Do not implement:
-- two agents debating or reviewing every answer
-- parallel model calls for ordinary turns
-- an agent framework or autonomous tool selection
+- a runtime fallback model or automatic cascade in this milestone
+- parallel calls to multiple models for an ordinary user turn
+- model debate, model voting, multi-agent review, or an agent framework
+- changing prompts, scenarios, thresholds, or sampling settings between models
+  to favour one candidate
+- selecting a model from parameter count or generic benchmarks alone
+- weakening deterministic routing, validation, explicit confirmation, source
+  grounding, or PDF separation to improve model scores
 - automatic confirmation, voice, authentication, persistence, or a database
 
 # Milestone 6.15 — Conversational navigation, correction, and review

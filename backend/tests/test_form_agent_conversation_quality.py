@@ -68,6 +68,12 @@ def test_conversation_quality_evaluation_reports_required_metrics() -> None:
     assert report.metrics.average_latency_ms >= 0
     assert report.metrics.total_model_calls == 6
     assert report.metrics.model_calls_per_scenario == 0.667
+    assert len(report.samples) == 9
+    assert report.samples[0].scenario == "usual-address-date"
+    assert report.samples[0].assistant_message is not None
+    assert report.samples[0].model_calls == 1
+    assert report.samples[-1].scenario == "post-completion-summary"
+    assert report.samples[-1].model_calls == 0
     assert len(service.calls) == 6
 
 

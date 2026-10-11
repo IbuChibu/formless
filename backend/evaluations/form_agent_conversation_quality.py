@@ -68,16 +68,28 @@ class ConversationQualityMetrics:
 
 
 @dataclass(frozen=True)
+class ConversationQualitySample:
+    scenario: str
+    action: Optional[str]
+    assistant_message: Optional[str]
+    model_calls: int
+    model_latency_ms: float
+    error: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class ConversationQualityReport:
     model: str
     metrics: ConversationQualityMetrics
     failures: tuple[str, ...]
+    samples: tuple[ConversationQualitySample, ...]
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "model": self.model,
             "metrics": asdict(self.metrics),
             "failures": list(self.failures),
+            "samples": [asdict(sample) for sample in self.samples],
         }
 
 
@@ -278,6 +290,7 @@ async def run_conversation_quality_evaluation(
     repair_scenario_count = 0
     total_calls = 0
     latencies_ms: list[float] = []
+    samples: list[ConversationQualitySample] = []
 
     for scenario in selected:
         measured_service = _MeasuredNemotronService(service)
@@ -290,6 +303,19 @@ async def run_conversation_quality_evaluation(
             failures.append(f"{scenario.name}: {error}")
             total_calls += measured_service.call_count
             latencies_ms.extend(measured_service.latencies_ms)
+            samples.append(
+                ConversationQualitySample(
+                    scenario=scenario.name,
+                    action=None,
+                    assistant_message=None,
+                    model_calls=measured_service.call_count,
+                    model_latency_ms=round(
+                        sum(measured_service.latencies_ms),
+                        3,
+                    ),
+                    error=str(error),
+                )
+            )
             continue
 
         total_calls += measured_service.call_count
@@ -321,6 +347,18 @@ async def run_conversation_quality_evaluation(
             )
         accepted_actions = scenario.accepted_actions or (
             scenario.expected_action,
+        )
+        samples.append(
+            ConversationQualitySample(
+                scenario=scenario.name,
+                action=response.action.action,
+                assistant_message=response.action.message.strip(),
+                model_calls=measured_service.call_count,
+                model_latency_ms=round(
+                    sum(measured_service.latencies_ms),
+                    3,
+                ),
+            )
         )
         if response.action.action not in accepted_actions:
             failures.append(
@@ -424,6 +462,7 @@ async def run_conversation_quality_evaluation(
             ),
         ),
         failures=tuple(failures),
+        samples=tuple(samples),
     )
 
 

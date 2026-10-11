@@ -60,3 +60,26 @@ source .env
 set +a
 python -m evaluations.form_agent_conversation_quality
 ```
+
+Milestone 6.14 compares the configured primary model with one stronger
+Token Factory candidate using the same fixed scenarios. Add an available model
+ID to `NEBIUS_CANDIDATE_MODEL` in `backend/.env`, then run:
+
+```bash
+cd backend
+source .venv/bin/activate
+set -a
+source .env
+set +a
+python -m evaluations.form_agent_model_selection
+```
+
+The models are evaluated sequentially. The JSON report contains no credentials
+and includes both metric sets, side-by-side scenario messages, latency, model
+calls, metric deltas, and a deterministic recommendation. This command does not
+change the production model; `NEBIUS_MODEL` remains the single runtime model.
+
+The recorded Milestone 6.14 comparison used
+`nvidia/Nemotron-3-Ultra-550b-a55b` as the candidate and retained Lightning: the
+candidate regressed guided conversation-repair metrics and was 4.419 times
+slower on the fixed live scenarios.

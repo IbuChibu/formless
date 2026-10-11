@@ -157,15 +157,26 @@ would undermine trust and could change a legal or financial form answer.
 
 ---
 
-## 2026-10-11 — Stronger-model fallback remains evaluation-gated
+## 2026-10-11 — Primary Nemotron selection is evaluation-gated
 
 Decision:
-Formless remains a single-agent, single-primary-model system until transcript
-and live evaluations identify a repeatable failure class that deterministic
-adapters and prompt improvements cannot address. A fallback model, if later
-justified, will be called only for that bounded class of ambiguity.
+Formless remains a single-agent, single-primary-model system. Before voice is
+added, the current Lightning model will be compared with one stronger Nemotron
+candidate through the same fixed live evaluation. A candidate may replace
+Lightning as the single primary model only when it provides a material
+conversation-quality improvement without a safety regression or unacceptable
+latency increase.
 
 Reason:
-Calling multiple models for ordinary turns would add latency, cost, and failure
-modes without demonstrated benefit. The current deterministic authority over
-state, tools, validation, and confirmation remains unchanged.
+Model size alone does not establish that a form interview will be clearer,
+safer, or responsive enough for voice. A controlled comparison makes the
+tradeoff visible while avoiding the latency, cost, and failure modes of a
+runtime cascade. Deterministic authority over state, tools, validation, and
+confirmation remains unchanged regardless of the selected model.
+
+Outcome:
+The 11 October 2026 live comparison retained
+`nvidia/Nemotron-3_5-Lightning`. The Ultra candidate preserved response validity
+and state safety but reduced useful-next-step and conversation-repair rates and
+was 4.419 times slower on the fixed scenarios. Formless therefore keeps one
+Lightning model and adds no runtime fallback.
