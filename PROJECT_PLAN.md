@@ -73,6 +73,7 @@ Required technology:
 - completed through Milestone 6.13.10
 - current typed workflow separates conversation from validated form effects
 - Milestone 6.14 remains evaluation-gated and has not started
+- Milestone 6.15 is planned after the 6.14 evaluation decision and before voice
 - voice, deployment, persistence, and the later full-workflow milestone have
   not started
 
@@ -2111,6 +2112,140 @@ Do not implement:
 - parallel model calls for ordinary turns
 - an agent framework or autonomous tool selection
 - automatic confirmation, voice, authentication, persistence, or a database
+
+# Milestone 6.15 — Conversational navigation, correction, and review
+
+Status: NOT STARTED
+
+Goal:
+Let users move around the form, revisit skipped questions, safely correct
+confirmed answers, and ask useful review questions through the typed
+conversation before voice is added. Preserve the existing rule that natural
+language can request an operation but only a closed, validated effect can
+change canonical state.
+
+Conversation and navigation behavior:
+- the user may refer to an unanswered field by its question, label, section, or
+  an unambiguous conversational description
+- deterministic exact and normalized field-reference matching runs before
+  Nemotron; model assistance may identify a candidate field only when the
+  reference remains ambiguous
+- every model-suggested field ID is validated against the supplied form schema,
+  current field status, and allowed operation before it can become an effect
+- selecting another unanswered field returns a closed field-selection effect
+  and does not change any field value
+- a skipped field can be explicitly reopened and becomes the active unanswered
+  field without affecting confirmed values elsewhere
+- ambiguous references produce a clarification listing only the smallest useful
+  set of matching questions; the agent must not choose arbitrarily
+- navigation acknowledgements ask the selected field's actual question and do
+  not describe the navigation command itself as a form answer
+
+Confirmed-value correction behavior:
+- the user may request a correction to a confirmed field through conversation
+- starting a correction keeps the existing confirmed value canonical and in the
+  PDF preview while the replacement is discussed
+- a replacement answer is returned as a reviewable proposal that identifies the
+  field, previous confirmed value, user-supplied original candidate, prepared
+  replacement value, and any visible transformation
+- rejecting or abandoning the replacement preserves the previous confirmed
+  value unchanged
+- only an explicit confirmation event replaces the previous confirmed value;
+  ordinary messages such as `yes`, `okay`, or `change it` cannot apply it
+- confirmation replaces the value exactly once, updates the existing shared
+  frontend state, and triggers the normal PDF preview flow exactly once
+- corrections use the same field adapters, preparation rules, option checks,
+  invention protections, and model-correction limit as first-time proposals
+
+Conversational review behavior:
+- while the form is in progress or complete, the user may ask which supported
+  fields are confirmed, skipped, or unanswered
+- the user may ask what confirmed value is currently stored for one
+  unambiguously referenced field
+- review answers are derived from canonical field state rather than conversation
+  prose or model memory
+- read-only review returns a non-mutating effect and cannot reopen, replace,
+  confirm, skip, or fill a field
+- post-completion review may navigate into an explicit reopen or correction flow
+  only after the backend returns the corresponding validated effect; free-form
+  text alone cannot leave `form_complete`
+- summaries are bounded and use field questions or user-facing labels rather
+  than exposing raw machine IDs unless needed to distinguish duplicate labels
+- confirmed personal values are not sent wholesale to Nemotron; only the
+  minimum value required for the user's specific review request may enter a
+  bounded prompt, and deterministic responses are preferred when sufficient
+
+State and effect design:
+- extend the event, phase, pending-operation, and effect contracts only as much
+  as required to distinguish navigation, reopening, first-time proposals, and
+  replacement proposals
+- the pending correction state retains both the previous confirmed value and
+  the proposed replacement so frontend and backend can validate stale or
+  duplicate events
+- the frontend continues to treat the backend effect and resulting state as the
+  authority; it must not infer a correction or navigation transition from the
+  assistant's wording
+- every effect is validated against a real stable field ID, the field's current
+  status, the active operation, and the latest canonical value
+- stale, duplicate, wrong-field, or phase-incompatible navigation and correction
+  events fail safely without modifying frontend field state or PDF bytes
+- the Form Agent continues to return messages and effects only; it never calls
+  the PDF filling service or edits PDF bytes
+
+Evaluation coverage:
+- add complete multi-turn transcripts for selecting a later unanswered field,
+  resolving an ambiguous field reference, reopening a skipped field, correcting
+  a confirmed field, rejecting a correction, editing a correction before
+  confirmation, and returning to review after form completion
+- test that the previous confirmed value remains canonical after correction
+  start, clarification, rejection, provider failure, invalid model output, and
+  stale confirmation
+- test that one explicit confirmation replaces the value once and advances
+  deterministically without a duplicate PDF-preview update
+- test specific post-completion questions and confirmed, skipped, and unanswered
+  summaries without state mutation
+- retain the existing invention, invalid-action, invalid-proposal,
+  confirmation-boundary, repeated-question, latency, and model-call metrics
+- normal backend tests use deterministic provider doubles; any optional live
+  navigation evaluation remains separate and uses synthetic personal data
+
+Acceptance criteria:
+- an unambiguous conversational reference can select any unanswered supported
+  field without changing its value
+- an ambiguous reference asks for clarification instead of selecting a field
+- a skipped field can be reopened explicitly and answered through the normal
+  proposal flow
+- a confirmed field can receive a replacement proposal while its previous value
+  remains canonical and visible
+- rejecting, cancelling, or failing a replacement proposal leaves the previous
+  confirmed value unchanged
+- explicit confirmation is required before a replacement reaches canonical
+  state or the PDF preview
+- confirmed replacement values update the shared state and PDF preview exactly
+  once
+- users can ask what value is stored for a specific confirmed field and receive
+  a response grounded in canonical state
+- users can list confirmed, skipped, and unanswered supported fields during and
+  after completion without mutating state
+- post-completion navigation and correction require closed validated effects;
+  assistant wording cannot reopen or alter a field
+- multi-turn transcript tests cover navigation, reopening, correction,
+  rejection, edited confirmation, stale events, and post-completion review
+- existing PDF extraction and filling behavior, proposal safety tests, backend
+  suite, and frontend production build continue to pass
+
+Do not implement:
+- voice input or output
+- direct editing, highlighting, or navigation on the rendered PDF page
+- the dedicated final-review interface planned for Milestone 8
+- automatic confirmation or replacement of a confirmed value from free-form
+  text alone
+- fuzzy guessing between ambiguous fields
+- sending every confirmed personal value to Nemotron for general context
+- a second model, model cascade, multi-agent workflow, or agent framework
+- new Tavily behavior, OCR, XFA, scanned-form support, or PDF filling semantics
+- authentication, persistence, browser storage, a database, Docker, or
+  deployment infrastructure
 
 # Milestone 7 — Voice
 
