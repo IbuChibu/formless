@@ -72,7 +72,9 @@ Required technology:
 
 - completed through Milestone 6.13.9
 - current typed workflow separates conversation from validated form effects
-- Milestone 6.14 remains evaluation-gated and has not started
+- Milestone 6.13.10 is the next milestone and has not started
+- Milestone 6.14 remains gated on the 6.13.10 reliability evaluation and has
+  not started
 - voice, deployment, persistence, and the later full-workflow milestone have
   not started
 
@@ -1827,6 +1829,229 @@ Do not implement:
 - voice, OCR, new PDF-format compatibility, external form submission, or
   changes to low-level PDF filling semantics
 
+# Milestone 6.13.10 — Natural conversation with deterministic effects
+
+Status: NOT STARTED
+
+Audit baseline recorded 11 October 2026:
+- 275 backend tests and the frontend production build pass
+- the offline suite covers 5 curated transcripts, 36 turns, and 5 fixtures,
+  with 90% first-attempt proposal acceptance, 3.8 turns per confirmed field,
+  and zero invalid actions, invalid proposals, confirmation-boundary failures,
+  invented facts, or invented purposes
+- the offline completion metric describes selected evaluation fields, not every
+  supported field in each real form
+- a live run using `nvidia/Nemotron-3_5-Lightning` produced 100% valid, direct,
+  and useful-next-step responses, 80% contextual relevance, 0% repeated
+  responses, 66.7% repair success, 7 model calls, and 462 ms average latency
+- the remaining live failure was a pronoun-based follow-up that lost the active
+  field context
+
+Problem to solve:
+The assistant's state and safety boundaries are appropriately strict, but that
+strictness has leaked into its language. Ordinary messages are routed through
+too many narrow intents, objectives, canned fallbacks, and workflow phrases.
+The result can be a form wizard presented in chat bubbles rather than a patient
+assistant that listens, answers the user's actual message, and then continues
+the form naturally.
+
+The audit also found concrete demo gaps: older messages disappear from the
+visible transcript, email and identifier answers can retain conversational
+framing, typed input cannot naturally begin or continue after completion, live
+follow-up context is imperfect, local provider configuration is easy to
+misunderstand, and evaluation coverage can be overstated.
+
+Goal:
+Make the typed assistant feel like a coherent conversation while keeping every
+form consequence deterministic and reviewable. Nemotron controls the wording
+for model-handled ordinary dialogue; deterministic application wording remains
+available for commands, safety fallbacks, and provider failures. Application
+code controls state transitions, tool use, value validation, confirmation, and
+PDF changes.
+
+Core design rule:
+
+```text
+Flexible conversational message
+              +
+One closed, validated form effect
+```
+
+- `assistant_message` may acknowledge, explain, summarize, ask a useful
+  follow-up, respond to a side question, or return naturally to the form
+- `effect` remains a closed typed union and is the only part of the response
+  that can influence conversation or form state
+- a natural message cannot itself select, propose, confirm, skip, or write a
+  field
+- every effect is validated against the current phase, active field, supported
+  options, field adapter, and canonical state before it is returned
+- only an explicit confirmation event moves a proposal into confirmed state;
+  only confirmed values can reach the PDF service
+
+Conversational behavior:
+- define the Formless persona and safety boundaries in the trusted prompt, but
+  do not prescribe a fixed sentence structure, mandatory closing phrase, or
+  button-like list of choices for ordinary responses
+- let Nemotron phrase non-mutating conversation naturally from the user's latest
+  message, active field, compact form map, canonical progress, and bounded recent
+  history
+- allow brief acknowledgements, follow-up questions, corrections, interruptions,
+  and side questions without forcing every turn into `explain`, `clarify`,
+  `next`, or another narrow conversational label
+- preserve the user's terminology when helpful and adapt detail, vocabulary,
+  and tone when the user asks again or appears confused
+- answer the latest message before steering back to the active question; do not
+  append the same workflow prompt to every response
+- keep explanations concise by default, but allow additional detail when the
+  conversation calls for it
+- never invent a personal fact, form purpose, official requirement, legal
+  conclusion, or field value in order to sound helpful
+
+Routing without scripting the dialogue:
+- handle unmistakable state-changing commands such as explicit confirmation,
+  rejection, skip, and field selection deterministically
+- run field adapters first for clear answers whose type and target are already
+  unambiguous
+- send ordinary or ambiguous conversational messages to Nemotron instead of
+  relying on an expanding set of keyword templates
+- allow Nemotron to interpret what the user is asking and to identify a
+  candidate contained in the user's own words, but do not allow it to select a
+  tool or make a state transition directly
+- validate any candidate through the existing field-type preparation pipeline;
+  an invalid or uncertain candidate becomes a natural clarification with no
+  mutating effect
+- keep Tavily eligibility and official-guidance selection under deterministic
+  backend policy; simple wording help must not trigger web search
+- use one model call for a normal model-handled turn and at most the existing
+  single correction call for an invalid, unsafe, or context-losing response
+- if model handling fails, return a grounded response that preserves the current
+  field and keeps manual completion available rather than exposing a parser
+  error
+
+Context and transcript:
+- retain the full visible transcript for the currently uploaded form in
+  ephemeral frontend state while sending no more than the existing eight recent
+  messages to the backend
+- clear the transcript when the user deliberately loads another form; do not
+  persist it to a server, database, or browser storage
+- include the canonical active-field ID and question explicitly for relevant
+  turns so `it`, `that`, and `this question` remain anchored correctly
+- include a compact ordered question map and progress summary so Nemotron can
+  understand the form without receiving raw PDF bytes or every personal answer
+- typed input may begin the experience without clicking `Start`; a greeting or
+  request for help starts the conversation but cannot become a field value
+- after `form_complete`, allow read-only conversational summaries and questions
+  about canonical progress without reopening or changing fields through free
+  text
+
+Answer preparation improvements:
+- add focused deterministic adapters for email addresses and identifier-like
+  fields, including passport, account, application, membership, reference, and
+  document numbers
+- remove only unambiguous conversational framing such as `my email is` while
+  preserving the candidate's letters, digits, leading zeroes, casing, spaces,
+  hyphens, and punctuation
+- request clarification when multiple or partial candidates remain; never guess
+  or externally verify a missing identifier character
+- retain original and prepared values and require explicit review for every
+  visible transformation
+- keep automatic prose preparation presentation-only by default
+- when the user explicitly requests help tidying a prose answer, Nemotron may
+  offer one reviewable suggestion, but it must preserve names, dates, numbers,
+  identifiers, quoted terms, negation, uncertainty, and stated reasons
+- do not apply model rewriting to identity values, names, addresses, email
+  addresses, phone numbers, or identifiers
+
+Frontend and local demo behavior:
+- render the assistant's message as normal conversation and show a separate
+  effect card only when a meaningful effect exists
+- keep proposal controls explicit without making every ordinary response end in
+  the same menu of workflow choices
+- keep the explicit `Start` button as an accessible alternative to typing
+- document one exact backend launch path that exports `backend/.env` before
+  starting FastAPI, without adding a general configuration framework
+- keep `/health` as API availability only; do not imply that it proves Nemotron
+  or Tavily is configured
+- provider configuration failures must be specific and recoverable, must not
+  expose credentials, and must leave manual PDF completion usable
+
+Evaluation design:
+- automated tests assert effects, state transitions, context bounds, safety,
+  source routing, and value preparation; they must not require one exact natural-
+  language sentence when multiple helpful responses are valid
+- conversation-quality evaluation scores whether the response addresses the
+  latest message, remains grounded in the active field, uses relevant recent
+  context, avoids unnecessary repetition, and provides a useful next step
+- add transcripts for natural start, interruptions, side questions, pronoun
+  follow-ups, repeated explanations, email and identifier framing, ambiguous
+  answers, explicit prose help, and post-completion summaries
+- add longer multi-field sessions across the sample, household, I-9, SBA, and
+  DS-11 fixtures using only supported and safely aligned fields
+- report evaluated-field count, total supported-field count, field types, and
+  fixture coverage so selected scenarios are not presented as full-form
+  completion
+- retain proposal-acceptance, user-edit, turns-per-field, repeated-question,
+  clarification, invalid-action, invalid-proposal, confirmation-boundary,
+  invention, unsafe-transformation, latency, and model-call metrics
+- run the optional live suite with synthetic data and record the model name and
+  results before deciding whether Milestone 6.14 is justified
+
+Acceptance criteria:
+- ordinary conversational turns can vary naturally in wording and structure
+  while returning a valid non-mutating effect
+- no prompt or response validator requires a canned opening, fixed closing, or
+  repeated menu of actions for a normal assistant message
+- deterministic code remains the sole authority over tools, phase changes,
+  proposals, confirmations, skips, canonical values, and PDF updates
+- ambiguous intent may receive model assistance, but model text cannot bypass
+  typed-effect validation or explicit confirmation
+- the assistant answers the user's latest message and remains connected to the
+  correct active field across pronouns, interruptions, and repeated follow-ups
+- a failed model response receives at most one correction attempt and then a
+  useful grounded fallback without changing form state
+- all current-form messages remain visible after more than eight chat messages,
+  while backend requests contain no more than eight recent messages
+- typed input can naturally start the conversation, and a pre-start greeting or
+  help request cannot become a candidate field value
+- completed conversations accept read-only progress and summary questions
+  without mutating confirmed, skipped, proposed, or PDF state
+- `my email is jane@example.com` prepares `jane@example.com`, and `my passport
+  number is 00123-AB` prepares `00123-AB`, without changing their internal
+  characters
+- ambiguous email or identifier candidates produce a helpful clarification
+  rather than an arbitrary proposal
+- optional prose tidying remains user-invoked, reviewable, and preserves
+  protected factual and uncertainty markers
+- one documented local command sequence loads `backend/.env`; missing provider
+  configuration has a clear recovery path and no credential is exposed
+- evaluation reports its real field and fixture coverage and does not equate a
+  curated scenario-completion rate with full-form completion
+- the expanded deterministic suite retains zero invalid actions, invalid
+  proposals, confirmation-boundary failures, invented facts, invented purposes,
+  and unsafe transformations
+- a recorded live run achieves at least 90% contextual relevance, at least 80%
+  conversation-repair success, zero repeated responses, and zero safety-boundary
+  failures; latency and model-call counts remain visible
+- existing PDF extraction and filling tests, Form Agent tests, backend suite,
+  and frontend production build pass
+
+Do not implement:
+- exact-string scripting of ordinary Nemotron responses
+- letting free-form model text choose tools or mutate canonical state
+- voice input or output
+- a stronger or second model, model cascade, multi-agent workflow, or agent
+  framework
+- direct PDF field editing, widget highlighting, or the dedicated final review
+  interface planned for Milestone 8
+- unbounded model history, server-side transcript persistence, authentication,
+  browser storage, or a database
+- automatic confirmation, silent rewriting, speculative identifier correction,
+  or external verification of personal information
+- new Tavily routing, unrestricted search, OCR, XFA, scanned-form support, or new
+  PDF filling semantics
+- a new configuration framework, deployment infrastructure, Docker, or new
+  application frameworks
+
 # Milestone 6.14 — Evaluation-gated model fallback
 
 Status: NOT STARTED
@@ -1836,8 +2061,8 @@ Add a stronger Nemotron fallback only for measured interpretation failures that
 remain after deterministic adapters, state handling, and prompt improvements.
 
 Entry criteria:
-- Milestones 6.13.8 and 6.13.9 are complete and their live evaluation results
-  are recorded for the current primary model
+- Milestones 6.13.8 through 6.13.10 are complete and their live evaluation
+  results are recorded for the current primary model
 - transcript evaluation identifies a repeatable class of ambiguous-answer failures
 - deterministic handling and the primary model cannot meet the documented reliability target
 - the chosen fallback model is available through Nebius Token Factory
