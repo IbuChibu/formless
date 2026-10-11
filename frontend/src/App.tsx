@@ -282,6 +282,7 @@ function App() {
   const [pendingProposalDetails, setPendingProposalDetails] =
     useState<ProposalAgentEffect | null>(null);
   const [manualDrawerOpen, setManualDrawerOpen] = useState(false);
+  const [showFullTranscript, setShowFullTranscript] = useState(false);
 
   const originalUrlRef = useRef<string | null>(null);
   const filledUrlRef = useRef<string | null>(null);
@@ -397,6 +398,23 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (
+      agentStatus === "idle" &&
+      [
+        "awaiting_answer",
+        "awaiting_clarification",
+        "awaiting_replacement",
+      ].includes(agentConversationState.phase)
+    ) {
+      agentInputRef.current?.focus();
+    }
+  }, [
+    agentConversationState.active_field_id,
+    agentConversationState.phase,
+    agentStatus,
+  ]);
+
   async function handleFileSelection(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) {
@@ -449,6 +467,7 @@ function App() {
     setProposalEditValue("");
     setPendingProposalDetails(null);
     setManualDrawerOpen(false);
+    setShowFullTranscript(false);
     agentMessageIdRef.current = 0;
     setExtractionStatus("loading");
     setPreviewStatus("idle");
@@ -835,6 +854,29 @@ function App() {
   const activeAgentFieldState = currentAgentFields.find(
     (field) => field.id === agentActiveFieldId,
   );
+  const activeAgentFieldIndex = currentAgentFields.findIndex(
+    (field) => field.id === agentActiveFieldId,
+  );
+  const activeAgentQuestion = activeAgentField
+    ? activeAgentField.question ||
+      activeAgentField.label ||
+      humanizeFieldId(activeAgentField.id)
+    : null;
+  const activeAgentSection = activeAgentField?.section || formContext.title;
+  const canAnswerActiveQuestion = Boolean(
+    activeAgentField &&
+      activeAgentFieldState?.status === "unanswered" &&
+      !pendingProposal &&
+      ["awaiting_answer", "awaiting_clarification"].includes(
+        agentConversationState.phase,
+      ),
+  );
+  const activeQuickAnswers = canAnswerActiveQuestion
+    ? getQuickAnswerOptions(activeAgentField)
+    : [];
+  const visibleAgentMessages = showFullTranscript
+    ? agentMessages
+    : agentMessages.slice(-3);
   const pendingProposalPdfField = fields.find(
     (field) => field.id === pendingProposal?.field_id,
   );
@@ -864,11 +906,11 @@ function App() {
   );
   const canUseAgent =
     extractionStatus === "ready" && currentAgentFields.length > 0;
-  const canAdvanceAgent = [
-    "asking",
-    "field_confirmed",
-    "field_skipped",
-  ].includes(agentConversationState.phase);
+  const canStartAgent =
+    agentConversationState.phase === "asking" && agentMessages.length === 0;
+  const canResumeAgent = ["field_confirmed", "field_skipped"].includes(
+    agentConversationState.phase,
+  );
   const canSendAgentMessage = [
     "asking",
     "awaiting_answer",
@@ -1081,42 +1123,118 @@ function App() {
                   </div>
                 </div>
 
-                {activeAgentField ? (
-                  <div className="ai-selected-field">
-                    <div>
-                      <span>Active field</span>
-                      <strong>
-                        {activeAgentField.label ||
-                          humanizeFieldId(activeAgentField.id)}
-                      </strong>
+                {activeAgentField && activeAgentQuestion ? (
+                  <section
+                    className={`guided-question-card ${agentConversationState.phase}`}
+                    aria-labelledby="active-question-heading"
+                  >
+                    <div className="guided-question-meta">
+                      <div>
+                        {activeAgentSection ? (
+                          <span>{activeAgentSection}</span>
+                        ) : (
+                          <span>Guided interview</span>
+                        )}
+                        {activeAgentField.page ? (
+                          <span>Page {activeAgentField.page}</span>
+                        ) : null}
+                      </div>
+                      {activeAgentFieldIndex >= 0 ? (
+                        <strong>
+                          Question {activeAgentFieldIndex + 1} of{" "}
+                          {currentAgentFields.length}
+                        </strong>
+                      ) : null}
                     </div>
-                    {activeAgentFieldState?.status === "unanswered" &&
-                    !pendingProposal &&
-                    ["awaiting_answer", "awaiting_clarification"].includes(
-                      agentConversationState.phase,
-                    ) ? (
-                      <div className="agent-field-actions">
+
+                    <div className="guided-question-copy">
+                      <span>
+                        {getQuestionStatusLabel(agentConversationState.phase)}
+                      </span>
+                      <h3 id="active-question-heading">
+                        {activeAgentQuestion}
+                      </h3>
+                      {activeAgentField.help_text ? (
+                        <p>{activeAgentField.help_text}</p>
+                      ) : null}
+                    </div>
+
+                    {canAnswerActiveQuestion &&
+                    activeQuickAnswers.length > 0 ? (
+                      <fieldset className="agent-quick-answers">
+                        <legend>Quick answers</legend>
+                        {activeQuickAnswers.length <= 6 ? (
+                          <div>
+                            {activeQuickAnswers.map((answer) => (
+                              <button
+                                key={answer.value}
+                                type="button"
+                                disabled={agentStatus === "loading"}
+                                onClick={() => sendAgentMessage(answer.message)}
+                              >
+                                {answer.label}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <label>
+                            <span>Choose an available answer</span>
+                            <select
+                              key={`${activeAgentField.id}-${agentMessages.length}`}
+                              defaultValue=""
+                              disabled={agentStatus === "loading"}
+                              onChange={(event) => {
+                                if (event.target.value) {
+                                  sendAgentMessage(event.target.value);
+                                }
+                              }}
+                            >
+                              <option value="" disabled>
+                                Select an option
+                              </option>
+                              {activeQuickAnswers.map((answer) => (
+                                <option
+                                  key={answer.value}
+                                  value={answer.message}
+                                >
+                                  {answer.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                        <small>You can still type your answer below.</small>
+                      </fieldset>
+                    ) : null}
+
+                    {canAnswerActiveQuestion ? (
+                      <div
+                        className="guided-question-actions"
+                        aria-label="Help with this question"
+                      >
                         <button
-                          className="agent-guidance-button"
                           type="button"
                           disabled={agentStatus === "loading"}
-                          onClick={() => {
-                            const message =
-                              "Search for current guidance that explains this field.";
-                            sendAgentEvent(
-                              {
-                                type: "focus_field",
-                                field_id: activeAgentField.id,
-                                content: message,
-                              },
-                              message,
-                            );
-                          }}
+                          onClick={() =>
+                            sendAgentMessage(
+                              "Explain this question in plain language.",
+                            )
+                          }
                         >
-                          Search guidance
+                          Explain this
                         </button>
                         <button
-                          className="agent-skip-button"
+                          type="button"
+                          disabled={agentStatus === "loading"}
+                          onClick={() =>
+                            sendAgentMessage(
+                              "Check official guidance for this question.",
+                            )
+                          }
+                        >
+                          Check guidance
+                        </button>
+                        <button
                           type="button"
                           disabled={agentStatus === "loading"}
                           onClick={() =>
@@ -1126,11 +1244,11 @@ function App() {
                             })
                           }
                         >
-                          Skip
+                          Skip for now
                         </button>
                       </div>
                     ) : null}
-                  </div>
+                  </section>
                 ) : null}
 
                 {agentMessages.length === 0 ? (
@@ -1143,181 +1261,141 @@ function App() {
                 ) : null}
 
                 {agentMessages.length > 0 ? (
-                  <div
-                    className="agent-conversation"
-                    aria-label="Form assistant conversation"
-                    role="log"
-                  >
-                    {agentMessages.map((message, messageIndex) => {
-                      const messageField = fields.find(
-                        (field) => field.id === message.fieldId,
-                      );
-                      const isLatestMessage =
-                        messageIndex === agentMessages.length - 1;
-                      const canOfferExplanationActions =
-                        isLatestMessage &&
-                        message.role === "assistant" &&
-                        message.effect?.effect === "none" &&
-                        message.fieldId === agentActiveFieldId &&
-                        activeAgentFieldState?.status === "unanswered" &&
-                        pendingProposal === null;
-
-                      return (
-                        <article
-                          className={[
-                            "agent-message",
-                            message.role,
-                            message.effect?.effect ?? "",
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                          key={message.id}
+                  <section className="agent-transcript">
+                    <div className="agent-transcript-heading">
+                      <div>
+                        <strong>Conversation</strong>
+                        <span>{agentMessages.length} messages</span>
+                      </div>
+                      {agentMessages.length > 3 ? (
+                        <button
+                          type="button"
+                          aria-controls="agent-conversation-log"
+                          aria-expanded={showFullTranscript}
+                          onClick={() =>
+                            setShowFullTranscript((current) => !current)
+                          }
                         >
-                          <div className="agent-message-meta">
-                            <strong>
-                              {message.role === "user"
-                                ? "You"
-                                : "Form assistant"}
-                            </strong>
-                            <div>
-                              {message.role === "assistant" &&
-                              message.effect &&
-                              !["none", "field_selected"].includes(
-                                message.effect.effect,
-                              ) ? (
-                                <small>
-                                  {getAgentEffectLabel(message.effect.effect)}
-                                </small>
-                              ) : null}
-                              {messageField ? (
-                                <span>
-                                  {messageField.label ||
-                                    humanizeFieldId(messageField.id)}
-                                </span>
-                              ) : null}
+                          {showFullTranscript
+                            ? "Show recent only"
+                            : "Show full transcript"}
+                        </button>
+                      ) : null}
+                    </div>
+                    <div
+                      className="agent-conversation"
+                      id="agent-conversation-log"
+                      aria-label="Form assistant conversation"
+                      role="log"
+                    >
+                      {visibleAgentMessages.map((message) => {
+                        const messageField = fields.find(
+                          (field) => field.id === message.fieldId,
+                        );
+
+                        return (
+                          <article
+                            className={[
+                              "agent-message",
+                              message.role,
+                              message.effect?.effect ?? "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                            key={message.id}
+                          >
+                            <div className="agent-message-meta">
+                              <strong>
+                                {message.role === "user"
+                                  ? "You"
+                                  : "Form assistant"}
+                              </strong>
+                              <div>
+                                {messageField ? (
+                                  <span>
+                                    {messageField.label ||
+                                      humanizeFieldId(messageField.id)}
+                                  </span>
+                                ) : null}
+                              </div>
                             </div>
-                          </div>
-                          <p>{message.content}</p>
-                          {message.guidance?.map((citation) => (
-                            <aside
-                              className="agent-guidance"
-                              key={`${message.id}-${citation.source_id}-${citation.excerpt}`}
-                            >
-                              <span>Official guidance · paraphrased</span>
-                              <p>{citation.excerpt}</p>
-                              <a
-                                href={citation.url}
-                                rel="noreferrer"
-                                target="_blank"
+                            <p>{message.content}</p>
+                            {message.guidance?.map((citation) => (
+                              <aside
+                                className="agent-guidance"
+                                key={`${message.id}-${citation.source_id}-${citation.excerpt}`}
                               >
-                                {citation.title}
-                              </a>
-                              <small>
-                                {citation.organization} · Form version{" "}
-                                {citation.form_version} · Retrieved{" "}
-                                {citation.retrieved_at}
-                              </small>
-                            </aside>
-                          ))}
-                          {message.webGuidance &&
-                          message.webGuidance.sources.length > 0 ? (
-                            <aside
-                              className={`agent-web-guidance ${message.webGuidance.status}`}
-                            >
-                              <span>Live web guidance · Tavily</span>
-                              <p>{message.webGuidance.notice}</p>
-                              {message.webGuidance.sources.map((source) => (
-                                <article
-                                  className="agent-web-source"
-                                  key={`${message.id}-${source.source_id}`}
+                                <span>Official guidance · paraphrased</span>
+                                <p>{citation.excerpt}</p>
+                                <a
+                                  href={citation.url}
+                                  rel="noreferrer"
+                                  target="_blank"
                                 >
-                                  <a
-                                    href={source.url}
-                                    rel="noreferrer"
-                                    target="_blank"
+                                  {citation.title}
+                                </a>
+                                <small>
+                                  {citation.organization} · Form version{" "}
+                                  {citation.form_version} · Retrieved{" "}
+                                  {citation.retrieved_at}
+                                </small>
+                              </aside>
+                            ))}
+                            {message.webGuidance &&
+                            message.webGuidance.sources.length > 0 ? (
+                              <aside
+                                className={`agent-web-guidance ${message.webGuidance.status}`}
+                              >
+                                <span>Live web guidance · Tavily</span>
+                                <p>{message.webGuidance.notice}</p>
+                                {message.webGuidance.sources.map((source) => (
+                                  <article
+                                    className="agent-web-source"
+                                    key={`${message.id}-${source.source_id}`}
                                   >
-                                    {source.title}
-                                  </a>
-                                  <p>{source.snippet}</p>
-                                  <small>
-                                    {getWebSourceQualityLabel(
-                                      source.source_quality,
-                                    )} · {source.hostname} · Retrieved{" "}
-                                    {source.retrieved_at}
-                                    {source.form_version
-                                      ? ` · Form version ${source.form_version}`
-                                      : ""}
-                                  </small>
-                                </article>
-                              ))}
-                            </aside>
-                          ) : null}
-                          {message.webGuidance &&
-                          message.webGuidance.sources.length === 0 &&
-                          message.webGuidanceRetry ? (
-                            <div className="agent-guidance-recovery">
-                              <button
-                                type="button"
-                                disabled={agentStatus === "loading"}
-                                onClick={() =>
-                                  void requestAgent(
-                                    message.webGuidanceRetry as AgentRequest,
-                                  )
-                                }
-                              >
-                                Retry guidance check
-                              </button>
-                            </div>
-                          ) : null}
-                          {canOfferExplanationActions ? (
-                            <div
-                              className="agent-conversation-actions"
-                              aria-label="Continue this conversation"
-                            >
-                              <button
-                                type="button"
-                                onClick={() => agentInputRef.current?.focus()}
-                              >
-                                Answer now
-                              </button>
-                              <button
-                                type="button"
-                                disabled={agentStatus === "loading"}
-                                onClick={() =>
-                                  sendAgentMessage("Explain that more simply.")
-                                }
-                              >
-                                Explain more
-                              </button>
-                              <button
-                                type="button"
-                                disabled={agentStatus === "loading"}
-                                onClick={() =>
-                                  sendAgentMessage(
-                                    "Check official guidance for this question.",
-                                  )
-                                }
-                              >
-                                Check guidance
-                              </button>
-                              <button
-                                type="button"
-                                disabled={agentStatus === "loading"}
-                                onClick={() =>
-                                  sendAgentEvent({
-                                    type: "skip",
-                                    field_id: message.fieldId as string,
-                                  })
-                                }
-                              >
-                                Skip for now
-                              </button>
-                            </div>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </div>
+                                    <a
+                                      href={source.url}
+                                      rel="noreferrer"
+                                      target="_blank"
+                                    >
+                                      {source.title}
+                                    </a>
+                                    <p>{source.snippet}</p>
+                                    <small>
+                                      {getWebSourceQualityLabel(
+                                        source.source_quality,
+                                      )} · {source.hostname} · Retrieved{" "}
+                                      {source.retrieved_at}
+                                      {source.form_version
+                                        ? ` · Form version ${source.form_version}`
+                                        : ""}
+                                    </small>
+                                  </article>
+                                ))}
+                              </aside>
+                            ) : null}
+                            {message.webGuidance &&
+                            message.webGuidance.sources.length === 0 &&
+                            message.webGuidanceRetry ? (
+                              <div className="agent-guidance-recovery">
+                                <button
+                                  type="button"
+                                  disabled={agentStatus === "loading"}
+                                  onClick={() =>
+                                    void requestAgent(
+                                      message.webGuidanceRetry as AgentRequest,
+                                    )
+                                  }
+                                >
+                                  Retry guidance check
+                                </button>
+                              </div>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
                 ) : null}
 
                 {pendingProposal && pendingProposalField ? (
@@ -1333,13 +1411,13 @@ function App() {
                             : "Review proposal"}
                         </span>
                         <strong>
-                          {pendingProposalField.label ||
+                          {pendingProposalField.question ||
+                            pendingProposalField.label ||
                             humanizeFieldId(pendingProposalField.id)}
                         </strong>
-                        <code>{pendingProposalField.id}</code>
                       </div>
                       <span className="agent-confirmation-status">
-                        Awaiting confirmation
+                        Awaiting your review
                       </span>
                     </div>
 
@@ -1367,7 +1445,7 @@ function App() {
                               !canApplyEditedProposal
                             }
                           >
-                            Use edited answer
+                            Confirm edited answer
                           </button>
                           <button
                             type="button"
@@ -1426,8 +1504,8 @@ function App() {
                         )}
                         <p>
                           {isReplacementPending
-                            ? "The current answer stays on the form until you confirm this replacement or submit an edited replacement."
-                            : "Nothing changes until you choose Confirm or submit an edited answer."}
+                            ? "Your current confirmed answer and PDF stay unchanged until you confirm this replacement."
+                            : "This answer has not been added to the PDF. Review it, then confirm or edit it."}
                         </p>
                         <div className="agent-confirmation-actions">
                           <button
@@ -1523,7 +1601,7 @@ function App() {
                 ) : null}
 
                 {canUseAgent &&
-                canAdvanceAgent &&
+                (canStartAgent || canResumeAgent) &&
                 hasUnansweredAgentField &&
                 agentStatus !== "loading" ? (
                   <button
@@ -1531,17 +1609,52 @@ function App() {
                     type="button"
                     onClick={() => sendAgentEvent({ type: "advance" })}
                   >
-                    {agentMessages.length === 0
-                      ? "Start guided form"
-                      : "Continue to next field"}
+                    {canStartAgent
+                      ? "Start guided interview"
+                      : "Resume guided interview"}
                   </button>
                 ) : null}
 
                 {canUseAgent &&
                 agentConversationState.phase === "form_complete" ? (
-                  <p className="agent-complete-state">
-                    No unanswered supported fields remain.
-                  </p>
+                  <section
+                    className="agent-complete-state"
+                    aria-labelledby="agent-complete-heading"
+                  >
+                    <span>Interview complete</span>
+                    <h3 id="agent-complete-heading">
+                      Every supported question has been reviewed.
+                    </h3>
+                    <p>
+                      {confirmedAgentFieldCount} confirmed ·{" "}
+                      {skippedAgentFieldCount} skipped · 0 unanswered
+                    </p>
+                    <div className="agent-complete-actions">
+                      <button
+                        type="button"
+                        disabled={agentStatus === "loading"}
+                        onClick={() =>
+                          sendAgentMessage(
+                            "Show confirmed, skipped, and unanswered fields.",
+                          )
+                        }
+                      >
+                        Review answers
+                      </button>
+                      <button
+                        type="button"
+                        disabled={agentStatus === "loading"}
+                        onClick={() => {
+                          setAgentInput("Change ");
+                          window.requestAnimationFrame(() =>
+                            agentInputRef.current?.focus(),
+                          );
+                        }}
+                      >
+                        Correct an answer
+                      </button>
+                    </div>
+                  </section>
                 ) : null}
 
                 {canUseAgent ? (
@@ -1551,7 +1664,11 @@ function App() {
                   >
                     <label htmlFor="agent-message">
                       {activeAgentField
-                        ? "Reply or ask a follow-up"
+                        ? pendingProposal
+                          ? "Ask a question or use the review controls"
+                          : "Your answer or question"
+                        : agentConversationState.phase === "form_complete"
+                          ? "Ask about your answers or name one to correct"
                         : "Start or continue the guided form"}
                     </label>
                     <div className="ai-question-controls">
@@ -1562,7 +1679,11 @@ function App() {
                         maxLength={2000}
                         placeholder={
                           activeAgentField
-                            ? "Type your answer or ask for clarification"
+                            ? pendingProposal
+                              ? "Ask about this proposal"
+                              : "Type your answer or ask for help"
+                            : agentConversationState.phase === "form_complete"
+                              ? "For example: Change my home address"
                             : "Ask for help with the form"
                         }
                         value={agentInput}
@@ -1583,10 +1704,9 @@ function App() {
                       </button>
                     </div>
                     <small>
-                      Your conversation stays visible for this PDF. Only the
-                      eight most recent messages are sent as AI context, and
-                      proposals update the form only after you explicitly
-                      confirm or use an edited answer.
+                      Nothing is added to the PDF until you explicitly confirm
+                      a prepared answer. The full conversation remains
+                      available above.
                     </small>
                   </form>
                 ) : extractionStatus === "ready" ? (
@@ -2121,6 +2241,31 @@ function getAvailableDropdownOptions(options?: string[]): string[] {
   return (options ?? []).filter(
     (option) => !isPlaceholderDropdownOption(option),
   );
+}
+
+function getQuickAnswerOptions(
+  field: PdfField | undefined,
+): Array<{ label: string; message: string; value: string }> {
+  if (!field || !isExplainableField(field)) {
+    return [];
+  }
+
+  if (field.type === "checkbox") {
+    return [
+      { label: "Yes", message: "Yes", value: "true" },
+      { label: "No", message: "No", value: "false" },
+    ];
+  }
+
+  if (field.type === "dropdown") {
+    return getAvailableDropdownOptions(field.options).map((option) => ({
+      label: option,
+      message: option,
+      value: option,
+    }));
+  }
+
+  return [];
 }
 
 function isPlaceholderDropdownOption(option: string): boolean {
@@ -2660,23 +2805,20 @@ function isValidFormContext(value: unknown): value is FormContext {
   );
 }
 
-function getAgentEffectLabel(effect: AgentEffectKind): string {
-  const labels: Record<AgentEffectKind, string> = {
-    none: "Conversation",
-    proposal: "Proposal",
-    replacement_proposal: "Replacement proposal",
-    confirmed: "Confirmed",
-    rejected: "Rejected",
-    skipped: "Skipped",
-    field_selected: "Question selected",
-    field_reopened: "Question reopened",
-    correction_started: "Correction started",
-    replacement_rejected: "Replacement rejected",
-    correction_cancelled: "Correction cancelled",
-    completed: "Complete",
+function getQuestionStatusLabel(phase: ConversationPhase): string {
+  const labels: Record<ConversationPhase, string> = {
+    asking: "Ready to begin",
+    awaiting_answer: "Your current question",
+    awaiting_clarification: "Let's clarify this",
+    awaiting_confirmation: "Review your answer",
+    awaiting_replacement: "Preparing a correction",
+    awaiting_replacement_confirmation: "Review your correction",
+    field_confirmed: "Answer added",
+    field_skipped: "Question skipped",
+    form_complete: "Interview complete",
   };
 
-  return labels[effect];
+  return labels[phase];
 }
 
 function getWebSourceQualityLabel(

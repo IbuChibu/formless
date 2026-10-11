@@ -199,3 +199,21 @@ must never become an implicit write operation. Keeping the old value canonical
 through discussion, rejection, failures, and stale events prevents premature
 PDF changes, while deterministic review responses avoid sending unrelated
 personal values to the model.
+
+---
+
+## 2026-10-11 — The guided interview is a view over shared canonical state
+
+Decision:
+The primary typed experience emphasizes one active question, its extracted
+section/page context, optional schema-derived quick answers, and a distinct
+proposal review. Quick answers and typed answers dispatch the same Form Agent
+message event. The full transcript stays available, while the manual field
+drawer remains a collapsed fallback over the same frontend field state.
+
+Reason:
+A focused interview is calmer than exposing a general chat plus workflow
+controls, but it must not create a second state path. Reusing the existing
+event, proposal, explicit-confirmation, and PDF-preview flow prevents quick
+controls or presentation changes from bypassing validation or writing an
+unconfirmed answer.

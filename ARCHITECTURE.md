@@ -29,6 +29,12 @@ Responsible for:
 - displaying questions
 - recording voice
 - displaying conversation
+- presenting the conversation as a focused one-question-at-a-time interview
+  using section, page, question, and progress metadata from extracted fields
+- exposing validated finite choices as optional quick answers that dispatch the
+  same Form Agent message event as the typed composer
+- retaining the full current-form transcript while visually prioritizing the
+  active question and latest conversational turn
 - rendering the assistant's natural-language message separately from any typed
   form effect
 - showing original and prepared proposal values together when formatting
@@ -39,6 +45,8 @@ Responsible for:
 - keeping the current uploaded form's ephemeral field state
 - keeping AI-proposed values separate from confirmed values
 - presenting confirmation, correction, rejection, and skip controls
+- keeping the manual field drawer, quick answers, conversation, and proposal
+  review on the same ephemeral canonical field state
 - sending only confirmed values to the PDF filling endpoint
 
 Must not:

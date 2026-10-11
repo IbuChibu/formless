@@ -2351,7 +2351,7 @@ Do not implement:
 
 # Milestone 6.16 — Focused guided-interview UX
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Design reference:
 The local
@@ -2518,6 +2518,38 @@ Acceptance criteria:
   typed interview and explicit-confirmation flow
 - frontend production build and existing backend, PDF, Form Agent, safety, and
   transcript tests pass
+
+Verified implementation outcome:
+- the assistant workspace now presents one dominant active-question card with
+  grounded section, page, real question text, and supported-field position,
+  while the existing canonical progress summary remains visible above it
+- validated dropdown options and checkbox states appear as accessible compact
+  quick answers; every quick answer calls the same `message` event path as the
+  typed composer and cannot update canonical state or the PDF directly
+- explanation, live-guidance, and stale-safe skip actions are centralized on
+  the active question instead of being repeated under every assistant message
+- assistant messages no longer expose internal effect or phase labels, and the
+  complete current-form transcript can switch between the three most recent
+  messages and the full retained conversation without discarding history
+- proposal review identifies the active question, says explicitly that the PDF
+  is unchanged, preserves original/prepared/transformation details, and shows
+  only the confirmation, edit, use-original, reject, skip, or correction
+  controls allowed by the current typed state
+- normal confirmation and skip responses continue through the backend's
+  deterministic next-question transition without a separate Continue action;
+  a distinct Resume action remains only for the existing direct/manual-edit
+  compatibility phases
+- form completion is a compact canonical confirmed/skipped/unanswered summary
+  with conversational review and correction routes provided by Milestone 6.15
+- loading, retry, validation, and provider states remain inside the interview
+  without clearing the active question, proposal, transcript, or confirmed
+  values; the collapsed manual drawer and live PDF filling flow are unchanged
+- focus returns to the typed composer when an answer or clarification is
+  expected, and the new quick, transcript, completion, and review controls have
+  explicit labels, focus styling, and live status context
+- the focused desktop layout was rendered in the local browser with no console
+  errors, the sample fixture exposed the expected section/page/finite-choice
+  metadata, all 305 backend tests pass, and the frontend production build passes
 
 Do not implement:
 - voice input, speech recognition, or speech output
