@@ -106,7 +106,10 @@ def get_nemotron_service() -> NemotronService:
     except NemotronConfigurationError as error:
         raise HTTPException(
             status_code=503,
-            detail="AI explanation service is not configured",
+            detail=(
+                "Nebius Token Factory is not configured. Load backend/.env "
+                "before starting the API, or continue with manual PDF editing."
+            ),
         ) from error
 
 

@@ -578,9 +578,7 @@ function App() {
   function appendAgentMessage(message: Omit<ConversationMessage, "id">) {
     agentMessageIdRef.current += 1;
     const nextMessage = { ...message, id: agentMessageIdRef.current };
-    setAgentMessages((current) =>
-      [...current, nextMessage].slice(-maxAgentHistoryMessages),
-    );
+    setAgentMessages((current) => [...current, nextMessage]);
   }
 
   async function requestAgent(request: AgentRequest) {
@@ -735,9 +733,9 @@ function App() {
   }
 
   const connectionCopy = {
-    checking: "Checking API",
-    connected: "API connected",
-    disconnected: "API unavailable",
+    checking: "Checking backend",
+    connected: "Backend connected",
+    disconnected: "Backend unavailable",
   }[connectionStatus];
 
   const previewCopy = {
@@ -817,9 +815,11 @@ function App() {
     "field_skipped",
   ].includes(agentConversationState.phase);
   const canSendAgentMessage = [
+    "asking",
     "awaiting_answer",
     "awaiting_clarification",
     "awaiting_confirmation",
+    "form_complete",
   ].includes(agentConversationState.phase);
 
   return (
@@ -1088,7 +1088,7 @@ function App() {
                 {agentMessages.length > 0 ? (
                   <div
                     className="agent-conversation"
-                    aria-label="Recent form assistant conversation"
+                    aria-label="Form assistant conversation"
                     role="log"
                   >
                     {agentMessages.map((message, messageIndex) => {
@@ -1494,7 +1494,8 @@ function App() {
                       </button>
                     </div>
                     <small>
-                      Only the eight most recent messages are kept. AI
+                      Your conversation stays visible for this PDF. Only the
+                      eight most recent messages are sent as AI context, and
                       proposals update the form only after you explicitly
                       confirm or use an edited answer.
                     </small>

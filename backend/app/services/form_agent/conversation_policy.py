@@ -8,7 +8,10 @@ from typing import Literal, Optional
 
 from pydantic import TypeAdapter
 
-from .answer_preparation import prepare_proposal_action
+from .answer_preparation import (
+    prepare_proposal_action,
+    prose_polish_candidate,
+)
 from .answer_adapters import (
     AnswerAdapterResult,
     ClarificationNeeded,
@@ -24,6 +27,7 @@ from .models import (
     ConfirmedAction,
     ConfirmedEffect,
     CompletedEffect,
+    ConversationAction,
     ConversationPhase,
     ConversationState,
     ExplainAction,
@@ -63,7 +67,7 @@ from .value_normalizer import (
 _RESPONSE_ADAPTER = TypeAdapter(FormAgentResponse)
 
 _ALLOWED_EVENTS: dict[ConversationPhase, set[str]] = {
-    "asking": {"advance", "focus_field"},
+    "asking": {"advance", "message", "focus_field"},
     "awaiting_answer": {"message", "skip", "focus_field"},
     "awaiting_clarification": {"message", "skip", "focus_field"},
     "awaiting_confirmation": {
@@ -75,7 +79,7 @@ _ALLOWED_EVENTS: dict[ConversationPhase, set[str]] = {
     },
     "field_confirmed": {"advance", "focus_field"},
     "field_skipped": {"advance", "focus_field"},
-    "form_complete": set(),
+    "form_complete": {"message"},
 }
 
 _SKIP_REQUEST_PATTERNS = (
@@ -104,6 +108,8 @@ TurnIntent = Literal[
     "wording_clarification",
     "evidence_question",
     "progress_question",
+    "general_conversation",
+    "prose_polish",
 ]
 TurnObjective = Literal[
     "deterministic_command",
@@ -114,6 +120,8 @@ TurnObjective = Literal[
     "clarify_what_is_confusing",
     "evidence_grounded_explanation",
     "progress_help",
+    "natural_conversation",
+    "polish_prose",
 ]
 
 ExplanationObjective = Literal[
@@ -158,8 +166,11 @@ _EXTERNAL_GUIDANCE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _WORDING_CLARIFICATION_PATTERN = re.compile(
-    r"\b(?:what\s+does\s+(?:this|that|it|the\s+(?:field|question))\s+mean|"
-    r"what\s+is\s+(?:this|that|it|the\s+(?:field|question))\s+asking|"
+    r"\b(?:what\s+does\s+.{1,80}?\s+mean(?:\s+here)?|"
+    r"what\s+does\s+(?:this|that|it|(?:this|that|the)\s+"
+    r"(?:field|question))\s+mean|"
+    r"what\s+is\s+(?:this|that|it|(?:this|that|the)\s+"
+    r"(?:field|question))\s+asking|"
     r"explain(?:\s+(?:this|that|it|the\s+(?:field|question)))?|"
     r"clarify(?:\s+(?:this|that|it|the\s+(?:field|question)))?|"
     r"rephrase(?:\s+(?:this|that|it|the\s+(?:field|question)))?|"
@@ -186,6 +197,14 @@ _UNRELATED_WORKFLOW_PATTERN = re.compile(
     r"\bform\s+progress\b",
     re.IGNORECASE,
 )
+_GENERAL_CONVERSATION_PATTERN = re.compile(
+    r"^(?:hi|hello|hey|thanks|thank\s+you|okay(?:,?\s+that\s+makes\s+"
+    r"sense)?|okay\s+thanks|got\s+it|i\s+understand)[.!]?$|"
+    r"\b(?:i\s+(?:am|'m)\s+(?:confused|nervous|worried|overwhelmed)|"
+    r"help\s+me\s+(?:with|through)\s+(?:this|the)\s+form|"
+    r"can\s+we\s+pause|let(?:'s|\s+us)\s+pause)\b",
+    re.IGNORECASE,
+)
 
 _REPEATED_EXPLANATION_ERROR = (
     "Form Agent repeated the previous explanation"
@@ -193,11 +212,28 @@ _REPEATED_EXPLANATION_ERROR = (
 _UNRELATED_WORKFLOW_ERROR = (
     "Form Agent added unrelated workflow commentary to an explanation"
 )
+_LOST_ACTIVE_FIELD_ERROR = "Form Agent lost the active field context"
 
 
 def classify_turn_intent(request: FormAgentRequest) -> TurnIntent:
     if not isinstance(request.event, (MessageEvent, FocusFieldEvent)):
         return "command"
+
+    active_field_id = request_active_field_id(request)
+    if active_field_id is not None:
+        active_field = next(
+            (field for field in request.fields if field.id == active_field_id),
+            None,
+        )
+        if (
+            active_field is not None
+            and prose_polish_candidate(
+                active_field,
+                request_message(request),
+            )
+            is not None
+        ):
+            return "prose_polish"
 
     return _classify_message(request_message(request))
 
@@ -211,11 +247,12 @@ def _classify_message(message: str) -> TurnIntent:
     if (
         _WORDING_CLARIFICATION_PATTERN.search(message) is not None
         or _CONVERSATION_REPAIR_PATTERN.search(message) is not None
-        or message.endswith("?")
     ):
         return "wording_clarification"
     if _UNCERTAIN_ANSWER_PATTERN.search(message) is not None:
         return "uncertain_answer"
+    if message.endswith("?") or _GENERAL_CONVERSATION_PATTERN.search(message):
+        return "general_conversation"
     return "field_answer"
 
 
@@ -229,6 +266,8 @@ def turn_objective(request: FormAgentRequest) -> TurnObjective:
         "uncertain_answer": "clarify_answer",
         "evidence_question": "evidence_grounded_explanation",
         "progress_question": "progress_help",
+        "general_conversation": "natural_conversation",
+        "prose_polish": "polish_prose",
     }[intent]
 
 
@@ -315,6 +354,7 @@ def explanation_repair_fallback(
     if str(error) not in {
         _REPEATED_EXPLANATION_ERROR,
         _UNRELATED_WORKFLOW_ERROR,
+        _LOST_ACTIVE_FIELD_ERROR,
     }:
         return None
     if classify_turn_intent(request) != "wording_clarification":
@@ -331,15 +371,96 @@ def explanation_repair_fallback(
         return None
 
     question = truncate_text(field_question(field), 220).rstrip(" .?")
-    return ExplainAction(
-        action="explain",
-        message=(
+    if str(error) == _LOST_ACTIVE_FIELD_ERROR:
+        message = (
+            f'Let me stay with the question “{question}”. Which part of '
+            "that wording would you like me to explain differently? Your "
+            "form answer has not changed."
+        )
+    else:
+        message = (
             "I don't want to repeat the same explanation. Which word or "
             f'phrase in “{question}” is unclear? Tell me that part and I’ll '
             "explain just that. Your form answer has not changed."
-        ),
+        )
+    return ExplainAction(
+        action="explain",
+        message=message,
         field_id=field.id,
     )
+
+
+def model_failure_fallback(
+    request: FormAgentRequest,
+) -> Optional[FormAgentAction]:
+    """Keep a failed model turn useful without granting it a form effect."""
+    active_field_id = request_active_field_id(request)
+    if active_field_id is None:
+        return None
+    field = next(
+        (field for field in request.fields if field.id == active_field_id),
+        None,
+    )
+    if field is None:
+        return None
+
+    intent = classify_turn_intent(request)
+    message = request_message(request)
+    question = truncate_text(field_question(field), 220).rstrip(" .?")
+
+    if intent == "general_conversation":
+        if re.search(r"\b(?:pause|wait|stop)\b", message, re.IGNORECASE):
+            reply = (
+                "Of course — we can pause here. Nothing on the form has "
+                "changed, and we can continue whenever you're ready."
+            )
+        else:
+            reply = (
+                "I couldn't answer that clearly, but nothing on the form "
+                f'has changed. We are still on “{question}”; you can rephrase '
+                "your message or continue when you're ready."
+            )
+        return ConversationAction(
+            action="conversation",
+            message=reply,
+            field_id=field.id,
+        )
+
+    if intent == "wording_clarification":
+        return ExplainAction(
+            action="explain",
+            message=(
+                f'Let me stay with “{question}”. Which word or part would '
+                "you like explained differently? Nothing on the form has "
+                "changed."
+            ),
+            field_id=field.id,
+        )
+
+    if intent == "evidence_question":
+        return ExplainAction(
+            action="explain",
+            message=(
+                "I couldn't produce a reliable explanation from the "
+                "available guidance, so I won't guess. Check the form's "
+                "instructions or issuing organisation; your answer has not "
+                "changed."
+            ),
+            field_id=field.id,
+        )
+
+    if intent == "prose_polish":
+        return ClarifyAction(
+            action="clarify",
+            message=(
+                "I couldn't prepare a wording suggestion safely, so I left "
+                "your answer unchanged. You can rephrase the request or use "
+                "your original wording."
+            ),
+            field_id=field.id,
+        )
+
+    return _build_field_clarification(field)
 
 
 def _comparison_words(value: str) -> list[str]:
@@ -438,6 +559,18 @@ def deterministic_action(
     if isinstance(event, AdvanceEvent):
         return _next_unanswered_action(request.fields)
 
+    if (
+        request.conversation_state.phase == "asking"
+        and isinstance(event, MessageEvent)
+    ):
+        return _start_conversation_action(request.fields)
+
+    if (
+        request.conversation_state.phase == "form_complete"
+        and isinstance(event, MessageEvent)
+    ):
+        return _completed_summary_action(request.fields)
+
     if isinstance(event, ConfirmEvent):
         pending = request.conversation_state.pending_proposal
         if pending is None:
@@ -511,8 +644,20 @@ def deterministic_action(
             )
         if turn_intent == "progress_question":
             return _progress_action(request, active_field)
-        if turn_intent in {"wording_clarification", "evidence_question"}:
+        if turn_intent in {
+            "wording_clarification",
+            "evidence_question",
+        }:
             return None
+        if turn_intent == "general_conversation":
+            return ConversationAction(
+                action="conversation",
+                message=(
+                    "Got it. The proposal is still waiting for your review, "
+                    "and nothing has been added to the form."
+                ),
+                field_id=active_field.id,
+            )
         return ClarifyAction(
             action="clarify",
             message=(
@@ -531,7 +676,12 @@ def deterministic_action(
 
     if turn_intent == "progress_question":
         return _progress_action(request, active_field)
-    if turn_intent in {"wording_clarification", "evidence_question"}:
+    if turn_intent in {
+        "wording_clarification",
+        "evidence_question",
+        "general_conversation",
+        "prose_polish",
+    }:
         return None
 
     adapter_result = answer_interpreter(active_field, message)
@@ -598,6 +748,8 @@ def response_for_action(
             phase="awaiting_clarification",
             active_field_id=action.field_id,
         )
+    elif isinstance(action, ConversationAction):
+        state = request.conversation_state
     elif isinstance(action, ExplainAction) and (
         preserve_conversation_phase
         or request.conversation_state.phase
@@ -772,15 +924,34 @@ def validate_action_for_turn(
     request: FormAgentRequest,
 ) -> None:
     intent = classify_turn_intent(request)
-    if intent in {"wording_clarification", "evidence_question"} and not (
-        isinstance(action, ExplainAction)
+    if intent == "evidence_question" and not isinstance(action, ExplainAction):
+        raise FormAgentError(
+            "This conversational turn requires an explanation action"
+        )
+    if intent == "general_conversation" and not isinstance(
+        action,
+        ConversationAction,
+    ):
+        raise FormAgentError(
+            "This conversational turn requires a non-mutating response"
+        )
+    if intent == "prose_polish" and not isinstance(
+        action,
+        (ProposeAction, ClarifyAction),
+    ):
+        raise FormAgentError(
+            "This prose request requires a reviewable proposal or clarification"
+        )
+    if intent == "wording_clarification" and not isinstance(
+        action,
+        (ExplainAction, ConversationAction),
     ):
         raise FormAgentError(
             "This conversational turn requires an explanation action"
         )
     if intent != "wording_clarification" or not isinstance(
         action,
-        ExplainAction,
+        (ExplainAction, ConversationAction),
     ):
         return
 
@@ -793,6 +964,8 @@ def validate_action_for_turn(
         raise FormAgentError(_REPEATED_EXPLANATION_ERROR)
     if _UNRELATED_WORKFLOW_PATTERN.search(action.message) is not None:
         raise FormAgentError(_UNRELATED_WORKFLOW_ERROR)
+    if not _response_mentions_active_field(action.message, request):
+        raise FormAgentError(_LOST_ACTIVE_FIELD_ERROR)
 
 
 def normalize_action_message(
@@ -891,6 +1064,37 @@ def _next_unanswered_action(fields: list[FormAgentField]) -> NextAction:
         action="next",
         message=build_next_field_question(next_field),
         field_id=next_field.id,
+    )
+
+
+def _start_conversation_action(fields: list[FormAgentField]) -> NextAction:
+    action = _next_unanswered_action(fields)
+    if action.field_id is None:
+        return action
+    return action.model_copy(
+        update={
+            "message": (
+                "I can help you work through this form one question at a "
+                f"time. Let's start here: {action.message}"
+            )
+        }
+    )
+
+
+def _completed_summary_action(fields: list[FormAgentField]) -> NextAction:
+    confirmed = sum(field.status == "confirmed" for field in fields)
+    skipped = sum(field.status == "skipped" for field in fields)
+    parts = [f"All {len(fields)} supported questions have been reviewed"]
+    parts.append(f"{confirmed} confirmed")
+    if skipped:
+        parts.append(f"{skipped} skipped")
+    return NextAction(
+        action="next",
+        message=(
+            f"{'; '.join(parts)}. You can review the PDF and the manual "
+            "field list before downloading it."
+        ),
+        field_id=None,
     )
 
 
@@ -1033,3 +1237,58 @@ def _asks_to_skip(message: str) -> bool:
         pattern.fullmatch(normalized_message)
         for pattern in _SKIP_REQUEST_PATTERNS
     )
+
+
+def _response_mentions_active_field(
+    message: str,
+    request: FormAgentRequest,
+) -> bool:
+    active_field_id = request_active_field_id(request)
+    field = next(
+        (field for field in request.fields if field.id == active_field_id),
+        None,
+    )
+    if field is None:
+        return True
+
+    metadata = " ".join(
+        value
+        for value in (
+            field.label,
+            field.question,
+            field.help_text,
+            " ".join(field.options or []),
+        )
+        if value
+    ).casefold()
+    anchors = {
+        word
+        for word in _comparison_words(metadata)
+        if len(word) >= 4
+        and word
+        not in {
+            "best",
+            "does",
+            "field",
+            "form",
+            "option",
+            "question",
+            "should",
+            "this",
+            "what",
+            "which",
+            "where",
+            "would",
+            "your",
+        }
+    }
+    if re.search(r"\b(?:address|home|housing|live|living|residen)", metadata):
+        anchors.update(
+            {"address", "home", "housing", "live", "living", "move", "own", "rent", "stay"}
+        )
+    if re.search(r"\b(?:date|day|month|year|when)\b", metadata):
+        anchors.update({"date", "day", "month", "year", "when"})
+    if re.search(r"\b(?:income|earn|money|salary|wage)\b", metadata):
+        anchors.update({"earn", "income", "money", "month", "monthly", "pay"})
+    response_words = set(_comparison_words(message))
+    return bool(anchors & response_words)

@@ -142,9 +142,10 @@ def test_explain_field_requires_server_side_configuration(monkeypatch: Any) -> N
     )
 
     assert response.status_code == 503
-    assert response.json() == {
-        "detail": "AI explanation service is not configured"
-    }
+    detail = response.json()["detail"]
+    assert "Nebius Token Factory is not configured" in detail
+    assert "backend/.env" in detail
+    assert "manual PDF editing" in detail
 
 
 def test_explain_field_returns_controlled_provider_error() -> None:

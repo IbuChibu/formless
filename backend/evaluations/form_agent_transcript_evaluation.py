@@ -1,7 +1,8 @@
 """Deterministic complete-conversation evaluation for the Form Agent.
 
-Each fixture checks a bounded representative set of fields through
-``form_complete``, including the exact-version DS-11 profile. Turns-per-
+Each fixture checks a curated representative set of supported fields through
+``form_complete``; it does not claim completion of every field in the source
+PDF. Coverage counts and field types are included in the report. Turns-per-
 confirmed-field counts every action tied to that field from the first question
 through confirmation. Repeated-question rate counts clarification re-prompts
 after a field has already been asked. Clarification, invalid-action, invalid-
@@ -86,7 +87,11 @@ class TranscriptEvaluationMetrics:
     total_transcripts: int
     total_turns: int
     fixture_count: int
-    form_completion_rate: float
+    evaluated_field_count: int
+    available_supported_field_count: int
+    field_type_coverage: tuple[str, ...]
+    fixture_coverage: tuple[str, ...]
+    curated_transcript_completion_rate: float
     first_attempt_accepted_proposal_rate: float
     average_turns_per_confirmed_field: float
     repeated_question_rate: float
@@ -174,8 +179,10 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
         ("country", "United Kingdom"),
     )
     household_name = (("applicant_full_legal_name", "Sam Example-Smith"),)
-    household_name_category = (
-        ("applicant_full_legal_name", "Sam Example-Smith"),
+    household_name_dob = household_name + (
+        ("applicant_date_of_birth", "17/10/1986"),
+    )
+    household_name_category = household_name_dob + (
         ("primary_support_category", "Housing stability"),
     )
     household_all = household_name_category + (
@@ -183,11 +190,21 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
     )
     i9_name = (("Last Name (Family Name)", "Example"),)
     i9_name_state = i9_name + (("State", "CA"),)
+    i9_name_state_email = i9_name_state + (
+        ("Employees E-mail Address", "jane@example.com"),
+    )
     sba_label = (("Monthly rent expense 1", "Monthly rent"),)
-    sba_label_actual = sba_label + (
+    sba_label_budget = sba_label + (
+        ("Monthly budget cost 1", "1200"),
+    )
+    sba_label_actual = sba_label_budget + (
         ("Monthly actual cost 1", "1050.50"),
     )
     ds11_name = (("Applicant Last Name", "Example"),)
+    ds11_first_name = ds11_name + (("Applicant First Name", "Jordan"),)
+    ds11_all_names = ds11_first_name + (
+        ("Applicant Middle Name", "Taylor"),
+    )
 
     return (
         TranscriptFixture(
@@ -195,7 +212,13 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
             fixture="sample_form.pdf",
             field_ids=("full_name", "country", "accept_terms"),
             turns=(
-                _turn("ask-name", _advance(), "next", "awaiting_answer", "full_name"),
+                _turn(
+                    "natural-start",
+                    _message("Hi, can you help me complete this form?"),
+                    "next",
+                    "awaiting_answer",
+                    "full_name",
+                ),
                 _turn(
                     "explain-name-question",
                     _message("What does this question mean?"),
@@ -306,6 +329,16 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     confirmed=sample_name_country,
                     skipped=("accept_terms",),
                 ),
+                _turn(
+                    "post-completion-summary",
+                    _message("What did we complete?"),
+                    "next",
+                    "form_complete",
+                    None,
+                    state_active_field_id=None,
+                    confirmed=sample_name_country,
+                    skipped=("accept_terms",),
+                ),
             ),
         ),
         TranscriptFixture(
@@ -313,6 +346,7 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
             fixture="household_support_review_demo.pdf",
             field_ids=(
                 "applicant_full_legal_name",
+                "applicant_date_of_birth",
                 "primary_support_category",
                 "shares_food_or_living_costs",
             ),
@@ -344,9 +378,30 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirmed",
                     "awaiting_answer",
                     "applicant_full_legal_name",
-                    state_active_field_id="primary_support_category",
+                    state_active_field_id="applicant_date_of_birth",
                     confirmed=household_name,
                     expected_value="Sam Example-Smith",
+                ),
+                _turn(
+                    "date-of-birth-proposal",
+                    _message("I was born on 17 October 1986."),
+                    "propose",
+                    "awaiting_confirmation",
+                    "applicant_date_of_birth",
+                    confirmed=household_name,
+                    expected_value="17/10/1986",
+                    expected_pending_field_id="applicant_date_of_birth",
+                    expected_pending_value="17/10/1986",
+                ),
+                _turn(
+                    "confirm-date-of-birth",
+                    {"type": "confirm"},
+                    "confirmed",
+                    "awaiting_answer",
+                    "applicant_date_of_birth",
+                    state_active_field_id="primary_support_category",
+                    confirmed=household_name_dob,
+                    expected_value="17/10/1986",
                 ),
                 _turn(
                     "category-proposal",
@@ -354,7 +409,7 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "propose",
                     "awaiting_confirmation",
                     "primary_support_category",
-                    confirmed=household_name,
+                    confirmed=household_name_dob,
                     expected_value="Housing stability",
                     expected_pending_field_id="primary_support_category",
                     expected_pending_value="Housing stability",
@@ -408,7 +463,12 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
         TranscriptFixture(
             name="uscis-purpose-grounding-and-skip",
             fixture="real_world/uscis_i9_2025.pdf",
-            field_ids=("Last Name (Family Name)", "State", "CB_1"),
+            field_ids=(
+                "Last Name (Family Name)",
+                "State",
+                "Employees E-mail Address",
+                "CB_1",
+            ),
             turns=(
                 _turn(
                     "ask-family-name",
@@ -466,9 +526,30 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirmed",
                     "awaiting_answer",
                     "State",
-                    state_active_field_id="CB_1",
+                    state_active_field_id="Employees E-mail Address",
                     confirmed=i9_name_state,
                     expected_value="CA",
+                ),
+                _turn(
+                    "email-proposal",
+                    _message("my email is jane@example.com"),
+                    "propose",
+                    "awaiting_confirmation",
+                    "Employees E-mail Address",
+                    confirmed=i9_name_state,
+                    expected_value="jane@example.com",
+                    expected_pending_field_id="Employees E-mail Address",
+                    expected_pending_value="jane@example.com",
+                ),
+                _turn(
+                    "confirm-email",
+                    {"type": "confirm"},
+                    "confirmed",
+                    "awaiting_answer",
+                    "Employees E-mail Address",
+                    state_active_field_id="CB_1",
+                    confirmed=i9_name_state_email,
+                    expected_value="jane@example.com",
                 ),
                 _turn(
                     "skip-attestation",
@@ -477,7 +558,7 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "form_complete",
                     "CB_1",
                     state_active_field_id=None,
-                    confirmed=i9_name_state,
+                    confirmed=i9_name_state_email,
                     skipped=("CB_1",),
                 ),
             ),
@@ -487,6 +568,7 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
             fixture="real_world/sba_startup_costs_2023.pdf",
             field_ids=(
                 "Monthly rent expense 1",
+                "Monthly budget cost 1",
                 "Monthly actual cost 1",
                 "One-time budget cost 1",
             ),
@@ -518,9 +600,30 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirmed",
                     "awaiting_answer",
                     "Monthly rent expense 1",
-                    state_active_field_id="Monthly actual cost 1",
+                    state_active_field_id="Monthly budget cost 1",
                     confirmed=sba_label,
                     expected_value="Monthly rent",
+                ),
+                _turn(
+                    "budget-cost-proposal",
+                    _message("The budget is $1,200."),
+                    "propose",
+                    "awaiting_confirmation",
+                    "Monthly budget cost 1",
+                    confirmed=sba_label,
+                    expected_value="1200",
+                    expected_pending_field_id="Monthly budget cost 1",
+                    expected_pending_value="1200",
+                ),
+                _turn(
+                    "confirm-budget-cost",
+                    {"type": "confirm"},
+                    "confirmed",
+                    "awaiting_answer",
+                    "Monthly budget cost 1",
+                    state_active_field_id="Monthly actual cost 1",
+                    confirmed=sba_label_budget,
+                    expected_value="1200",
                 ),
                 _turn(
                     "unclear-actual-cost",
@@ -528,7 +631,7 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "clarify",
                     "awaiting_clarification",
                     "Monthly actual cost 1",
-                    confirmed=sba_label,
+                    confirmed=sba_label_budget,
                     model_response=_action_json(
                         "clarify",
                         "Please provide one exact numeric amount.",
@@ -541,7 +644,7 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "propose",
                     "awaiting_confirmation",
                     "Monthly actual cost 1",
-                    confirmed=sba_label,
+                    confirmed=sba_label_budget,
                     expected_value="1050.50",
                     expected_pending_field_id="Monthly actual cost 1",
                     expected_pending_value="1050.50",
@@ -574,7 +677,11 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
         TranscriptFixture(
             name="ds11-first-applicant-field",
             fixture="real_world/state_ds11_2025.pdf",
-            field_ids=("Applicant Last Name",),
+            field_ids=(
+                "Applicant Last Name",
+                "Applicant First Name",
+                "Applicant Middle Name",
+            ),
             turns=(
                 _turn(
                     "ask-applicant-last-name",
@@ -601,11 +708,53 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "confirm-applicant-last-name",
                     {"type": "confirm"},
                     "confirmed",
-                    "form_complete",
+                    "awaiting_answer",
                     "Applicant Last Name",
-                    state_active_field_id=None,
+                    state_active_field_id="Applicant First Name",
                     confirmed=ds11_name,
                     expected_value="Example",
+                ),
+                _turn(
+                    "applicant-first-name-proposal",
+                    _message("My first name is Jordan."),
+                    "propose",
+                    "awaiting_confirmation",
+                    "Applicant First Name",
+                    confirmed=ds11_name,
+                    expected_value="Jordan",
+                    expected_pending_field_id="Applicant First Name",
+                    expected_pending_value="Jordan",
+                ),
+                _turn(
+                    "confirm-applicant-first-name",
+                    {"type": "confirm"},
+                    "confirmed",
+                    "awaiting_answer",
+                    "Applicant First Name",
+                    state_active_field_id="Applicant Middle Name",
+                    confirmed=ds11_first_name,
+                    expected_value="Jordan",
+                ),
+                _turn(
+                    "applicant-middle-name-proposal",
+                    _message("My middle name is Taylor."),
+                    "propose",
+                    "awaiting_confirmation",
+                    "Applicant Middle Name",
+                    confirmed=ds11_first_name,
+                    expected_value="Taylor",
+                    expected_pending_field_id="Applicant Middle Name",
+                    expected_pending_value="Taylor",
+                ),
+                _turn(
+                    "confirm-applicant-middle-name",
+                    {"type": "confirm"},
+                    "confirmed",
+                    "form_complete",
+                    "Applicant Middle Name",
+                    state_active_field_id=None,
+                    confirmed=ds11_all_names,
+                    expected_value="Taylor",
                 ),
             ),
         ),
@@ -642,13 +791,21 @@ async def run_transcript_evaluation(
     total_model_calls = 0
     model_latencies_ms: list[float] = []
     total_evaluated_fields = 0
+    total_available_supported_fields = 0
+    evaluated_field_types: set[str] = set()
     total_turns = sum(
         len(transcript.turns) for transcript in selected_transcripts
     )
 
     for transcript in selected_transcripts:
-        form_context, fields = _load_transcript_fields(transcript)
+        (
+            form_context,
+            fields,
+            available_supported_fields,
+        ) = _load_transcript_fields(transcript)
         total_evaluated_fields += len(fields)
+        total_available_supported_fields += available_supported_fields
+        evaluated_field_types.update(field.type for field in fields)
         state = ConversationState(
             phase="asking",
             active_field_id=None,
@@ -960,7 +1117,15 @@ async def run_transcript_evaluation(
         fixture_count=len(
             {transcript.fixture for transcript in selected_transcripts}
         ),
-        form_completion_rate=_rate(
+        evaluated_field_count=total_evaluated_fields,
+        available_supported_field_count=total_available_supported_fields,
+        field_type_coverage=tuple(sorted(evaluated_field_types)),
+        fixture_coverage=tuple(
+            sorted(
+                {transcript.fixture for transcript in selected_transcripts}
+            )
+        ),
+        curated_transcript_completion_rate=_rate(
             completed_transcripts,
             len(selected_transcripts),
         ),
@@ -1116,7 +1281,11 @@ def _legacy_answer_interpreter(
 
 def _load_transcript_fields(
     transcript: TranscriptFixture,
-) -> tuple[FormAgentFormContext, list[FormAgentField]]:
+) -> tuple[
+    FormAgentFormContext,
+    list[FormAgentField],
+    int,
+]:
     extraction = extract_acroform(
         (FIXTURES_PATH / transcript.fixture).read_bytes()
     )
@@ -1135,6 +1304,11 @@ def _load_transcript_fields(
             )
         fields.append(agent_field)
 
+    supported_agent_fields = [
+        agent_field
+        for field in extraction.fields
+        if (agent_field := agent_field_from_pdf(field)) is not None
+    ]
     return (
         FormAgentFormContext(
             title=extraction.form_context.title,
@@ -1143,6 +1317,7 @@ def _load_transcript_fields(
             form_version=extraction.form_context.form_version,
         ),
         fields,
+        len(supported_agent_fields),
     )
 
 

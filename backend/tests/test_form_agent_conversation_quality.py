@@ -43,6 +43,9 @@ def test_conversation_quality_evaluation_reports_required_metrics() -> None:
             'moved into their current home on 5 March 2021 would call that '
             'their move-in date, not yours. Which word or part is unclear?",'
             '"field_id":"active_field"}',
+            '{"action":"conversation","message":"Of course. We can '
+            'pause here and continue whenever you are ready.",'
+            '"field_id":"active_field"}',
         ]
     )
 
@@ -52,7 +55,7 @@ def test_conversation_quality_evaluation_reports_required_metrics() -> None:
 
     assert report.failures == ()
     assert report.model == "nvidia/test-nemotron"
-    assert report.metrics.total_scenarios == 5
+    assert report.metrics.total_scenarios == 9
     assert report.metrics.valid_response_rate == 1.0
     assert report.metrics.directness_rate == 1.0
     assert report.metrics.contextual_relevance_rate == 1.0
@@ -61,22 +64,27 @@ def test_conversation_quality_evaluation_reports_required_metrics() -> None:
     assert report.metrics.material_rephrasing_rate == 1.0
     assert report.metrics.progressive_simplification_rate == 1.0
     assert report.metrics.conversation_repair_success_rate == 1.0
+    assert report.metrics.safety_boundary_failures == 0
     assert report.metrics.average_latency_ms >= 0
-    assert report.metrics.total_model_calls == 5
-    assert report.metrics.model_calls_per_scenario == 1.0
-    assert len(service.calls) == 5
+    assert report.metrics.total_model_calls == 6
+    assert report.metrics.model_calls_per_scenario == 0.667
+    assert len(service.calls) == 6
 
 
 def test_conversation_quality_scenarios_are_small_and_fixed() -> None:
     scenarios = conversation_quality_scenarios()
 
-    assert len(scenarios) == 5
+    assert len(scenarios) == 9
     assert {scenario.name for scenario in scenarios} == {
         "usual-address-date",
         "monthly-income",
         "move-in-date-simplification",
         "housing-pronoun-follow-up",
         "continued-confusion",
+        "natural-pause-question",
+        "email-framing",
+        "natural-chat-start",
+        "post-completion-summary",
     }
     assert all(scenario.context_terms for scenario in scenarios)
     assert all(scenario.next_step_terms for scenario in scenarios)
@@ -86,4 +94,6 @@ def test_conversation_quality_scenarios_are_small_and_fixed() -> None:
         "initial_paraphrase",
         "simplify_previous_explanation",
         "clarify_what_is_confusing",
+        "natural_conversation",
+        None,
     }

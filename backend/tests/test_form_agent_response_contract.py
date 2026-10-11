@@ -226,6 +226,66 @@ def test_prose_polish_preserves_uncertainty_and_stated_reason() -> None:
     assert "might" in str(prepared.prepared_value)
 
 
+def test_explicit_prose_tidy_returns_a_reviewable_model_suggestion() -> None:
+    field = _field(
+        field_id="reason",
+        label="Reason for leaving",
+        field_type="textarea",
+    )
+    request = _request(
+        field,
+        "Please tidy this: i left because the hours was changed and i could not do nights",
+    )
+    nemotron = StubNemotronService(
+        '{"action":"propose","message":"Here is a clearer version for '
+        'review.","field_id":"reason","value":"I left because the hours '
+        'were changed and I could not do nights."}'
+    )
+
+    response = asyncio.run(
+        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "proposal"
+    assert response.effect.original_value == (  # type: ignore[union-attr]
+        "i left because the hours was changed and i could not do nights"
+    )
+    assert response.effect.prepared_value == (  # type: ignore[union-attr]
+        "I left because the hours were changed and I could not do nights."
+    )
+    assert "Grammar and presentation suggested" in (  # type: ignore[union-attr]
+        response.effect.transformation or ""
+    )
+    assert response.conversation_state.phase == "awaiting_confirmation"
+    assert len(nemotron.calls) == 1
+
+
+def test_unsafe_prose_tidy_falls_back_to_the_original_wording() -> None:
+    field = _field(
+        field_id="reason",
+        label="Reason for leaving",
+        field_type="textarea",
+    )
+    original = "i did not work 3 nights because the hours changed"
+    request = _request(field, f"Polish this: {original}")
+    unsafe = (
+        '{"action":"propose","message":"Suggestion",'
+        '"field_id":"reason","value":"I worked 3 days because the hours changed."}'
+    )
+    nemotron = StubNemotronService(unsafe)
+
+    response = asyncio.run(
+        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "proposal"
+    assert response.effect.original_value == original  # type: ignore[union-attr]
+    assert response.effect.prepared_value == original  # type: ignore[union-attr]
+    assert response.effect.transformation is None  # type: ignore[union-attr]
+    assert "kept your original text" in response.assistant_message
+    assert len(nemotron.calls) == 2
+
+
 def test_use_original_can_be_confirmed_through_explicit_edit_event() -> None:
     request = _request(_field(), "my name is john smith")
     proposal_response = asyncio.run(

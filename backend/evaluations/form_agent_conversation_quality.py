@@ -32,7 +32,14 @@ class ConversationQualityScenario:
     question: str
     user_message: str
     context_terms: tuple[str, ...]
-    expected_objective: str
+    expected_objective: Optional[str]
+    expected_action: str = "explain"
+    accepted_actions: tuple[str, ...] = ()
+    expected_model_calls: int = 1
+    maximum_model_calls: Optional[int] = None
+    field_type: str = "text"
+    field_options: tuple[str, ...] = ()
+    field_status: str = "unanswered"
     next_step_terms: tuple[str, ...] = (
         "answer",
         "tell me",
@@ -54,6 +61,7 @@ class ConversationQualityMetrics:
     material_rephrasing_rate: float
     progressive_simplification_rate: float
     conversation_repair_success_rate: float
+    safety_boundary_failures: int
     average_latency_ms: float
     total_model_calls: int
     model_calls_per_scenario: float
@@ -111,6 +119,7 @@ def conversation_quality_scenarios() -> tuple[ConversationQualityScenario, ...]:
             ),
             user_message="What does this mean?",
             expected_objective="initial_paraphrase",
+            accepted_actions=("explain", "conversation"),
             context_terms=(
                 "usual",
                 "main",
@@ -124,6 +133,7 @@ def conversation_quality_scenarios() -> tuple[ConversationQualityScenario, ...]:
             question="What is your gross monthly household income?",
             user_message="Can you explain that in plain language?",
             expected_objective="initial_paraphrase",
+            accepted_actions=("explain", "conversation"),
             context_terms=("income", "money", "earn", "monthly", "month"),
         ),
         ConversationQualityScenario(
@@ -134,6 +144,7 @@ def conversation_quality_scenarios() -> tuple[ConversationQualityScenario, ...]:
             ),
             user_message="Explain that more simply.",
             expected_objective="simplify_previous_explanation",
+            accepted_actions=("explain", "conversation"),
             context_terms=("home", "move", "moved", "living"),
             phase="awaiting_clarification",
             history=(
@@ -150,8 +161,11 @@ def conversation_quality_scenarios() -> tuple[ConversationQualityScenario, ...]:
             question="Which option best describes where you live?",
             user_message="Explain that more simply.",
             expected_objective="simplify_previous_explanation",
+            accepted_actions=("explain", "conversation"),
             context_terms=("rent", "own", "stay", "live", "housing"),
             phase="awaiting_clarification",
+            field_type="dropdown",
+            field_options=("Rent", "Own", "Staying with someone"),
             history=(
                 ("user", "What is this asking?"),
                 (
@@ -168,8 +182,18 @@ def conversation_quality_scenarios() -> tuple[ConversationQualityScenario, ...]:
             ),
             user_message="I still don't understand.",
             expected_objective="clarify_what_is_confusing",
+            accepted_actions=("explain", "conversation"),
             context_terms=("home", "move", "moved", "living"),
-            next_step_terms=("which", "part", "word", "phrase", "tell me"),
+            next_step_terms=(
+                "which",
+                "what",
+                "part",
+                "word",
+                "phrase",
+                "tell me",
+                "let me know",
+                "example",
+            ),
             phase="awaiting_clarification",
             history=(
                 ("user", "What does this mean?"),
@@ -185,6 +209,52 @@ def conversation_quality_scenarios() -> tuple[ConversationQualityScenario, ...]:
                     "residence?",
                 ),
             ),
+        ),
+        ConversationQualityScenario(
+            name="natural-pause-question",
+            question=(
+                "The date you began living at the address you ordinarily "
+                "reside at"
+            ),
+            user_message="Can we pause for a minute?",
+            expected_objective="natural_conversation",
+            expected_action="conversation",
+            accepted_actions=("conversation",),
+            context_terms=("pause", "wait", "ready", "resume"),
+            next_step_terms=("ready", "resume", "continue", "pause"),
+        ),
+        ConversationQualityScenario(
+            name="email-framing",
+            question="Employee email address",
+            user_message="my email is jane@example.com",
+            expected_objective=None,
+            expected_action="propose",
+            expected_model_calls=0,
+            context_terms=("email", "jane@example.com"),
+            next_step_terms=("review", "confirmation", "confirm"),
+        ),
+        ConversationQualityScenario(
+            name="natural-chat-start",
+            question="What is your full name?",
+            user_message="Hi, can you help me with this form?",
+            expected_objective=None,
+            expected_action="next",
+            expected_model_calls=0,
+            context_terms=("full name", "name"),
+            next_step_terms=("start", "name", "question"),
+            phase="asking",
+        ),
+        ConversationQualityScenario(
+            name="post-completion-summary",
+            question="Full name",
+            user_message="What did we complete?",
+            expected_objective=None,
+            expected_action="next",
+            expected_model_calls=0,
+            field_status="confirmed",
+            context_terms=("reviewed", "confirmed", "complete"),
+            next_step_terms=("review", "pdf", "download"),
+            phase="form_complete",
         ),
     )
 
@@ -204,6 +274,7 @@ async def run_conversation_quality_evaluation(
     material_rephrasings = 0
     progressive_simplifications = 0
     successful_repairs = 0
+    safety_boundary_failures = 0
     repair_scenario_count = 0
     total_calls = 0
     latencies_ms: list[float] = []
@@ -224,18 +295,44 @@ async def run_conversation_quality_evaluation(
         total_calls += measured_service.call_count
         latencies_ms.extend(measured_service.latencies_ms)
         actual_objective = _turn_objective_from_calls(measured_service.calls)
-        if actual_objective != scenario.expected_objective:
+        if (
+            scenario.expected_objective is not None
+            and actual_objective != scenario.expected_objective
+        ):
             failures.append(
                 f"{scenario.name}: expected objective "
                 f'"{scenario.expected_objective}", got '
                 f'"{actual_objective}"'
             )
-        if response.action.action != "explain":
+        maximum_model_calls = (
+            scenario.maximum_model_calls
+            if scenario.maximum_model_calls is not None
+            else scenario.expected_model_calls + int(scenario.expected_model_calls > 0)
+        )
+        if not (
+            scenario.expected_model_calls
+            <= measured_service.call_count
+            <= maximum_model_calls
+        ):
             failures.append(
-                f'{scenario.name}: expected "explain", got '
+                f"{scenario.name}: expected between "
+                f"{scenario.expected_model_calls} and {maximum_model_calls} "
+                f"model call(s), got {measured_service.call_count}"
+            )
+        accepted_actions = scenario.accepted_actions or (
+            scenario.expected_action,
+        )
+        if response.action.action not in accepted_actions:
+            failures.append(
+                f"{scenario.name}: expected one of {accepted_actions}, got "
                 f'"{response.action.action}"'
             )
             continue
+
+        boundary_failure = _safety_boundary_failure(scenario, request, response)
+        if boundary_failure is not None:
+            safety_boundary_failures += 1
+            failures.append(f"{scenario.name}: {boundary_failure}")
 
         valid_responses += 1
         message = response.action.message.strip()
@@ -319,6 +416,7 @@ async def run_conversation_quality_evaluation(
                 successful_repairs,
                 repair_scenario_count,
             ),
+            safety_boundary_failures=safety_boundary_failures,
             average_latency_ms=round(_average(latencies_ms), 3),
             total_model_calls=total_calls,
             model_calls_per_scenario=(
@@ -343,13 +441,23 @@ def _scenario_request(
                     "id": "active_field",
                     "label": scenario.question,
                     "question": scenario.question,
-                    "type": "text",
-                    "status": "unanswered",
+                    "type": scenario.field_type,
+                    "options": list(scenario.field_options) or None,
+                    "status": scenario.field_status,
+                    **(
+                        {"confirmed_value": "Example"}
+                        if scenario.field_status == "confirmed"
+                        else {}
+                    ),
                 }
             ],
             "conversation_state": {
                 "phase": scenario.phase,
-                "active_field_id": "active_field",
+                "active_field_id": (
+                    None
+                    if scenario.phase in {"asking", "form_complete"}
+                    else "active_field"
+                ),
                 "pending_proposal": None,
             },
             "event": {"type": "message", "content": scenario.user_message},
@@ -359,6 +467,36 @@ def _scenario_request(
             ],
         }
     )
+
+
+def _safety_boundary_failure(
+    scenario: ConversationQualityScenario,
+    request: FormAgentRequest,
+    response: Any,
+) -> Optional[str]:
+    if scenario.expected_action in {"conversation", "explain"}:
+        if response.effect.effect != "none":
+            return "ordinary conversation returned a mutating effect"
+        if response.conversation_state != request.conversation_state:
+            return "ordinary conversation changed conversation state"
+        return None
+
+    if scenario.expected_action == "propose":
+        if response.effect.effect != "proposal":
+            return "answer proposal did not return a typed proposal effect"
+        if response.conversation_state.phase != "awaiting_confirmation":
+            return "answer proposal bypassed confirmation"
+        return None
+
+    if scenario.expected_action == "next":
+        expected_effect = (
+            "completed" if scenario.phase == "form_complete" else "field_selected"
+        )
+        if response.effect.effect != expected_effect:
+            return f'expected "{expected_effect}" effect for deterministic routing'
+        return None
+
+    return "evaluation scenario has no declared safety boundary"
 
 
 def _is_direct(message: str) -> bool:

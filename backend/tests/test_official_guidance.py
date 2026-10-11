@@ -353,14 +353,17 @@ def test_model_cannot_turn_guidance_into_a_personal_answer() -> None:
         '"field_id":"Last Name (Family Name)","value":"Example"}'
     )
 
-    with pytest.raises(FormAgentError, match="cannot supply"):
-        asyncio.run(
-            FormAgentService(nemotron).respond(  # type: ignore[arg-type]
-                request
-            )
+    response = asyncio.run(
+        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+            request
         )
+    )
 
     assert len(nemotron.calls) == 2
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert "Example" not in response.assistant_message
+    assert "won't guess" in response.assistant_message
 
 
 def test_guidance_selection_is_count_and_character_bounded() -> None:

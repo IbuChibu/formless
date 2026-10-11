@@ -15,6 +15,9 @@ from .models import (
 from .value_normalizer import validate_field_value
 
 
+PROSE_POLISH_UNSAFE_ERROR = "Form Agent changed protected prose content"
+
+
 @dataclass(frozen=True)
 class PreparedAnswer:
     original_value: AgentFieldValue
@@ -50,6 +53,87 @@ _NAME_PARTICLES = frozenset(
         "le",
         "van",
         "von",
+    }
+)
+_PROSE_POLISH_REQUEST = re.compile(
+    r"^(?:(?:can|could|would)\s+you\s+|please\s+)?"
+    r"(?:tidy|polish|improve|clean\s+up|fix\s+the\s+grammar\s+(?:in|of))"
+    r"(?:\s+(?:this|my\s+(?:answer|wording|text)))?\s*[:\-]\s*"
+    r"(?P<value>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+_NEGATION_PATTERN = re.compile(
+    r"\b(?:no|not|never|neither|nor|cannot|can't|couldn't|didn't|doesn't|"
+    r"don't|hadn't|hasn't|haven't|isn't|mustn't|shouldn't|wasn't|weren't|"
+    r"won't|wouldn't)\b",
+    re.IGNORECASE,
+)
+_UNCERTAINTY_PATTERN = re.compile(
+    r"\b(?:about|approximately|around|estimate|estimated|guess|maybe|may|"
+    r"might|perhaps|possibly|probably|roughly|think|uncertain|unsure)\b",
+    re.IGNORECASE,
+)
+_NUMBER_OR_IDENTIFIER_PATTERN = re.compile(
+    r"\b(?:[A-Za-z]+\d+[A-Za-z0-9._/-]*|\d+[A-Za-z][A-Za-z0-9._/-]*|"
+    r"\d+(?:[.,:/-]\d+)*)\b|"
+    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+)
+_QUOTED_TEXT_PATTERN = re.compile(r"[\"'“‘](.+?)[\"'”’]")
+_GRAMMAR_TOKENS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "been",
+        "being",
+        "but",
+        "by",
+        "did",
+        "do",
+        "does",
+        "for",
+        "from",
+        "had",
+        "has",
+        "have",
+        "he",
+        "her",
+        "hers",
+        "him",
+        "his",
+        "i",
+        "in",
+        "is",
+        "it",
+        "its",
+        "me",
+        "my",
+        "of",
+        "on",
+        "or",
+        "our",
+        "ours",
+        "she",
+        "that",
+        "the",
+        "their",
+        "theirs",
+        "them",
+        "they",
+        "this",
+        "to",
+        "was",
+        "we",
+        "were",
+        "with",
+        "you",
+        "your",
+        "yours",
     }
 )
 
@@ -144,6 +228,58 @@ def prepare_answer(
     )
 
 
+def prose_polish_candidate(
+    field: FormAgentField,
+    message: str,
+) -> str | None:
+    if field.type != "textarea":
+        return None
+    metadata = semantic_text(field.id, field.label, field.question)
+    if _ADDRESS_HINT.search(metadata):
+        return None
+    match = _PROSE_POLISH_REQUEST.fullmatch(message.strip())
+    if match is None:
+        return None
+    candidate = _normalize_whitespace(match.group("value"))
+    return candidate or None
+
+
+def prose_polish_is_safe(original: str, prepared: str) -> bool:
+    if not original.strip() or not prepared.strip():
+        return False
+    if _protected_matches(_NEGATION_PATTERN, original) != _protected_matches(
+        _NEGATION_PATTERN,
+        prepared,
+    ):
+        return False
+    if _protected_matches(
+        _UNCERTAINTY_PATTERN,
+        original,
+    ) != _protected_matches(_UNCERTAINTY_PATTERN, prepared):
+        return False
+    if _protected_matches(
+        _NUMBER_OR_IDENTIFIER_PATTERN,
+        original,
+        preserve_case=True,
+    ) != _protected_matches(
+        _NUMBER_OR_IDENTIFIER_PATTERN,
+        prepared,
+        preserve_case=True,
+    ):
+        return False
+    if _protected_matches(
+        _QUOTED_TEXT_PATTERN,
+        original,
+        preserve_case=True,
+    ) != _protected_matches(
+        _QUOTED_TEXT_PATTERN,
+        prepared,
+        preserve_case=True,
+    ):
+        return False
+    return _content_tokens(original) == _content_tokens(prepared)
+
+
 def preparation_is_safe(
     field: FormAgentField,
     original_value: AgentFieldValue,
@@ -168,6 +304,12 @@ def preparation_is_safe(
     ):
         return True
 
+    if (
+        isinstance(original_value, str)
+        and isinstance(prepared_value, str)
+        and field.type == "textarea"
+    ):
+        return prose_polish_is_safe(original_value, prepared_value)
     if isinstance(original_value, str) and isinstance(prepared_value, str):
         return _meaning_tokens(original_value) == _meaning_tokens(prepared_value)
     return False
@@ -222,3 +364,24 @@ def _polish_prose_presentation(value: str) -> str:
 
 def _meaning_tokens(value: str) -> list[str]:
     return re.findall(r"[\w]+", value.casefold(), re.UNICODE)
+
+
+def _protected_matches(
+    pattern: re.Pattern[str],
+    value: str,
+    *,
+    preserve_case: bool = False,
+) -> tuple[str, ...]:
+    matches = []
+    for match in pattern.finditer(value):
+        matched = match.group(1) if match.lastindex else match.group(0)
+        matches.append(matched if preserve_case else matched.casefold())
+    return tuple(matches)
+
+
+def _content_tokens(value: str) -> list[str]:
+    return [
+        token
+        for token in _meaning_tokens(value)
+        if token not in _GRAMMAR_TOKENS
+    ]

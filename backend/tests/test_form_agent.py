@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from app.main import app, get_form_agent_service
 from app.services.form_agent import (
     MAX_AGENT_CONTEXT_CHARS,
-    FormAgentError,
     FormAgentRequest,
     FormAgentService,
 )
@@ -621,27 +620,34 @@ def test_model_context_is_structured_and_size_bounded() -> None:
 
 
 @pytest.mark.parametrize(
-    "raw_action, expected_detail",
+    "raw_action",
     [
-        ("not JSON", "Form Agent returned an invalid action"),
+        "not JSON",
         (
             '{"action":"explain","message":"Explanation",'
-            '"field_id":"unknown_field"}',
-            "Form Agent returned an unknown field ID",
+            '"field_id":"unknown_field"}'
         ),
     ],
 )
-def test_agent_rejects_invalid_model_output_with_a_controlled_error(
+def test_agent_uses_a_grounded_fallback_for_invalid_model_output(
     raw_action: str,
-    expected_detail: str,
 ) -> None:
-    response = post_with_nemotron(
-        StubNemotronService(raw_action),
-        agent_request_payload(),
-    )
+    nemotron = StubNemotronService(raw_action)
 
-    assert response.status_code == 502
-    assert response.json() == {"detail": expected_detail}
+    response = post_with_nemotron(nemotron, agent_request_payload())
+
+    assert response.status_code == 200
+    assert response.json()["effect"] == {
+        "effect": "none",
+        "field_id": "living_arrangement",
+    }
+    assert response.json()["conversation_state"]["phase"] == (
+        "awaiting_clarification"
+    )
+    assert "Choose one available option" in response.json()[
+        "assistant_message"
+    ]
+    assert len(nemotron.calls) == 2
 
 
 @pytest.mark.parametrize("invalid_value", ['"Lease"', "true"])
@@ -743,13 +749,17 @@ def test_agent_cannot_skip_a_confirmed_field() -> None:
     assert response.json() == {"detail": "The active field is no longer answerable"}
 
 
-def test_form_agent_error_is_a_controlled_service_failure() -> None:
+def test_form_agent_parser_failure_does_not_escape_the_service() -> None:
     nemotron = StubNemotronService("not JSON")
     request = FormAgentRequest.model_validate(agent_request_payload())
 
-    with pytest.raises(FormAgentError, match="invalid action"):
-        asyncio.run(
-            FormAgentService(nemotron).respond(  # type: ignore[arg-type]
-                request
-            )
+    response = asyncio.run(
+        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+            request
         )
+    )
+
+    assert response.effect.effect == "none"
+    assert response.conversation_state.phase == "awaiting_clarification"
+    assert response.action.action == "clarify"
+    assert len(nemotron.calls) == 2

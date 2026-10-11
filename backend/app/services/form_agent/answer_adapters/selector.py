@@ -10,7 +10,9 @@ from .scalar import adapt_checkbox, adapt_dropdown, adapt_number
 from .text import (
     adapt_address,
     adapt_date,
+    adapt_email,
     adapt_free_text,
+    adapt_identifier,
     adapt_name,
     adapt_phone,
     adapt_postcode,
@@ -30,6 +32,16 @@ _PHONE_HINT = re.compile(
 )
 _POSTCODE_HINT = re.compile(
     r"\b(?:postcode|postal\s+code|zip\s+code)\b",
+    re.IGNORECASE,
+)
+_EMAIL_HINT = re.compile(
+    r"\b(?:email|e-mail)(?:\s+address)?\b",
+    re.IGNORECASE,
+)
+_IDENTIFIER_HINT = re.compile(
+    r"\b(?:passport|account|application|membership|document|reference)"
+    r"(?:\s+(?:number|code|id|identifier))?\b|"
+    r"\bidentifier\b|\bid\s+(?:number|code)\b",
     re.IGNORECASE,
 )
 _MONEY_HINT = re.compile(
@@ -71,6 +83,10 @@ def select_answer_adapter(field: FormAgentField) -> AnswerAdapter:
         return adapt_date
     if _PHONE_HINT.search(metadata):
         return adapt_phone
+    if _EMAIL_HINT.search(metadata):
+        return adapt_email
+    if _IDENTIFIER_HINT.search(metadata):
+        return adapt_identifier
     if _POSTCODE_HINT.search(metadata):
         return adapt_postcode
     if _MONEY_HINT.search(metadata) and "edit to change item" not in metadata:

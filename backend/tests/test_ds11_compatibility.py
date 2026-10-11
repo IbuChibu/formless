@@ -203,7 +203,7 @@ def test_ds11_typed_transcript_proposes_first_supported_applicant_field() -> Non
     )
 
     assert report.failures == ()
-    assert report.metrics.form_completion_rate == 1.0
+    assert report.metrics.curated_transcript_completion_rate == 1.0
     completed = fill_acroform_fields(
         DS11_FIXTURE.read_bytes(),
         {"Applicant Last Name": "Example"},

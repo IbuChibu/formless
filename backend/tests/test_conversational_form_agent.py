@@ -188,6 +188,87 @@ def test_pronoun_follow_up_uses_active_field_and_bounded_history() -> None:
     ]
 
 
+def test_side_question_uses_natural_non_mutating_conversation_action() -> None:
+    request = _request("Can I pause for a minute?")
+    nemotron = StubNemotronService(
+        '{"action":"conversation","message":"Of course. We can pause '
+        'here, and your form has not changed.","field_id":"move_in_date"}'
+    )
+    tavily = StubTavilyService()
+
+    response = _respond(request, nemotron, tavily)
+
+    assert response.action.action == "conversation"
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert len(nemotron.calls) == 1
+    assert tavily.queries == []
+    context = _prompt_context(nemotron)
+    assert context["conversation"]["turn_objective"] == "natural_conversation"
+
+
+def test_invalid_pause_responses_use_grounded_non_mutating_fallback() -> None:
+    request = _request("Can we pause for a minute?")
+    invalid = (
+        '{"action":"explain","message":"We can pause.",'
+        '"field_id":"move_in_date"}'
+    )
+    nemotron = StubNemotronService([invalid, invalid])
+    tavily = StubTavilyService()
+
+    response = _respond(request, nemotron, tavily)
+
+    assert response.action.action == "conversation"
+    assert "pause" in response.assistant_message.casefold()
+    assert "nothing on the form has changed" in response.assistant_message.casefold()
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert len(nemotron.calls) == 2
+    assert tavily.queries == []
+
+
+def test_context_losing_explanation_gets_one_correction() -> None:
+    request = _request("Explain that more simply.")
+    nemotron = StubNemotronService(
+        [
+            '{"action":"explain","message":"I can help with that. '
+            'What would you like to do?","field_id":"move_in_date"}',
+            '{"action":"explain","message":"When did you move into '
+            'the home you normally live in?","field_id":"move_in_date"}',
+        ]
+    )
+    tavily = StubTavilyService()
+
+    response = _respond(request, nemotron, tavily)
+
+    assert response.action.action == "explain"
+    assert "move into the home" in response.assistant_message
+    assert len(nemotron.calls) == 2
+    assert "lost the active field context" in nemotron.calls[1]["user_prompt"]
+
+
+def test_context_losing_correction_uses_active_field_fallback() -> None:
+    request = _request("Explain that more simply.")
+    generic = (
+        '{"action":"explain","message":"I can help. What would you '
+        'like to do?","field_id":"move_in_date"}'
+    )
+    nemotron = StubNemotronService([generic, generic])
+    tavily = StubTavilyService()
+
+    response = _respond(request, nemotron, tavily)
+
+    assert response.action.action == "explain"
+    assert (
+        "date you began living at the address"
+        in response.assistant_message.casefold()
+    )
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert len(nemotron.calls) == 2
+    assert tavily.queries == []
+
+
 def test_continued_confusion_uses_third_level_repair_context() -> None:
     history = [
         {"role": "user", "content": "What does this mean?"},
@@ -545,7 +626,8 @@ def test_acknowledgement_does_not_confirm_a_pending_proposal() -> None:
 
     response = _respond(request, nemotron, tavily)
 
-    assert response.action.action == "clarify"
+    assert response.action.action == "conversation"
+    assert response.effect.effect == "none"
     assert response.conversation_state == request.conversation_state
     assert nemotron.calls == []
     assert tavily.queries == []

@@ -70,11 +70,9 @@ Required technology:
 
 ## Current implementation status
 
-- completed through Milestone 6.13.9
+- completed through Milestone 6.13.10
 - current typed workflow separates conversation from validated form effects
-- Milestone 6.13.10 is the next milestone and has not started
-- Milestone 6.14 remains gated on the 6.13.10 reliability evaluation and has
-  not started
+- Milestone 6.14 remains evaluation-gated and has not started
 - voice, deployment, persistence, and the later full-workflow milestone have
   not started
 
@@ -1831,7 +1829,7 @@ Do not implement:
 
 # Milestone 6.13.10 — Natural conversation with deterministic effects
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Audit baseline recorded 11 October 2026:
 - 275 backend tests and the frontend production build pass
@@ -2034,6 +2032,33 @@ Acceptance criteria:
   failures; latency and model-call counts remain visible
 - existing PDF extraction and filling tests, Form Agent tests, backend suite,
   and frontend production build pass
+
+Verified implementation outcome recorded 11 October 2026:
+- ordinary model-handled dialogue returns natural `conversation` or `explain`
+  messages with a separately validated non-mutating effect; deterministic code
+  remains the only authority for state, tools, proposals, confirmations, skips,
+  canonical values, and PDF changes
+- malformed, unsafe, repeated, or context-losing model output receives at most
+  one correction call and then a field-grounded fallback without applying a
+  value or exposing a parser error
+- the frontend retains the full current-form transcript while requests remain
+  bounded to the eight most recent messages; typed greetings can start the
+  workflow and post-completion questions remain read-only
+- email and identifier adapters remove only clear conversational framing and
+  preserve internal characters; optional prose tidying is explicit,
+  reviewable, and protected by deterministic factual-token checks
+- the offline transcript evaluation covers 5 fixtures, 47 turns, and 18
+  selected fields out of 324 supported fields across text, number, dropdown,
+  and checkbox types; curated transcript completion is 100%, first-attempt
+  proposal acceptance is 93.3%, invalid-action, invalid-proposal,
+  confirmation-boundary, unsafe-transformation, invented-fact, and
+  invented-purpose failures are all zero
+- the recorded live synthetic run used `nvidia/Nemotron-3_5-Lightning` across
+  9 scenarios and achieved 100% contextual relevance, 100% conversation-repair
+  success, zero repeated responses, and zero safety-boundary failures; it made
+  8 model calls (0.889 per scenario) with 398.882 ms average model latency
+- all 288 backend tests pass and the frontend production build succeeds; the
+  existing Vite bundle-size warning remains non-blocking
 
 Do not implement:
 - exact-string scripting of ordinary Nemotron responses

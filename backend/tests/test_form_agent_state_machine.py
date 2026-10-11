@@ -103,6 +103,46 @@ def test_advance_selects_first_unanswered_field_and_declares_state() -> None:
     assert nemotron.calls == []
 
 
+def test_typed_greeting_can_start_without_becoming_a_field_answer() -> None:
+    response, nemotron = respond(
+        request_payload(
+            phase="asking",
+            event={"type": "message", "content": "Hi, can you help me?"},
+        )
+    )
+
+    assert response.action.action == "next"
+    assert response.effect.effect == "field_selected"
+    assert response.conversation_state.model_dump() == {
+        "phase": "awaiting_answer",
+        "active_field_id": "full_name",
+        "pending_proposal": None,
+    }
+    assert "What is your full name?" in response.assistant_message
+    assert nemotron.calls == []
+
+
+def test_form_complete_accepts_read_only_summary_message() -> None:
+    response, nemotron = respond(
+        request_payload(
+            phase="form_complete",
+            event={"type": "message", "content": "What did we complete?"},
+            name_status="confirmed",
+        )
+    )
+
+    assert response.action.action == "next"
+    assert response.effect.effect == "completed"
+    assert response.conversation_state.model_dump() == {
+        "phase": "form_complete",
+        "active_field_id": None,
+        "pending_proposal": None,
+    }
+    assert "All 2 supported questions" in response.assistant_message
+    assert "2 confirmed" in response.assistant_message
+    assert nemotron.calls == []
+
+
 def test_answer_proposal_enters_awaiting_confirmation_with_pending_value() -> None:
     response, nemotron = respond(
         request_payload(

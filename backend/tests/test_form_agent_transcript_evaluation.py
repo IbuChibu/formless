@@ -60,19 +60,34 @@ def test_offline_transcripts_cover_complete_multiform_conversations() -> None:
 
     assert report.failures == ()
     assert report.metrics.total_transcripts == 5
-    assert report.metrics.total_turns == 36
+    assert report.metrics.total_turns == 47
     assert report.metrics.fixture_count == 5
-    assert report.metrics.form_completion_rate == 1.0
-    assert report.metrics.first_attempt_accepted_proposal_rate == 0.9
-    assert report.metrics.average_turns_per_confirmed_field == 3.8
-    assert report.metrics.repeated_question_rate == 0.133
-    assert report.metrics.clarification_rate == 0.056
+    assert report.metrics.curated_transcript_completion_rate == 1.0
+    assert report.metrics.evaluated_field_count == 18
+    assert report.metrics.available_supported_field_count == 324
+    assert report.metrics.field_type_coverage == (
+        "checkbox",
+        "dropdown",
+        "number",
+        "text",
+    )
+    assert report.metrics.fixture_coverage == (
+        "household_support_review_demo.pdf",
+        "real_world/sba_startup_costs_2023.pdf",
+        "real_world/state_ds11_2025.pdf",
+        "real_world/uscis_i9_2025.pdf",
+        "sample_form.pdf",
+    )
+    assert report.metrics.first_attempt_accepted_proposal_rate == 0.933
+    assert report.metrics.average_turns_per_confirmed_field == 3.533
+    assert report.metrics.repeated_question_rate == 0.1
+    assert report.metrics.clarification_rate == 0.043
     assert report.metrics.invalid_action_rate == 0.0
     assert report.metrics.invalid_proposal_rate == 0.0
     assert report.metrics.confirmation_boundary_failure_rate == 0.0
-    assert report.metrics.prepared_value_acceptance_rate == 0.9
-    assert report.metrics.user_edit_rate == 0.1
-    assert report.metrics.transformed_proposal_rate == 0.182
+    assert report.metrics.prepared_value_acceptance_rate == 0.933
+    assert report.metrics.user_edit_rate == 0.067
+    assert report.metrics.transformed_proposal_rate == 0.25
     assert report.metrics.unsafe_transformation_rate == 0.0
     assert report.metrics.invented_fact_failures == 0
     assert report.metrics.invented_purpose_failures == 0
@@ -84,9 +99,9 @@ def test_offline_transcripts_cover_complete_multiform_conversations() -> None:
 def test_adapter_comparison_improves_reprompts_and_invalid_proposals() -> None:
     comparison = asyncio.run(run_adapter_comparison())
 
-    assert comparison.repeated_question_rate_before == 0.214
-    assert comparison.repeated_question_rate_after == 0.133
-    assert comparison.invalid_proposal_rate_before == 0.028
+    assert comparison.repeated_question_rate_before == 0.143
+    assert comparison.repeated_question_rate_after == 0.1
+    assert comparison.invalid_proposal_rate_before == 0.085
     assert comparison.invalid_proposal_rate_after == 0.0
     assert comparison.invention_failures_before == 0
     assert comparison.invention_failures_after == 0
@@ -126,10 +141,10 @@ def test_failure_output_identifies_exact_transcript_and_turn() -> None:
     )
 
     assert report.failures[0] == (
-        "failure-location-check, turn 1 (ask-name): expected action "
+        "failure-location-check, turn 1 (natural-start): expected action "
         '"clarify", got "next"'
     )
-    assert report.metrics.invalid_action_rate == 0.091
+    assert report.metrics.invalid_action_rate == 0.083
 
 
 def test_optional_live_mode_reports_latency_and_model_calls_per_field() -> None:

@@ -7,6 +7,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from .answer_adapters import ClarificationNeeded, MatchedAnswer, interpret_answer
 from .models import (
+    ConversationAction,
     FormAgentAction,
     FormAgentError,
     FormAgentRequest,
@@ -84,6 +85,11 @@ def validate_action_against_request(
     ]
 
     if action.field_id is None:
+        if (
+            isinstance(action, ConversationAction)
+            and request.conversation_state.phase == "form_complete"
+        ):
+            return
         if not isinstance(action, NextAction) or unanswered_fields:
             raise FormAgentError("Form Agent returned an invalid action")
         return

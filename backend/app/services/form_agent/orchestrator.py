@@ -10,7 +10,12 @@ from app.services.tavily_service import (
     TavilyServiceError,
 )
 
-from .answer_preparation import prepare_proposal_action
+from .answer_preparation import (
+    PROSE_POLISH_UNSAFE_ERROR,
+    prepare_proposal_action,
+    prose_polish_candidate,
+    prose_polish_is_safe,
+)
 from .answer_adapters import (
     AnswerAdapterResult,
     interpret_answer,
@@ -21,6 +26,7 @@ from .conversation_policy import (
     explanation_repair_fallback,
     insufficient_guidance_action,
     invalid_value_clarification,
+    model_failure_fallback,
     normalize_action_message,
     response_for_action,
     unexpected_navigation_clarification,
@@ -34,6 +40,8 @@ from .models import (
     FormAgentRequest,
     FormAgentResponse,
     ProposeAction,
+    request_active_field_id,
+    request_message,
     truncate_text,
 )
 from .official_guidance import (
@@ -76,6 +84,21 @@ class FormAgentService:
 
     async def respond(self, request: FormAgentRequest) -> FormAgentResponse:
         validate_event_transition(request)
+
+        active_field_id = request_active_field_id(request)
+        active_field = next(
+            (
+                field
+                for field in request.fields
+                if field.id == active_field_id
+            ),
+            None,
+        )
+        requested_prose_candidate = (
+            prose_polish_candidate(active_field, request_message(request))
+            if active_field is not None
+            else None
+        )
 
         policy_action = deterministic_action(
             request,
@@ -163,7 +186,9 @@ class FormAgentService:
                         action.model_copy(
                             update={
                                 "original_value": (
-                                    original_model_value
+                                    requested_prose_candidate
+                                    if requested_prose_candidate is not None
+                                    else original_model_value
                                     if original_model_value is not None
                                     else action.value
                                 ),
@@ -172,6 +197,27 @@ class FormAgentService:
                         ),
                         request,
                     )
+                    if requested_prose_candidate is not None:
+                        prepared_value = action.value
+                        if not isinstance(prepared_value, str) or not (
+                            prose_polish_is_safe(
+                                requested_prose_candidate,
+                                prepared_value,
+                            )
+                        ):
+                            raise FormAgentError(PROSE_POLISH_UNSAFE_ERROR)
+                        action = action.model_copy(
+                            update={
+                                "original_value": requested_prose_candidate,
+                                "transformation": (
+                                    "Grammar and presentation suggested; "
+                                    "review the wording before confirming."
+                                    if prepared_value
+                                    != requested_prose_candidate
+                                    else None
+                                ),
+                            }
+                        )
                 validate_guidance_action(action, guidance)
                 validate_web_guidance_action(action, web_guidance)
                 validate_action_for_turn(action, request)
@@ -223,6 +269,24 @@ class FormAgentService:
 
         if validation_error is None:
             raise FormAgentError("Form Agent returned an invalid action")
+        if (
+            requested_prose_candidate is not None
+            and str(validation_error) == PROSE_POLISH_UNSAFE_ERROR
+            and active_field is not None
+        ):
+            fallback = ProposeAction(
+                action="propose",
+                message=(
+                    "I couldn't safely change that wording without risking "
+                    "its meaning, so I kept your original text for review. "
+                    "It has not been applied to the form."
+                ),
+                field_id=active_field.id,
+                value=requested_prose_candidate,
+                original_value=requested_prose_candidate,
+            )
+            validate_action_against_request(fallback, request)
+            return response_for_action(fallback, request)
         repair_fallback = explanation_repair_fallback(
             validation_error,
             request,
@@ -235,4 +299,7 @@ class FormAgentService:
         )
         if clarification is not None:
             return response_for_action(clarification, request)
+        fallback = model_failure_fallback(request)
+        if fallback is not None:
+            return response_for_action(fallback, request)
         raise validation_error

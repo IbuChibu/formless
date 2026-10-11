@@ -9,6 +9,7 @@ from .selector import (
     interpret_answer,
     select_answer_adapter,
 )
+from .text import adapt_email, adapt_identifier
 
 __all__ = [
     "AnswerAdapterResult",
@@ -18,4 +19,6 @@ __all__ = [
     "clarification_for_field",
     "interpret_answer",
     "select_answer_adapter",
+    "adapt_email",
+    "adapt_identifier",
 ]

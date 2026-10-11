@@ -321,6 +321,12 @@ class ClarifyAction(_AgentModel):
     field_id: str = Field(min_length=1, max_length=500)
 
 
+class ConversationAction(_AgentModel):
+    action: Literal["conversation"]
+    message: str = Field(min_length=1, max_length=4000)
+    field_id: Optional[str] = Field(default=None, max_length=500)
+
+
 class ProposeAction(_AgentModel):
     action: Literal["propose"]
     message: str = Field(min_length=1, max_length=4000)
@@ -433,6 +439,7 @@ FormAgentAction = Annotated[
     Union[
         ExplainAction,
         ClarifyAction,
+        ConversationAction,
         ProposeAction,
         SkipAction,
         NextAction,
@@ -446,6 +453,7 @@ ModelAction = Annotated[
     Union[
         ExplainAction,
         ClarifyAction,
+        ConversationAction,
         ProposeAction,
         SkipAction,
         NextAction,

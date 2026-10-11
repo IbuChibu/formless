@@ -29,6 +29,7 @@ _NAME_FRAMES = (
     ),
     re.compile(
         r"^(?:my\s+)?(?:full\s+|legal\s+|family\s+|first\s+|last\s+)?"
+        r"(?:middle\s+)?"
         r"name\s+is\s+(?P<value>.+)$",
         re.IGNORECASE,
     ),
@@ -84,6 +85,32 @@ _PHONE_FRAMES = (
         re.IGNORECASE,
     ),
 ) + _GENERAL_FRAMES
+_EMAIL_FRAMES = (
+    re.compile(
+        r"^(?:my\s+)?(?:email|e-mail)(?:\s+address)?\s+is\s+"
+        r"(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:you\s+can\s+)?(?:email|e-mail)\s+me\s+at\s+"
+        r"(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
+) + _GENERAL_FRAMES
+_IDENTIFIER_FRAMES = (
+    re.compile(
+        r"^(?:my|the)\s+(?:passport|account|application|membership|"
+        r"document|reference|identifier|id)(?:\s+(?:number|code|id))?"
+        r"\s+is\s+(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:passport|account|application|membership|document|reference|"
+        r"identifier|id)(?:\s+(?:number|code|id))?\s*[:#-]\s*"
+        r"(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
+) + _GENERAL_FRAMES
 _UNCERTAIN_PATTERN = re.compile(
     r"\b(?:maybe|perhaps|not\s+sure|unsure|i\s+think|probably|possibly)\b",
     re.IGNORECASE,
@@ -108,6 +135,14 @@ _POSTCODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 -]{0,10}[A-Za-z0-9]$")
 _PHONE_PATTERN = re.compile(
     r"^\+?[0-9() -]+(?:\s*(?:x|ext\.?|extension)\s*\d+)?$",
     re.IGNORECASE,
+)
+_EMAIL_PATTERN = re.compile(
+    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+"
+)
+_IDENTIFIER_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9 ./_-]{0,98}[A-Za-z0-9]$|^[A-Za-z0-9]$"
 )
 _STREET_CUE_PATTERN = re.compile(
     r"\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|court|ct|"
@@ -341,6 +376,51 @@ def adapt_phone(field: FormAgentField, message: str) -> AnswerAdapterResult:
     if not _PHONE_PATTERN.fullmatch(candidate) or not 7 <= len(digits) <= 18:
         return ClarificationNeeded(
             reason="I could not isolate one complete phone number safely.",
+            accepted_shape=accepted_shape,
+        )
+    return MatchedAnswer(candidate)
+
+
+def adapt_email(field: FormAgentField, message: str) -> AnswerAdapterResult:
+    accepted_shape = "Provide one complete email address."
+    candidate = preflight_message(message, accepted_shape=accepted_shape)
+    if not isinstance(candidate, str):
+        return candidate
+    candidate = strip_framing(candidate, _EMAIL_FRAMES)
+    matches = _EMAIL_PATTERN.findall(candidate)
+    if len(matches) != 1 or matches[0] != candidate:
+        reason = (
+            "Your answer contains more than one possible email address."
+            if len(matches) > 1 or " or " in candidate.casefold()
+            else "I could not isolate one complete email address safely."
+        )
+        return ClarificationNeeded(
+            reason=reason,
+            accepted_shape=accepted_shape,
+        )
+    return MatchedAnswer(candidate)
+
+
+def adapt_identifier(
+    field: FormAgentField,
+    message: str,
+) -> AnswerAdapterResult:
+    accepted_shape = (
+        "Provide the identifier exactly as shown, including any leading "
+        "zeroes, spaces, or punctuation."
+    )
+    candidate = preflight_message(message, accepted_shape=accepted_shape)
+    if not isinstance(candidate, str):
+        return candidate
+    candidate = strip_framing(candidate, _IDENTIFIER_FRAMES)
+    if " or " in candidate.casefold():
+        return ClarificationNeeded(
+            reason="Your answer contains more than one possible identifier.",
+            accepted_shape=accepted_shape,
+        )
+    if not _IDENTIFIER_PATTERN.fullmatch(candidate):
+        return ClarificationNeeded(
+            reason="I could not isolate one complete identifier safely.",
             accepted_shape=accepted_shape,
         )
     return MatchedAnswer(candidate)

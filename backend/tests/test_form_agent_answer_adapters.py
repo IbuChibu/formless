@@ -76,6 +76,11 @@ def _field(
         (_field(field_id="home", label="Home address"), "adapt_address"),
         (_field(field_id="zip", label="ZIP Code"), "adapt_postcode"),
         (_field(field_id="mobile", label="Phone number"), "adapt_phone"),
+        (_field(field_id="email", label="Email address"), "adapt_email"),
+        (
+            _field(field_id="passport", label="Passport number"),
+            "adapt_identifier",
+        ),
         (_field(field_id="notes", label="Additional details"), "adapt_free_text"),
     ],
 )
@@ -282,6 +287,34 @@ def test_postcode_and_phone_adapters_preserve_supplied_formatting() -> None:
 
     assert postcode == MatchedAnswer("SW1A  1AA")
     assert phone == MatchedAnswer("+44 (0)20 7946 0958")
+
+
+def test_email_adapter_removes_only_unambiguous_framing() -> None:
+    field = _field(field_id="email", label="Email address")
+
+    assert interpret_answer(field, "my email is jane@example.com") == (
+        MatchedAnswer("jane@example.com")
+    )
+    ambiguous = interpret_answer(
+        field,
+        "jane@example.com or jane@example.org",
+    )
+
+    assert isinstance(ambiguous, ClarificationNeeded)
+    assert "more than one" in ambiguous.reason
+
+
+def test_identifier_adapter_preserves_leading_zeroes_and_punctuation() -> None:
+    field = _field(field_id="passport", label="Passport number")
+
+    assert interpret_answer(
+        field,
+        "my passport number is 00123-AB",
+    ) == MatchedAnswer("00123-AB")
+    ambiguous = interpret_answer(field, "00123-AB or 00999-CD")
+
+    assert isinstance(ambiguous, ClarificationNeeded)
+    assert "more than one" in ambiguous.reason
 
 
 def test_questions_are_not_misread_as_factual_answers() -> None:
