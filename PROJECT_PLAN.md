@@ -74,6 +74,7 @@ Required technology:
 - current typed workflow separates conversation from validated form effects
 - Milestone 6.14 remains evaluation-gated and has not started
 - Milestone 6.15 is planned after the 6.14 evaluation decision and before voice
+- Milestone 6.16 is planned after conversational navigation and before voice
 - voice, deployment, persistence, and the later full-workflow milestone have
   not started
 
@@ -2246,6 +2247,192 @@ Do not implement:
 - new Tavily behavior, OCR, XFA, scanned-form support, or PDF filling semantics
 - authentication, persistence, browser storage, a database, Docker, or
   deployment infrastructure
+
+# Milestone 6.16 — Focused guided-interview UX
+
+Status: NOT STARTED
+
+Design reference:
+The local
+[`Milestone 6.16 guided-interview reference`](docs/milestone-6.16-guided-interview-reference.md)
+records the useful interaction pattern from the shared `Complete Form Together`
+conversation. The requirements below are the authoritative scope; the
+implementation must retain Formless's stronger proposal, confirmation,
+grounding, and PDF-safety boundaries.
+
+Problem to solve:
+The typed Form Agent can converse, propose values, progress automatically, and
+support navigation and correction, but the frontend still exposes those
+capabilities as a general chat with workflow controls. A user completing a long
+or unfamiliar form needs a calmer interview: one clearly framed question at a
+time, a short acknowledgement of what just happened, controls appropriate to
+the current field, and an obvious route to explanation, skipping, correction,
+and review.
+
+Goal:
+Turn the existing typed conversation into a focused, one-question-at-a-time
+form interview without creating a new agent path. Keep the PDF visible, make
+the active question and current section easy to understand, collect answers
+through conversation or field-appropriate controls, and preserve explicit
+review before every AI-prepared value reaches canonical field state.
+
+Target turn rhythm:
+1. Show the current section, progress, and one active question.
+2. Let the user answer naturally, use an appropriate quick control, ask for an
+   explanation, or skip the question.
+3. When an answer produces a proposal, show a compact review card containing
+   the user's answer and the value prepared for the form.
+4. Require an explicit confirm, edit, use-original, reject, or skip action.
+5. After confirmation or skip, acknowledge the resolved field briefly and ask
+   the next question in the same conversational flow.
+6. When the form is complete, provide a concise conversational summary and
+   routes to review or correct fields; leave the dedicated final-review
+   workspace to Milestone 8.
+
+Intended frontend experience:
+- the PDF preview and guided interview remain the two primary workspace areas
+- the interview emphasizes the active question rather than internal action,
+  event, phase, or field-type terminology
+- the active-question header shows available section, question or label, page
+  number, and supported-field progress from existing extracted metadata
+- only one active question is visually dominant at a time
+- text and textarea fields use the normal conversational composer
+- dropdown, radio, and checkbox fields may also expose compact quick-answer
+  controls built only from validated schema options
+- selecting a quick answer submits the same explicit Form Agent event as a
+  typed answer and does not write directly to canonical state
+- `Explain this`, `Skip for now`, and contextually valid correction or review
+  actions remain easy to reach without appending a repetitive menu to every
+  assistant message
+- assistant acknowledgements are concise and specific, such as `Added your
+  date of birth`, before the next real question is presented
+- proposal review remains visually distinct from ordinary conversation and
+  clearly states that the PDF has not changed yet
+- when visible formatting changes, the card shows `You said` and `Prepared for
+  the form` plus the existing transformation description
+- after confirmation, the existing live PDF preview updates and the interview
+  advances through the current deterministic progression path
+- the full current-form transcript remains available without competing with
+  the active question; older turns may be visually quieter or collapsible but
+  must not be discarded
+- loading, provider failure, validation failure, retry, and manual fallback are
+  presented inside the interview context without clearing the active question
+  or confirmed state
+- the existing `Edit all fields` drawer remains the fallback and stays closed
+  by default
+
+Conversation and guidance behavior:
+- the assistant asks the field's real grounded question and may add one short
+  plain-language sentence when existing context safely supports it
+- follow-up explanations answer the user's latest request before returning to
+  the question; they do not repeat the same generic workflow instructions
+- optionality, privacy warnings, requiredness, legal effect, and form purpose
+  are shown only when supplied by verified form metadata or attributable
+  guidance, never inferred merely to make the interview sound authoritative
+- users may answer in their own words; deterministic adapters and Nemotron keep
+  the existing interpretation and answer-preparation responsibilities
+- unclear answers receive a focused clarification about the missing or
+  ambiguous part while retaining the same active question
+- the interview may offer schema-derived choices but must not reduce free-text
+  conversation to a sequence of rigid buttons
+- completion summaries and field-status answers come from canonical confirmed,
+  skipped, proposed, and unanswered state rather than model memory
+
+Architecture boundaries:
+- continue using `POST /agent/respond` as the only Form Agent conversation
+  endpoint
+- reuse the existing `assistant_message`, typed `effect`, and canonical
+  `conversation_state` contract; add contract fields only if implementation
+  review proves existing extracted metadata cannot support the presentation
+- keep one shared frontend field state for conversation, quick controls, the
+  manual drawer, and PDF filling
+- quick controls dispatch events through the same validated path and never
+  mutate confirmed values directly
+- Nemotron continues to control natural wording only for model-handled turns;
+  deterministic code remains authoritative over tools, navigation, proposals,
+  confirmation, skipping, canonical values, and PDF updates
+- the Form Agent continues to return messages and typed effects and never
+  calls the PDF Service
+- the PDF Service and existing live-preview filling flow remain unchanged
+- do not add a component framework or state-management library solely for this
+  milestone
+
+Representative experience:
+
+```text
+Personal details · Question 4 of 12
+Assistant: What is your date of birth? Please use day, month, and year.
+
+User: 17 October 1986
+
+Assistant: I understood your date of birth and prepared it in the format this
+form requests.
+
+You said: 17 October 1986
+Prepared for the form: 17/10/1986
+Change made: formatted as DD/MM/YYYY
+[Confirm] [Edit] [Use original] [Reject]
+
+User confirms.
+
+Assistant: Added your date of birth. Next, when did you begin living at your
+current address?
+```
+
+Acceptance criteria:
+- the interview presents one active supported question as the dominant task
+- available section, page, and supported-field progress are shown from existing
+  canonical or extracted metadata
+- the assistant's conversational message is primary and internal action or
+  phase names are not shown as chat content
+- text answers can be entered naturally through the existing typed composer
+- fields with validated finite options expose accessible quick-answer controls
+  without preventing a typed response
+- quick answers use the same Form Agent request, validation, proposal, and
+  confirmation flow as typed answers
+- answering through either input path cannot update a confirmed value or PDF
+  before explicit confirmation
+- every pending proposal identifies the active question and clearly says the
+  value is awaiting review
+- visible transformations show the original and prepared values plus the
+  transformation description
+- confirm, edit, use-original when valid, reject, and skip controls appear only
+  when allowed by the current typed state
+- confirmation and skip produce a concise acknowledgement and display the next
+  unanswered question without requiring a separate Continue action
+- explanation and clarification turns retain the current question and do not
+  create empty proposal cards or duplicate generic action menus
+- loading, retry, provider, and validation states preserve the active question,
+  transcript, pending proposal, and confirmed field state
+- the complete current-form transcript remains accessible even though the
+  active question is visually emphasized
+- manual controls remain available in the collapsed `Edit all fields` drawer
+  and continue to share canonical state
+- the PDF remains visible and confirmed answers continue to update its live
+  preview through the existing filling flow
+- reaching `form_complete` shows a concise canonical summary and offers review
+  or correction through Milestone 6.15 behavior without introducing the
+  dedicated Milestone 8 review workspace
+- keyboard focus, control labels, and status announcements support the complete
+  typed interview and explicit-confirmation flow
+- frontend production build and existing backend, PDF, Form Agent, safety, and
+  transcript tests pass
+
+Do not implement:
+- voice input, speech recognition, or speech output
+- automatic confirmation, conversational confirmation, or silent PDF updates
+- a second conversation endpoint, voice-specific agent, second model, model
+  cascade, multi-agent workflow, or agent framework
+- direct editing, field overlays, highlighting, or automatic page navigation
+  on the rendered PDF
+- the dedicated final-review workspace, PDF field clicking, or geometry work
+  planned for Milestone 8
+- invented optionality, privacy claims, form purposes, requirements, legal or
+  eligibility guidance, personal facts, or field values
+- changes to PDF extraction or filling semantics
+- OCR, XFA, scanned-form support, online forms, or new PDF compatibility
+- unbounded backend history, server persistence, browser storage,
+  authentication, a database, Docker, or deployment infrastructure
 
 # Milestone 7 — Voice
 
