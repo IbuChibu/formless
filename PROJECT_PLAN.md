@@ -24,9 +24,13 @@ The intended user experience is:
 3. A voice-first assistant guides the user through one relevant question at a time.
 4. The user can speak or type, ask for an explanation, skip a question, or correct an answer.
 5. The assistant converts the user's own answer into a structured proposed field update.
-6. The user confirms or edits every AI-proposed factual value before it is applied.
-7. The confirmed value updates the same live PDF preview used by manual editing.
-8. The user reviews unanswered and completed fields before downloading the final PDF.
+6. When safe formatting changes visible text, the interface shows the user's
+   original answer beside the value prepared for the form and explains the
+   transformation.
+7. The user confirms, edits, uses the original, or rejects every AI-proposed
+   factual value before it is applied.
+8. The confirmed value updates the same live PDF preview used by manual editing.
+9. The user reviews unanswered and completed fields before downloading the final PDF.
 
 Final interface hierarchy:
 - primary: voice and text conversation with the form assistant
@@ -45,6 +49,9 @@ Core safety and state rules:
 - an explicit manual or direct-on-form edit counts as user confirmation
 - only confirmed values are sent to the PDF filling service
 - the Form Agent returns structured proposals and never edits PDF bytes directly
+- the assistant's natural-language message is separate from the typed effect
+  that may change conversation or form state
+- safe formatting preserves the original answer and remains reviewable
 - the PDF Service remains independent from AI and voice functionality
 
 ## Hackathon
@@ -60,6 +67,14 @@ Deadline:
 Required technology:
 - NVIDIA Nemotron
 - Nebius Token Factory
+
+## Current implementation status
+
+- completed through Milestone 6.13.9
+- current typed workflow separates conversation from validated form effects
+- Milestone 6.14 remains evaluation-gated and has not started
+- voice, deployment, persistence, and the later full-workflow milestone have
+  not started
 
 ---
 
@@ -1375,6 +1390,21 @@ Do not implement:
 
 Status: COMPLETE
 
+Live baseline recorded 11 October 2026 using
+`nvidia/Nemotron-3_5-Lightning`:
+- 5 fixed scenarios and 8 total model calls
+- 100% valid-response and directness rates
+- 80% contextual-relevance and useful-next-step rates
+- 0% repeated-response rate
+- 100% material-rephrasing and progressive-simplification rates
+- 33.3% conversation-repair success rate
+- 367 ms average model latency
+
+The remaining failures were one follow-up that lost field context and one
+continued-confusion response without a useful next step. These results are a
+baseline for later evaluation; they do not authorize Milestone 6.14 by
+themselves.
+
 Problem to solve:
 The assistant now routes ordinary wording questions to Nemotron with bounded
 field and conversation context, but repeated requests such as `Explain that
@@ -1542,7 +1572,26 @@ Do not implement:
 
 # Milestone 6.13.9 — Conversational response contract and safe answer polishing
 
-Status: NOT STARTED
+Status: COMPLETE
+
+Verified implementation outcome:
+- the public response contains `assistant_message`, one validated typed
+  `effect`, canonical conversation state, and optional guidance metadata
+- proposal effects preserve original and prepared values plus a concise
+  transformation description
+- the frontend presents conversation as the primary message and displays a
+  separate proposal review card with Confirm, Edit, Use original when valid,
+  Reject, and Skip controls
+- deterministic preparation covers existing date, number, money, dropdown,
+  and checkbox normalization plus reviewable name capitalization and
+  presentation-only textarea polishing
+- relevant confirmed answers enter bounded working memory only when the user
+  explicitly refers to their field context
+- offline transcript evaluation reports 90% prepared-value acceptance, 10%
+  user edits, an 18.2% transformed-proposal rate, and 0% unsafe
+  transformations while retaining zero invalid actions, invalid proposals,
+  confirmation-boundary failures, invented facts, and invented purposes
+- 275 backend tests and the frontend production build pass
 
 Problem to solve:
 The current Form Agent requires every turn to be represented as one workflow

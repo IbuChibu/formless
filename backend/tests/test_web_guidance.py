@@ -1103,11 +1103,14 @@ def test_endpoint_returns_typed_unavailable_web_guidance(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["action"]["action"] == "explain"
+    assert payload["effect"] == {
+        "effect": "none",
+        "field_id": "family_name",
+    }
     assert payload["web_guidance"]["status"] == "unavailable"
     assert payload["web_guidance"]["sources"] == []
     assert expected_notice in payload["web_guidance"]["notice"]
     assert "couldn't check live guidance right now" in (
-        payload["action"]["message"]
+        payload["assistant_message"]
     )
     assert nemotron.calls == []

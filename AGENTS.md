@@ -8,6 +8,7 @@ confusing PDF forms.
 Frontend: React + TypeScript + Vite
 Backend: Python + FastAPI
 AI: NVIDIA Nemotron via Nebius Token Factory
+Web guidance: Tavily Search API
 PDF: pypdf / PyMuPDF
 
 ## Rules

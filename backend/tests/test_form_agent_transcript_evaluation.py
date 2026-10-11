@@ -70,6 +70,10 @@ def test_offline_transcripts_cover_complete_multiform_conversations() -> None:
     assert report.metrics.invalid_action_rate == 0.0
     assert report.metrics.invalid_proposal_rate == 0.0
     assert report.metrics.confirmation_boundary_failure_rate == 0.0
+    assert report.metrics.prepared_value_acceptance_rate == 0.9
+    assert report.metrics.user_edit_rate == 0.1
+    assert report.metrics.transformed_proposal_rate == 0.182
+    assert report.metrics.unsafe_transformation_rate == 0.0
     assert report.metrics.invented_fact_failures == 0
     assert report.metrics.invented_purpose_failures == 0
     assert report.metrics.total_model_calls is None

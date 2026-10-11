@@ -122,3 +122,50 @@ nearby text geometry and machine-oriented export names. A reviewed,
 version-specific mapping is deterministic, testable, and safer than asking an
 LLM to reinterpret the form or broadening geometry heuristics for unrelated
 PDFs.
+
+---
+
+## 2026-10-11 — Conversation text is separate from form effects
+
+Decision:
+The public Form Agent response contains a natural `assistant_message` and one
+closed typed `effect`. Ordinary conversation uses a non-mutating effect;
+proposals, confirmations, rejections, skips, field selection, and completion
+remain explicit validated effects with canonical conversation state.
+
+Reason:
+The assistant should be able to converse naturally without making every useful
+sentence double as a state-machine command. Keeping effects typed preserves the
+existing safety boundary: model wording cannot mutate confirmed values or PDF
+bytes.
+
+---
+
+## 2026-10-11 — Answer preparation preserves the original candidate
+
+Decision:
+Every prepared proposal retains the user's original candidate, the value
+prepared for the form, and a concise transformation description when the two
+differ. Deterministic field adapters run first. Names and identity data never
+receive speculative spelling correction, and every visible transformation
+requires explicit review.
+
+Reason:
+Formatting dates, numbers, options, capitalization, and light prose
+presentation can reduce user effort, but silently rewriting factual information
+would undermine trust and could change a legal or financial form answer.
+
+---
+
+## 2026-10-11 — Stronger-model fallback remains evaluation-gated
+
+Decision:
+Formless remains a single-agent, single-primary-model system until transcript
+and live evaluations identify a repeatable failure class that deterministic
+adapters and prompt improvements cannot address. A fallback model, if later
+justified, will be called only for that bounded class of ambiguity.
+
+Reason:
+Calling multiple models for ordinary turns would add latency, cost, and failure
+modes without demonstrated benefit. The current deterministic authority over
+state, tools, validation, and confirmation remains unchanged.

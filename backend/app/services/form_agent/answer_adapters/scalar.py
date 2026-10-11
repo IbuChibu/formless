@@ -49,9 +49,9 @@ def adapt_checkbox(field: FormAgentField, message: str) -> AnswerAdapterResult:
     if not isinstance(candidate, str):
         return candidate
     if _POSITIVE_CHECKBOX_PATTERN.fullmatch(candidate):
-        return MatchedAnswer(True)
+        return MatchedAnswer(True, original_value=candidate)
     if _NEGATIVE_CHECKBOX_PATTERN.fullmatch(candidate):
-        return MatchedAnswer(False)
+        return MatchedAnswer(False, original_value=candidate)
     if _UNCERTAIN_CHOICE_PATTERN.search(candidate):
         return ClarificationNeeded(
             reason="I could not tell whether the box should be checked.",
@@ -87,7 +87,7 @@ def adapt_dropdown(field: FormAgentField, message: str) -> AnswerAdapterResult:
         if _normalize_words(option) == normalized_candidate
     ]
     if len(exact_matches) == 1:
-        return MatchedAnswer(exact_matches[0])
+        return MatchedAnswer(exact_matches[0], original_value=candidate)
 
     padded_candidate = f" {normalized_candidate} "
     mentioned_matches = [
@@ -96,7 +96,10 @@ def adapt_dropdown(field: FormAgentField, message: str) -> AnswerAdapterResult:
         if f" {_normalize_words(option)} " in padded_candidate
     ]
     if len(mentioned_matches) == 1:
-        return MatchedAnswer(mentioned_matches[0])
+        return MatchedAnswer(
+            mentioned_matches[0],
+            original_value=candidate,
+        )
     if len(mentioned_matches) > 1:
         return ClarificationNeeded(
             reason="Your answer could refer to more than one available option.",
@@ -147,7 +150,7 @@ def adapt_number(
             reason="I could not safely convert that value to a stored number.",
             accepted_shape=accepted_shape,
         )
-    return MatchedAnswer(normalized)
+    return MatchedAnswer(normalized, original_value=matches[0].strip())
 
 
 def _normalize_words(value: str) -> str:

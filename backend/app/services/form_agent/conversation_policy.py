@@ -8,6 +8,7 @@ from typing import Literal, Optional
 
 from pydantic import TypeAdapter
 
+from .answer_preparation import prepare_proposal_action
 from .answer_adapters import (
     AnswerAdapterResult,
     ClarificationNeeded,
@@ -21,6 +22,8 @@ from .models import (
     ConfirmEditEvent,
     ConfirmEvent,
     ConfirmedAction,
+    ConfirmedEffect,
+    CompletedEffect,
     ConversationPhase,
     ConversationState,
     ExplainAction,
@@ -33,13 +36,18 @@ from .models import (
     FormAgentTransitionError,
     MessageEvent,
     NextAction,
+    NoFormEffect,
     OfficialGuidanceCitation,
     PendingProposal,
+    ProposalEffect,
     ProposeAction,
     RejectEvent,
     RejectedAction,
+    RejectedEffect,
     SkipAction,
+    SkippedEffect,
     SkipEvent,
+    FieldSelectedEffect,
     WebGuidanceMetadata,
     field_question,
     request_active_field_id,
@@ -533,11 +541,15 @@ def deterministic_action(
         return None
 
     return normalize_action_message(
-        ProposeAction(
-            action="propose",
-            message="Proposal awaiting confirmation.",
-            field_id=active_field.id,
-            value=adapter_result.value,
+        prepare_proposal_action(
+            ProposeAction(
+                action="propose",
+                message="Proposal awaiting confirmation.",
+                field_id=active_field.id,
+                value=adapter_result.value,
+                original_value=adapter_result.original_value,
+            ),
+            request,
         ),
         request,
     )
@@ -611,9 +623,10 @@ def response_for_action(
     ):
         raise FormAgentError("Form Agent changed the active field unexpectedly")
 
-    return _RESPONSE_ADAPTER.validate_python(
+    response = _RESPONSE_ADAPTER.validate_python(
         {
-            "action": action.model_dump(),
+            "assistant_message": action.message,
+            "effect": _effect_for_action(action),
             "conversation_state": state.model_dump(),
             "guidance": [citation.model_dump() for citation in guidance],
             "web_guidance": (
@@ -623,6 +636,35 @@ def response_for_action(
             ),
         }
     )
+    return response.bind_internal_action(action)
+
+
+def _effect_for_action(action: FormAgentAction) -> dict[str, object]:
+    if isinstance(action, ProposeAction):
+        return ProposalEffect(
+            field_id=action.field_id,
+            original_value=(
+                action.original_value
+                if action.original_value is not None
+                else action.value
+            ),
+            prepared_value=action.value,
+            transformation=action.transformation,
+        ).model_dump()
+    if isinstance(action, ConfirmedAction):
+        return ConfirmedEffect(
+            field_id=action.field_id,
+            value=action.value,
+        ).model_dump()
+    if isinstance(action, RejectedAction):
+        return RejectedEffect(field_id=action.field_id).model_dump()
+    if isinstance(action, SkipAction):
+        return SkippedEffect(field_id=action.field_id).model_dump()
+    if isinstance(action, NextAction):
+        if action.field_id is None:
+            return CompletedEffect().model_dump()
+        return FieldSelectedEffect(field_id=action.field_id).model_dump()
+    return NoFormEffect(field_id=action.field_id).model_dump()
 
 
 def insufficient_guidance_action(
@@ -782,15 +824,25 @@ def normalize_action_message(
             if action.value is False
             else f'"{action.value}"'
         )
-        return action.model_copy(
-            update={
-                "message": (
-                    f'Got it — for “{question}”, I understood your answer '
-                    f"as {display_value}. It is awaiting your confirmation "
-                    "and has not been applied to the form."
-                )
-            }
-        )
+        if action.transformation:
+            original_display = format_agent_value(
+                action.original_value
+                if action.original_value is not None
+                else action.value
+            )
+            message = (
+                f'For “{question}”, I understood your answer as '
+                f"{original_display}. {action.transformation} I prepared "
+                f"{display_value} for your review. It is awaiting your "
+                "confirmation and has not been applied to the form."
+            )
+        else:
+            message = (
+                f'Got it — for “{question}”, I understood your answer '
+                f"as {display_value}. It is awaiting your confirmation "
+                "and has not been applied to the form."
+            )
+        return action.model_copy(update={"message": message})
 
     if isinstance(action, SkipAction):
         field = next(

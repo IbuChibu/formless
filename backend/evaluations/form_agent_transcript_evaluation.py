@@ -37,6 +37,7 @@ from app.services.form_agent.answer_adapters import (
     MatchedAnswer,
     NotApplicable,
 )
+from app.services.form_agent.answer_preparation import preparation_is_safe
 from app.services.form_agent.value_normalizer import infer_unambiguous_answer
 from app.services.nemotron_service import (
     NemotronConfigurationError,
@@ -93,6 +94,10 @@ class TranscriptEvaluationMetrics:
     invalid_action_rate: float
     invalid_proposal_rate: float
     confirmation_boundary_failure_rate: float
+    prepared_value_acceptance_rate: float
+    user_edit_rate: float
+    transformed_proposal_rate: float
+    unsafe_transformation_rate: float
     invented_fact_failures: int
     invented_purpose_failures: int
     total_model_calls: Optional[int]
@@ -629,6 +634,11 @@ async def run_transcript_evaluation(
     confirmed_field_turn_counts: list[int] = []
     confirmed_fields = 0
     first_attempt_accepted_proposals = 0
+    prepared_value_confirmations = 0
+    user_edits = 0
+    proposal_count = 0
+    transformed_proposal_count = 0
+    unsafe_transformation_count = 0
     total_model_calls = 0
     model_latencies_ms: list[float] = []
     total_evaluated_fields = 0
@@ -778,9 +788,31 @@ async def run_transcript_evaluation(
                     )
                 )
             if isinstance(action, ProposeAction):
+                proposal_count += 1
                 proposal_counts[action.field_id] = (
                     proposal_counts.get(action.field_id, 0) + 1
                 )
+                if action.transformation is not None:
+                    transformed_proposal_count += 1
+                    original_value = (
+                        action.original_value
+                        if action.original_value is not None
+                        else action.value
+                    )
+                    if not preparation_is_safe(
+                        _field_by_id(fields, action.field_id),
+                        original_value,
+                        action.value,
+                    ):
+                        unsafe_transformation_count += 1
+                        failures.append(
+                            _failure(
+                                transcript,
+                                turn_number,
+                                turn,
+                                "proposal preparation changed factual meaning",
+                            )
+                        )
                 if (
                     response.conversation_state.phase
                     != "awaiting_confirmation"
@@ -805,6 +837,8 @@ async def run_transcript_evaluation(
                 )
 
             if isinstance(action, ConfirmedAction):
+                prepared_value_confirmations += int(event_type == "confirm")
+                user_edits += int(event_type == "confirm_edit")
                 field = _field_by_id(fields, action.field_id)
                 if field.status != "unanswered":
                     confirmation_boundary_failures += 1
@@ -944,6 +978,19 @@ async def run_transcript_evaluation(
         confirmation_boundary_failure_rate=_rate(
             confirmation_boundary_failures,
             total_turns,
+        ),
+        prepared_value_acceptance_rate=_rate(
+            prepared_value_confirmations,
+            confirmed_fields,
+        ),
+        user_edit_rate=_rate(user_edits, confirmed_fields),
+        transformed_proposal_rate=_rate(
+            transformed_proposal_count,
+            proposal_count,
+        ),
+        unsafe_transformation_rate=_rate(
+            unsafe_transformation_count,
+            transformed_proposal_count,
         ),
         invented_fact_failures=invented_fact_failures,
         invented_purpose_failures=invented_purpose_failures,

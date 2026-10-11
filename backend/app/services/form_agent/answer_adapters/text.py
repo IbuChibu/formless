@@ -47,6 +47,10 @@ _FREE_TEXT_FRAMES = (
 ) + _GENERAL_FRAMES
 _DATE_FRAMES = (
     re.compile(
+        r"^i\s+was\s+born(?:\s+on)?\s+(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(
         r"^(?:my\s+)?(?:date|date\s+of\s+birth|birth\s+date)\s+is\s+"
         r"(?P<value>.+)$",
         re.IGNORECASE,
@@ -202,7 +206,7 @@ def adapt_date(field: FormAgentField, message: str) -> AnswerAdapterResult:
             if date_format == "day_first"
             else parsed.strftime("%m/%d/%Y")
         )
-        return MatchedAnswer(formatted)
+        return MatchedAnswer(formatted, original_value=candidate)
 
     if date_format == "month_year":
         match = _MONTH_YEAR_PATTERN.fullmatch(candidate)
@@ -224,7 +228,10 @@ def adapt_date(field: FormAgentField, message: str) -> AnswerAdapterResult:
                 reason="That month and year are not a valid calendar value.",
                 accepted_shape=accepted_shape,
             )
-        return MatchedAnswer(parsed.strftime("%m/%Y"))
+        return MatchedAnswer(
+            parsed.strftime("%m/%Y"),
+            original_value=candidate,
+        )
 
     if _ISO_DATE_PATTERN.fullmatch(candidate):
         try:

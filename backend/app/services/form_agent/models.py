@@ -7,6 +7,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     StrictBool,
     StrictStr,
     model_validator,
@@ -325,6 +326,12 @@ class ProposeAction(_AgentModel):
     message: str = Field(min_length=1, max_length=4000)
     field_id: str = Field(min_length=1, max_length=500)
     value: AgentFieldValue
+    original_value: Optional[AgentFieldValue] = None
+    transformation: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=500,
+    )
 
 
 class SkipAction(_AgentModel):
@@ -447,14 +454,87 @@ ModelAction = Annotated[
 ]
 
 
+class NoFormEffect(_AgentModel):
+    effect: Literal["none"] = "none"
+    field_id: Optional[str] = Field(default=None, max_length=500)
+
+
+class ProposalEffect(_AgentModel):
+    effect: Literal["proposal"] = "proposal"
+    field_id: str = Field(min_length=1, max_length=500)
+    original_value: AgentFieldValue
+    prepared_value: AgentFieldValue
+    transformation: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=500,
+    )
+
+
+class ConfirmedEffect(_AgentModel):
+    effect: Literal["confirmed"] = "confirmed"
+    field_id: str = Field(min_length=1, max_length=500)
+    value: AgentFieldValue
+
+
+class RejectedEffect(_AgentModel):
+    effect: Literal["rejected"] = "rejected"
+    field_id: str = Field(min_length=1, max_length=500)
+
+
+class SkippedEffect(_AgentModel):
+    effect: Literal["skipped"] = "skipped"
+    field_id: str = Field(min_length=1, max_length=500)
+
+
+class FieldSelectedEffect(_AgentModel):
+    effect: Literal["field_selected"] = "field_selected"
+    field_id: str = Field(min_length=1, max_length=500)
+
+
+class CompletedEffect(_AgentModel):
+    effect: Literal["completed"] = "completed"
+
+
+FormAgentEffect = Annotated[
+    Union[
+        NoFormEffect,
+        ProposalEffect,
+        ConfirmedEffect,
+        RejectedEffect,
+        SkippedEffect,
+        FieldSelectedEffect,
+        CompletedEffect,
+    ],
+    Field(discriminator="effect"),
+]
+
+
 class FormAgentResponse(_AgentModel):
-    action: FormAgentAction
+    assistant_message: str = Field(min_length=1, max_length=4000)
+    effect: FormAgentEffect
     conversation_state: ConversationState
     guidance: list[OfficialGuidanceCitation] = Field(
         default_factory=list,
         max_length=2,
     )
     web_guidance: Optional[WebGuidanceMetadata] = None
+
+    _action: Optional[FormAgentAction] = PrivateAttr(default=None)
+
+    @property
+    def action(self) -> FormAgentAction:
+        """Internal compatibility view; it is not part of the API payload."""
+        if self._action is None:
+            raise FormAgentError("Form Agent response has no internal action")
+        return self._action
+
+    def bind_internal_action(
+        self,
+        action: FormAgentAction,
+    ) -> FormAgentResponse:
+        self._action = action
+        return self
 
 
 def request_active_field_id(request: FormAgentRequest) -> Optional[str]:

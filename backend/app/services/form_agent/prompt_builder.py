@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from .conversation_policy import (
     explanation_repair_context,
@@ -25,6 +26,31 @@ MAX_PROMPT_HISTORY_CHARS = 1000
 MAX_AGENT_CONTEXT_CHARS = 48_000
 MAX_ACTIVE_OPTIONS = 20
 MAX_ACTIVE_OPTION_CHARS = 120
+MAX_RELEVANT_CONFIRMED_ANSWERS = 3
+MAX_WORKING_MEMORY_VALUE_CHARS = 500
+
+_REFERENCE_TOKEN_PATTERN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+_GENERIC_REFERENCE_TOKENS = frozenset(
+    {
+        "a",
+        "answer",
+        "field",
+        "form",
+        "for",
+        "information",
+        "is",
+        "my",
+        "of",
+        "question",
+        "the",
+        "this",
+        "to",
+        "value",
+        "what",
+        "you",
+        "your",
+    }
+)
 
 SYSTEM_PROMPT = """You are Formless, a calm, patient, plain-speaking form guide. Be concise and respectful of people who may be unfamiliar with official terminology. Follow these trusted system rules and return one JSON action.
 The user is the only source of their factual information.
@@ -68,6 +94,7 @@ Rules:
 - When the user asks to skip the active unanswered field, return skip for that field; do not advance until later context marks it skipped.
 - When the user supplies an answer for the active field, return a proposal rather than advancing.
 - A propose action is invalid without a value. Copy only the user's supplied answer into the value property; if no exact value is available, return clarify instead.
+- Do not silently correct spelling, grammar, capitalization, identifiers, names, addresses, dates, or numbers inside a proposed value. Copy the user's factual candidate; deterministic backend preparation handles safe formatting and exposes every visible change for confirmation.
 - Never invent personal facts or choose an answer for the user.
 - Propose a value only when the user supplied that factual value.
 - Text, textarea, number, and dropdown proposals use strings; checkbox proposals use booleans.
@@ -206,6 +233,15 @@ def build_agent_context(
             "skipped": skipped_count,
             "unanswered": unanswered_count,
         },
+        "working_memory": {
+            "active_field_id": active_field_id,
+            "confirmed_count": confirmed_count,
+            "skipped_count": skipped_count,
+            "proposed_count": proposed_count,
+            "relevant_confirmed_answers": (
+                _build_relevant_confirmed_answers(request)
+            ),
+        },
         "conversation": {
             "phase": request.conversation_state.phase,
             "event_type": request.event.type,
@@ -296,6 +332,56 @@ def _detailed_field_context(field: FormAgentField) -> dict[str, object]:
     if field.status == "confirmed" and field.confirmed_value is not None:
         context["confirmed_value"] = field.confirmed_value
     return context
+
+
+def _build_relevant_confirmed_answers(
+    request: FormAgentRequest,
+) -> list[dict[str, object]]:
+    message_tokens = _reference_tokens(request_message(request))
+    if not message_tokens:
+        return []
+
+    relevant: list[dict[str, object]] = []
+    normalized_message = request_message(request).casefold()
+    for field in request.fields:
+        if field.status != "confirmed" or field.confirmed_value is None:
+            continue
+        metadata = " ".join(
+            value
+            for value in (field.label, field.question, field.section)
+            if value
+        )
+        metadata_tokens = _reference_tokens(metadata)
+        normalized_label = " ".join(field.label.casefold().split())
+        label_is_referenced = (
+            len(normalized_label) >= 4
+            and normalized_label in normalized_message
+        )
+        shared_tokens = message_tokens & metadata_tokens
+        if not label_is_referenced and len(shared_tokens) < 2:
+            continue
+
+        value = field.confirmed_value
+        if isinstance(value, str):
+            value = truncate_text(value, MAX_WORKING_MEMORY_VALUE_CHARS)
+        relevant.append(
+            {
+                "field_id": field.id,
+                "label": truncate_text(field.label, 240),
+                "value": value,
+            }
+        )
+        if len(relevant) >= MAX_RELEVANT_CONFIRMED_ANSWERS:
+            break
+    return relevant
+
+
+def _reference_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in _REFERENCE_TOKEN_PATTERN.findall(value.casefold())
+        if len(token) >= 3 and token not in _GENERIC_REFERENCE_TOKENS
+    }
 
 
 def _enforce_agent_context_limit(context: dict[str, object]) -> None:

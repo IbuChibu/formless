@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Union
 
 from ..value_normalizer import FormFieldValue
@@ -9,7 +9,12 @@ from ..value_normalizer import FormFieldValue
 @dataclass(frozen=True)
 class MatchedAnswer:
     value: FormFieldValue
+    original_value: FormFieldValue | None = field(default=None, compare=False)
     kind: Literal["matched"] = "matched"
+
+    def __post_init__(self) -> None:
+        if self.original_value is None:
+            object.__setattr__(self, "original_value", self.value)
 
 
 @dataclass(frozen=True)

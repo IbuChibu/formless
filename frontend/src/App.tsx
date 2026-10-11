@@ -9,14 +9,14 @@ type PreviewStatus = "idle" | "pending" | "updating" | "ready" | "error";
 type AgentStatus = "idle" | "loading" | "error";
 type AgentActivity = "responding" | "guidance";
 type FieldValue = string | boolean;
-type AgentActionKind =
-  | "explain"
-  | "clarify"
-  | "propose"
-  | "skip"
-  | "next"
+type AgentEffectKind =
+  | "none"
+  | "proposal"
   | "confirmed"
-  | "rejected";
+  | "rejected"
+  | "skipped"
+  | "field_selected"
+  | "completed";
 type AgentFieldStatus = "unanswered" | "confirmed" | "skipped";
 type ConversationPhase =
   | "asking"
@@ -156,35 +156,34 @@ type AgentEvent =
   | { type: "reject" }
   | { type: "skip"; field_id: string };
 
-type AgentAction =
+type AgentEffect =
   | {
-      action: Exclude<
-        AgentActionKind,
-        "propose" | "next" | "confirmed"
-      >;
-      message: string;
-      field_id: string;
-    }
-  | {
-      action: "propose";
-      message: string;
-      field_id: string;
-      value: FieldValue;
-    }
-  | {
-      action: "next";
-      message: string;
+      effect: "none";
       field_id: string | null;
     }
   | {
-      action: "confirmed";
-      message: string;
+      effect: "proposal";
+      field_id: string;
+      original_value: FieldValue;
+      prepared_value: FieldValue;
+      transformation: string | null;
+    }
+  | {
+      effect: "confirmed";
       field_id: string;
       value: FieldValue;
+    }
+  | {
+      effect: "rejected" | "skipped" | "field_selected";
+      field_id: string;
+    }
+  | {
+      effect: "completed";
     };
 
 type AgentResponse = {
-  action: AgentAction;
+  assistant_message: string;
+  effect: AgentEffect;
   conversation_state: ConversationState;
   guidance: OfficialGuidanceCitation[];
   web_guidance: WebGuidanceMetadata | null;
@@ -192,9 +191,8 @@ type AgentResponse = {
 
 type ConversationMessage = AgentHistoryMessage & {
   id: number;
-  action?: AgentActionKind;
+  effect?: AgentEffect;
   fieldId?: string | null;
-  proposedValue?: FieldValue;
   guidance?: OfficialGuidanceCitation[];
   webGuidance?: WebGuidanceMetadata | null;
   webGuidanceRetry?: AgentRequest;
@@ -247,6 +245,8 @@ function App() {
   const [isEditingProposal, setIsEditingProposal] = useState(false);
   const [proposalEditValue, setProposalEditValue] =
     useState<FieldValue>("");
+  const [pendingProposalDetails, setPendingProposalDetails] =
+    useState<Extract<AgentEffect, { effect: "proposal" }> | null>(null);
   const [manualDrawerOpen, setManualDrawerOpen] = useState(false);
 
   const originalUrlRef = useRef<string | null>(null);
@@ -413,6 +413,7 @@ function App() {
     setFailedAgentRequest(null);
     setIsEditingProposal(false);
     setProposalEditValue("");
+    setPendingProposalDetails(null);
     setManualDrawerOpen(false);
     agentMessageIdRef.current = 0;
     setExtractionStatus("loading");
@@ -519,6 +520,7 @@ function App() {
   function resetProposalEditor() {
     setIsEditingProposal(false);
     setProposalEditValue("");
+    setPendingProposalDetails(null);
   }
 
   function confirmPendingProposal(value: FieldValue) {
@@ -554,6 +556,13 @@ function App() {
       return;
     }
     sendAgentEvent({ type: "reject" });
+  }
+
+  function useOriginalProposal() {
+    if (!pendingProposalDetails) {
+      return;
+    }
+    confirmPendingProposal(pendingProposalDetails.original_value);
   }
 
   function skipPendingProposal() {
@@ -605,7 +614,11 @@ function App() {
         await response.json(),
         request.fields,
       );
-      const { action, conversation_state: conversationState } = agentResponse;
+      const {
+        assistant_message: assistantMessage,
+        effect,
+        conversation_state: conversationState,
+      } = agentResponse;
 
       if (controller.signal.aborted) {
         return;
@@ -613,9 +626,9 @@ function App() {
 
       appendAgentMessage({
         role: "assistant",
-        content: action.message,
-        action: action.action,
-        fieldId: action.field_id,
+        content: assistantMessage,
+        effect,
+        fieldId: "field_id" in effect ? effect.field_id : null,
         guidance: agentResponse.guidance,
         webGuidance: agentResponse.web_guidance,
         ...(["empty", "unavailable"].includes(
@@ -623,31 +636,29 @@ function App() {
         )
           ? { webGuidanceRetry: request }
           : {}),
-        ...(action.action === "propose"
-          ? { proposedValue: action.value }
-          : {}),
       });
 
       setAgentConversationState(conversationState);
 
-      if (action.action === "propose") {
-        setProposalEditValue(action.value);
+      if (effect.effect === "proposal") {
+        setProposalEditValue(effect.prepared_value);
+        setPendingProposalDetails(effect);
         setIsEditingProposal(false);
-      } else if (action.action === "confirmed") {
-        writeFieldValue(action.field_id, action.value, true);
+      } else if (effect.effect === "confirmed") {
+        writeFieldValue(effect.field_id, effect.value, true);
         resetProposalEditor();
-      } else if (action.action === "skip") {
+      } else if (effect.effect === "skipped") {
         const skippedField = request.fields.find(
-          (field) => field.id === action.field_id,
+          (field) => field.id === effect.field_id,
         );
         if (skippedField?.status === "unanswered") {
           setSkippedFieldIds((current) =>
-            new Set(current).add(action.field_id),
+            new Set(current).add(effect.field_id),
           );
         }
         setConfirmedFieldIds((current) => {
           const next = new Set(current);
-          next.delete(action.field_id);
+          next.delete(effect.field_id);
           return next;
         });
         resetProposalEditor();
@@ -778,9 +789,25 @@ function App() {
     pendingProposalPdfField && isExplainableField(pendingProposalPdfField)
       ? pendingProposalPdfField
       : null;
+  const activeProposalDetails =
+    pendingProposalDetails &&
+    pendingProposalDetails.field_id === pendingProposal?.field_id &&
+    pendingProposalDetails.prepared_value === pendingProposal?.value
+      ? pendingProposalDetails
+      : null;
   const canApplyEditedProposal = Boolean(
     pendingProposalField &&
       isAgentValueCompatible(pendingProposalField, proposalEditValue),
+  );
+  const canUseOriginalProposal = Boolean(
+    pendingProposalField &&
+      activeProposalDetails &&
+      activeProposalDetails.original_value !==
+        activeProposalDetails.prepared_value &&
+      isAgentValueCompatible(
+        pendingProposalField,
+        activeProposalDetails.original_value,
+      ),
   );
   const canUseAgent =
     extractionStatus === "ready" && currentAgentFields.length > 0;
@@ -1073,7 +1100,7 @@ function App() {
                       const canOfferExplanationActions =
                         isLatestMessage &&
                         message.role === "assistant" &&
-                        message.action === "explain" &&
+                        message.effect?.effect === "none" &&
                         message.fieldId === agentActiveFieldId &&
                         activeAgentFieldState?.status === "unanswered" &&
                         pendingProposal === null;
@@ -1083,7 +1110,7 @@ function App() {
                           className={[
                             "agent-message",
                             message.role,
-                            message.action ?? "",
+                            message.effect?.effect ?? "",
                           ]
                             .filter(Boolean)
                             .join(" ")}
@@ -1097,10 +1124,12 @@ function App() {
                             </strong>
                             <div>
                               {message.role === "assistant" &&
-                              message.action &&
-                              message.action !== "explain" ? (
+                              message.effect &&
+                              !["none", "field_selected"].includes(
+                                message.effect.effect,
+                              ) ? (
                                 <small>
-                                  {getAgentActionLabel(message.action)}
+                                  {getAgentEffectLabel(message.effect.effect)}
                                 </small>
                               ) : null}
                               {messageField ? (
@@ -1181,19 +1210,6 @@ function App() {
                               >
                                 Retry guidance check
                               </button>
-                            </div>
-                          ) : null}
-                          {message.action === "propose" &&
-                          message.proposedValue !== undefined ? (
-                            <div className="agent-proposal">
-                              <span>Proposed answer</span>
-                              <strong>
-                                {formatAgentValue(message.proposedValue)}
-                              </strong>
-                              <small>
-                                This suggestion never changes the field or PDF
-                                automatically.
-                              </small>
                             </div>
                           ) : null}
                           {canOfferExplanationActions ? (
@@ -1306,12 +1322,36 @@ function App() {
                       </form>
                     ) : (
                       <>
-                        <div className="agent-confirmation-value">
-                          <span>Proposed answer</span>
-                          <strong>
-                            {formatAgentValue(pendingProposal.value)}
-                          </strong>
-                        </div>
+                        {activeProposalDetails?.transformation ? (
+                          <div className="agent-preparation-comparison">
+                            <div>
+                              <span>You said</span>
+                              <strong>
+                                {formatAgentValue(
+                                  activeProposalDetails.original_value,
+                                )}
+                              </strong>
+                            </div>
+                            <div>
+                              <span>Prepared for the form</span>
+                              <strong>
+                                {formatAgentValue(
+                                  activeProposalDetails.prepared_value,
+                                )}
+                              </strong>
+                            </div>
+                            <small>
+                              {activeProposalDetails.transformation}
+                            </small>
+                          </div>
+                        ) : (
+                          <div className="agent-confirmation-value">
+                            <span>Prepared answer</span>
+                            <strong>
+                              {formatAgentValue(pendingProposal.value)}
+                            </strong>
+                          </div>
+                        )}
                         <p>
                           Nothing changes until you choose Confirm or submit an
                           edited answer.
@@ -1337,6 +1377,15 @@ function App() {
                           >
                             Edit
                           </button>
+                          {canUseOriginalProposal ? (
+                            <button
+                              type="button"
+                              disabled={agentStatus === "loading"}
+                              onClick={useOriginalProposal}
+                            >
+                              Use original
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             disabled={agentStatus === "loading"}
@@ -2002,16 +2051,23 @@ function parseAgentResponse(
     throw new Error("The API returned an invalid form assistant response.");
   }
 
-  const action = parseAgentAction(payload.action, requestFields);
+  if (
+    typeof payload.assistant_message !== "string" ||
+    !payload.assistant_message.trim()
+  ) {
+    throw new Error("The API returned an invalid form assistant response.");
+  }
+  const effect = parseAgentEffect(payload.effect, requestFields);
   const conversationState = parseConversationState(
     payload.conversation_state,
     requestFields,
   );
   const guidance = parseOfficialGuidance(payload.guidance);
   const webGuidance = parseWebGuidance(payload.web_guidance);
-  validateAgentResponseState(action, conversationState, requestFields);
+  validateAgentResponseState(effect, conversationState, requestFields);
   return {
-    action,
+    assistant_message: payload.assistant_message.trim(),
+    effect,
     conversation_state: conversationState,
     guidance,
     web_guidance: webGuidance,
@@ -2126,29 +2182,27 @@ function parseWebGuidance(payload: unknown): WebGuidanceMetadata | null {
   };
 }
 
-function parseAgentAction(
+function parseAgentEffect(
   payload: unknown,
   requestFields: AgentRequestField[],
-): AgentAction {
-  if (!isRecord(payload) || !isAgentActionKind(payload.action)) {
+): AgentEffect {
+  if (!isRecord(payload) || !isAgentEffectKind(payload.effect)) {
     throw new Error("The API returned an invalid form assistant response.");
   }
 
-  if (typeof payload.message !== "string" || !payload.message.trim()) {
-    throw new Error("The API returned an invalid form assistant response.");
+  if (payload.effect === "completed") {
+    return { effect: "completed" };
   }
 
-  const message = payload.message.trim();
   const fieldId = payload.field_id;
-
-  if (payload.action === "next") {
+  if (payload.effect === "none") {
     if (fieldId !== null && typeof fieldId !== "string") {
       throw new Error("The API returned an invalid form assistant response.");
     }
     if (typeof fieldId === "string" && !findAgentField(requestFields, fieldId)) {
       throw new Error("The form assistant returned an unknown field.");
     }
-    return { action: "next", message, field_id: fieldId };
+    return { effect: "none", field_id: fieldId };
   }
 
   if (typeof fieldId !== "string") {
@@ -2160,7 +2214,30 @@ function parseAgentAction(
     throw new Error("The form assistant returned an unknown field.");
   }
 
-  if (payload.action === "propose" || payload.action === "confirmed") {
+  if (payload.effect === "proposal") {
+    const originalValue = payload.original_value;
+    const preparedValue = payload.prepared_value;
+    const transformation = payload.transformation;
+    if (
+      (typeof originalValue !== "string" &&
+        typeof originalValue !== "boolean") ||
+      (typeof preparedValue !== "string" &&
+        typeof preparedValue !== "boolean") ||
+      !isAgentValueCompatible(field, preparedValue) ||
+      (transformation !== null && typeof transformation !== "string")
+    ) {
+      throw new Error("The form assistant returned an invalid proposal.");
+    }
+    return {
+      effect: "proposal",
+      field_id: fieldId,
+      original_value: originalValue,
+      prepared_value: preparedValue,
+      transformation,
+    };
+  }
+
+  if (payload.effect === "confirmed") {
     const value = payload.value;
     if (
       (typeof value !== "string" && typeof value !== "boolean") ||
@@ -2168,12 +2245,10 @@ function parseAgentAction(
     ) {
       throw new Error("The form assistant returned an invalid proposal.");
     }
-    return payload.action === "propose"
-      ? { action: "propose", message, field_id: fieldId, value }
-      : { action: "confirmed", message, field_id: fieldId, value };
+    return { effect: "confirmed", field_id: fieldId, value };
   }
 
-  return { action: payload.action, message, field_id: fieldId };
+  return { effect: payload.effect, field_id: fieldId };
 }
 
 function parseConversationState(
@@ -2247,64 +2322,65 @@ function parseConversationState(
 }
 
 function validateAgentResponseState(
-  action: AgentAction,
+  effect: AgentEffect,
   state: ConversationState,
   requestFields: AgentRequestField[],
 ) {
-  const isResolutionAction =
-    action.action === "confirmed" || action.action === "skip";
+  const isResolutionEffect =
+    effect.effect === "confirmed" || effect.effect === "skipped";
+  const effectFieldId = "field_id" in effect ? effect.field_id : null;
   const resolutionField =
-    action.field_id === null
+    effectFieldId === null
       ? undefined
-      : findAgentField(requestFields, action.field_id);
+      : findAgentField(requestFields, effectFieldId);
   const resolutionFieldWasUnanswered =
     resolutionField?.status === "unanswered";
-  const expectedNextField = isResolutionAction
+  const expectedNextField = isResolutionEffect
     ? requestFields.find(
         (field) =>
-          field.status === "unanswered" && field.id !== action.field_id,
+          field.status === "unanswered" && field.id !== effectFieldId,
       )
     : undefined;
   const progressedToNextField =
-    isResolutionAction &&
+    isResolutionEffect &&
     resolutionFieldWasUnanswered &&
     expectedNextField !== undefined &&
     state.phase === "awaiting_answer" &&
     state.active_field_id === expectedNextField.id;
   const completedForm =
-    isResolutionAction &&
+    isResolutionEffect &&
     resolutionFieldWasUnanswered &&
     expectedNextField === undefined &&
     state.phase === "form_complete" &&
     state.active_field_id === null;
 
-  if (!isResolutionAction && action.field_id !== state.active_field_id) {
+  if (
+    !isResolutionEffect &&
+    effect.effect !== "completed" &&
+    effectFieldId !== state.active_field_id
+  ) {
     throw new Error("The assistant response and conversation state disagree.");
   }
 
   const validPhase =
-    (action.action === "propose" &&
+    (effect.effect === "proposal" &&
       state.phase === "awaiting_confirmation" &&
-      state.pending_proposal?.field_id === action.field_id &&
-      state.pending_proposal.value === action.value) ||
-    (action.action === "confirmed" &&
+      state.pending_proposal?.field_id === effect.field_id &&
+      state.pending_proposal.value === effect.prepared_value) ||
+    (effect.effect === "confirmed" &&
       (progressedToNextField || completedForm)) ||
-    (action.action === "rejected" && state.phase === "awaiting_answer") ||
-    (action.action === "skip" &&
+    (effect.effect === "rejected" && state.phase === "awaiting_answer") ||
+    (effect.effect === "skipped" &&
       (progressedToNextField || completedForm)) ||
-    (action.action === "explain" &&
+    (effect.effect === "none" &&
       [
         "awaiting_answer",
         "awaiting_clarification",
         "awaiting_confirmation",
       ].includes(state.phase)) ||
-    (action.action === "clarify" &&
-      ["awaiting_clarification", "awaiting_confirmation"].includes(
-        state.phase,
-      )) ||
-    (action.action === "next" &&
-      ((action.field_id === null && state.phase === "form_complete") ||
-        (action.field_id !== null && state.phase === "awaiting_answer")));
+    (effect.effect === "field_selected" &&
+      state.phase === "awaiting_answer") ||
+    (effect.effect === "completed" && state.phase === "form_complete");
   if (!validPhase) {
     throw new Error("The assistant returned an invalid state transition.");
   }
@@ -2317,16 +2393,16 @@ function findAgentField(
   return fields.find((field) => field.id === fieldId);
 }
 
-function isAgentActionKind(value: unknown): value is AgentActionKind {
+function isAgentEffectKind(value: unknown): value is AgentEffectKind {
   return [
-    "explain",
-    "clarify",
-    "propose",
-    "skip",
-    "next",
+    "none",
+    "proposal",
     "confirmed",
     "rejected",
-  ].includes(value as AgentActionKind);
+    "skipped",
+    "field_selected",
+    "completed",
+  ].includes(value as AgentEffectKind);
 }
 
 function isConversationPhase(value: unknown): value is ConversationPhase {
@@ -2380,18 +2456,18 @@ function isValidFormContext(value: unknown): value is FormContext {
   );
 }
 
-function getAgentActionLabel(action?: AgentActionKind): string {
-  const labels: Record<AgentActionKind, string> = {
-    explain: "Explanation",
-    clarify: "Clarification",
-    propose: "Proposal",
-    skip: "Skipped",
-    next: "Next field",
+function getAgentEffectLabel(effect: AgentEffectKind): string {
+  const labels: Record<AgentEffectKind, string> = {
+    none: "Conversation",
+    proposal: "Proposal",
     confirmed: "Confirmed",
     rejected: "Rejected",
+    skipped: "Skipped",
+    field_selected: "Question selected",
+    completed: "Complete",
   };
 
-  return action ? labels[action] : "Form assistant";
+  return labels[effect];
 }
 
 function getWebSourceQualityLabel(

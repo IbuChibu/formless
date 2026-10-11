@@ -853,24 +853,26 @@ h1 {
   background: #e5eee7;
 }
 
-.agent-message.explain {
+.agent-message.none {
   border-left-color: #3b8657;
 }
 
-.agent-message.clarify {
-  border-left-color: #d19632;
-}
-
-.agent-message.propose {
+.agent-message.proposal {
   border-left-color: #6359ad;
 }
 
-.agent-message.skip {
+.agent-message.skipped,
+.agent-message.rejected {
   border-left-color: #77817a;
 }
 
-.agent-message.next {
+.agent-message.field_selected {
   border-left-color: #367b87;
+}
+
+.agent-message.confirmed,
+.agent-message.completed {
+  border-left-color: #2b8150;
 }
 
 .agent-message-meta {
@@ -908,19 +910,16 @@ h1 {
   text-transform: uppercase;
 }
 
-.agent-message.clarify .agent-message-meta strong {
-  color: #8a611e;
-}
-
-.agent-message.propose .agent-message-meta strong {
+.agent-message.proposal .agent-message-meta strong {
   color: #584f9a;
 }
 
-.agent-message.skip .agent-message-meta strong {
+.agent-message.skipped .agent-message-meta strong,
+.agent-message.rejected .agent-message-meta strong {
   color: #626d65;
 }
 
-.agent-message.next .agent-message-meta strong {
+.agent-message.field_selected .agent-message-meta strong {
   color: #276a75;
 }
 
@@ -1187,6 +1186,40 @@ h1 {
   color: #332d61;
   font-size: 0.84rem;
   overflow-wrap: anywhere;
+}
+
+.agent-preparation-comparison {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-preparation-comparison > div {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid #d8e0da;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.agent-preparation-comparison span {
+  color: #718077;
+  font-size: 0.6rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-preparation-comparison strong {
+  overflow-wrap: anywhere;
+  color: #27382d;
+  font-size: 0.82rem;
+}
+
+.agent-preparation-comparison small {
+  color: #65736a;
+  font-size: 0.65rem;
+  line-height: 1.45;
 }
 
 .agent-confirmation > p {

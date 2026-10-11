@@ -10,6 +10,7 @@ from app.services.tavily_service import (
     TavilyServiceError,
 )
 
+from .answer_preparation import prepare_proposal_action
 from .answer_adapters import (
     AnswerAdapterResult,
     interpret_answer,
@@ -32,6 +33,7 @@ from .models import (
     FormAgentField,
     FormAgentRequest,
     FormAgentResponse,
+    ProposeAction,
     truncate_text,
 )
 from .official_guidance import (
@@ -152,7 +154,24 @@ class FormAgentService:
             )
             try:
                 action = parse_action(raw_action)
+                original_model_value = (
+                    action.value if isinstance(action, ProposeAction) else None
+                )
                 action = canonicalize_proposal_value(action, request)
+                if isinstance(action, ProposeAction):
+                    action = prepare_proposal_action(
+                        action.model_copy(
+                            update={
+                                "original_value": (
+                                    original_model_value
+                                    if original_model_value is not None
+                                    else action.value
+                                ),
+                                "transformation": None,
+                            }
+                        ),
+                        request,
+                    )
                 validate_guidance_action(action, guidance)
                 validate_web_guidance_action(action, web_guidance)
                 validate_action_for_turn(action, request)

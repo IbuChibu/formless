@@ -126,16 +126,24 @@ def test_agent_returns_a_validated_proposal_without_confirming_it() -> None:
     )
     action = response.action
 
-    assert action.model_dump() == {
-        "action": "propose",
-        "message": (
-            "Got it — for “Which option best describes where you live”, I "
-            'understood your answer as "Rent". It is awaiting your '
-            "confirmation and has not been applied to the form."
-        ),
+    expected_message = (
+        "Got it — for “Which option best describes where you live”, I "
+        'understood your answer as "Rent". It is awaiting your '
+        "confirmation and has not been applied to the form."
+    )
+    assert action.action == "propose"
+    assert action.message == expected_message
+    assert action.field_id == "living_arrangement"
+    assert action.value == "Rent"
+    assert response.assistant_message == expected_message
+    assert response.effect.model_dump() == {
+        "effect": "proposal",
         "field_id": "living_arrangement",
-        "value": "Rent",
+        "original_value": "Rent",
+        "prepared_value": "Rent",
+        "transformation": None,
     }
+    assert "action" not in response.model_dump()
     assert response.conversation_state.model_dump() == {
         "phase": "awaiting_confirmation",
         "active_field_id": "living_arrangement",
@@ -416,7 +424,11 @@ def test_agent_supports_each_model_reasoning_action(
     )
 
     assert response.status_code == 200
-    assert response.json()["action"]["action"] == expected_action
+    payload = response.json()
+    expected_effect = "proposal" if expected_action == "propose" else "none"
+    assert payload["effect"]["effect"] == expected_effect
+    assert isinstance(payload["assistant_message"], str)
+    assert "action" not in payload
 
 
 def test_next_asks_the_selected_field_instead_of_repeating_navigation() -> None:
@@ -432,9 +444,11 @@ def test_next_asks_the_selected_field_instead_of_repeating_navigation() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["action"] == {
-        "action": "next",
-        "message": "Full name. What should be entered here?",
+    assert response.json()["assistant_message"] == (
+        "Full name. What should be entered here?"
+    )
+    assert response.json()["effect"] == {
+        "effect": "field_selected",
         "field_id": "full_name",
     }
 
@@ -462,9 +476,11 @@ def test_next_prefers_the_grounded_question_over_the_field_label() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["action"] == {
-        "action": "next",
-        "message": "Last Name (Family Name). What should be entered here?",
+    assert response.json()["assistant_message"] == (
+        "Last Name (Family Name). What should be entered here?"
+    )
+    assert response.json()["effect"] == {
+        "effect": "field_selected",
         "field_id": "full_name",
     }
 
@@ -483,12 +499,12 @@ def test_next_dropdown_question_omits_placeholder_options() -> None:
     response = post_with_nemotron(nemotron, payload)
 
     assert response.status_code == 200
-    assert response.json()["action"] == {
-        "action": "next",
-        "message": (
-            "Which option best describes where you live? Choose one of: "
-            "Rent, Own, Staying with someone."
-        ),
+    assert response.json()["assistant_message"] == (
+        "Which option best describes where you live? Choose one of: "
+        "Rent, Own, Staying with someone."
+    )
+    assert response.json()["effect"] == {
+        "effect": "field_selected",
         "field_id": "living_arrangement",
     }
     assert nemotron.calls == []
@@ -644,13 +660,13 @@ def test_repeated_invalid_proposal_value_becomes_clarification(
     )
 
     assert response.status_code == 200
-    assert response.json()["action"] == {
-        "action": "clarify",
-        "message": (
-            "For “Which option best describes where you live?”: I could not "
-            "safely validate one value for this field. Choose one available "
-            "option: Rent, Own, Staying with someone."
-        ),
+    assert response.json()["assistant_message"] == (
+        "For “Which option best describes where you live?”: I could not "
+        "safely validate one value for this field. Choose one available "
+        "option: Rent, Own, Staying with someone."
+    )
+    assert response.json()["effect"] == {
+        "effect": "none",
         "field_id": "living_arrangement",
     }
 
@@ -685,11 +701,10 @@ def test_next_can_finish_only_when_no_fields_are_unanswered() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["action"] == {
-        "action": "next",
-        "message": "All supported fields have been reviewed.",
-        "field_id": None,
-    }
+    assert response.json()["assistant_message"] == (
+        "All supported fields have been reviewed."
+    )
+    assert response.json()["effect"] == {"effect": "completed"}
 
 
 def test_model_cannot_silently_advance_past_an_active_field() -> None:
@@ -702,13 +717,13 @@ def test_model_cannot_silently_advance_past_an_active_field() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["action"] == {
-        "action": "clarify",
-        "message": (
-            "For “Which option best describes where you live?”: I could not "
-            "safely validate one value for this field. Choose one available "
-            "option: Rent, Own, Staying with someone."
-        ),
+    assert response.json()["assistant_message"] == (
+        "For “Which option best describes where you live?”: I could not "
+        "safely validate one value for this field. Choose one available "
+        "option: Rent, Own, Staying with someone."
+    )
+    assert response.json()["effect"] == {
+        "effect": "none",
         "field_id": "living_arrangement",
     }
 
