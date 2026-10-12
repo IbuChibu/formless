@@ -37,6 +37,13 @@ when the corresponding assistant feature is used. Manual PDF extraction,
 editing, filling, and download remain available if an AI provider is
 unavailable.
 
+Voice input uses the browser's speech-recognition capability and therefore
+requires a supported browser on `localhost` or HTTPS. After uploading a form,
+select **Start voice answer**, allow microphone access, stop capture, review or
+edit the visible transcript, and select **Send transcript**. Spoken assistant
+responses are opt-in. Typing remains available when voice is unsupported,
+denied, or interrupted.
+
 ## Checks
 
 ```bash

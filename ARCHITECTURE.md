@@ -27,7 +27,14 @@ Voice / Text / PDF field click / Manual drawer
 Responsible for:
 - displaying PDF
 - displaying questions
-- recording voice
+- starting and stopping browser voice capture only after an explicit user action
+- keeping recognized speech as an editable draft until the user submits it
+- sending submitted speech transcripts through the same Form Agent message path
+  and explicit proposal-confirmation flow as typed text
+- optionally speaking the already-visible assistant message through browser
+  speech synthesis, with a visible stop control and persistent text fallback
+- presenting permission, listening, processing, retry, unsupported-browser, and
+  speech-output failure states without removing the typed composer
 - displaying conversation
 - presenting the conversation as a focused one-question-at-a-time interview
   using section, page, question, and progress metadata from extracted fields
@@ -54,6 +61,8 @@ Must not:
 - manipulate PDF files
 - contain agent reasoning
 - treat an AI proposal as a confirmed factual answer
+- let browser speech recognition or speech synthesis mutate canonical field
+  state, confirm a proposal, or create a second conversation path
 
 ## FastAPI
 

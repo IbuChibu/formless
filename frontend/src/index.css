@@ -1503,13 +1503,301 @@ h1 {
   gap: 7px;
 }
 
+.voice-assistant-panel {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid #c6d8cb;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 78%);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background 150ms ease;
+}
+
+.voice-assistant-panel.listening {
+  border-color: #d19083;
+  background: #fff9f7;
+  box-shadow: 0 0 0 3px rgb(172 73 55 / 8%);
+}
+
+.voice-assistant-panel.requesting_permission,
+.voice-assistant-panel.processing {
+  border-color: #d7bf86;
+  background: #fffdf7;
+}
+
+.voice-assistant-panel.error {
+  border-color: #e1b2ab;
+  background: #fff8f7;
+}
+
+.voice-assistant-heading,
+.voice-assistant-heading > div,
+.voice-capture-actions,
+.voice-transcript-actions,
+.voice-output-controls,
+.voice-output-controls label {
+  display: flex;
+  align-items: center;
+}
+
+.voice-assistant-heading {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.voice-assistant-heading > div {
+  min-width: 0;
+  gap: 9px;
+}
+
+.voice-assistant-heading > div > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.voice-assistant-heading strong {
+  color: #263a2d;
+  font-size: 0.76rem;
+}
+
+.voice-assistant-heading > div > div > span {
+  overflow: hidden;
+  color: #738078;
+  font-size: 0.61rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 9px;
+  color: #fff;
+  background: #347650;
+  font-size: 0.66rem;
+  box-shadow: 0 6px 15px rgb(36 99 59 / 16%);
+}
+
+.voice-assistant-panel.listening .voice-mark {
+  background: #a44737;
+  animation: voice-listening-pulse 1.4s ease-in-out infinite;
+}
+
+.voice-status-label {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: #496455;
+  background: #edf3ee;
+  font-size: 0.58rem;
+  font-weight: 850;
+}
+
+.voice-assistant-panel.listening .voice-status-label,
+.voice-assistant-panel.error .voice-status-label {
+  color: #8e3c30;
+  background: #f9e8e4;
+}
+
+.voice-assistant-panel.requesting_permission .voice-status-label,
+.voice-assistant-panel.processing .voice-status-label {
+  color: #7b5d1d;
+  background: #fff0cc;
+}
+
+.voice-status-copy,
+.voice-output-error {
+  margin: 0;
+  color: #607067;
+  font-size: 0.66rem;
+  line-height: 1.48;
+}
+
+.voice-assistant-panel.error .voice-status-copy,
+.voice-output-error {
+  color: #8d3e34;
+}
+
+.voice-capture-actions,
+.voice-transcript-actions {
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.voice-primary-button,
+.voice-secondary-button,
+.voice-transcript-actions button,
+.voice-output-controls button {
+  min-height: 35px;
+  padding: 0 10px;
+  border: 1px solid #b8ccbe;
+  border-radius: 8px;
+  color: #2b6240;
+  background: #f7fbf8;
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 850;
+}
+
+.voice-primary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-color: #397c52;
+  color: #fff;
+  background: #2a7047;
+}
+
+.voice-primary-button.listening {
+  border-color: #9e4335;
+  background: #a44737;
+}
+
+.voice-primary-button:hover:not(:disabled),
+.voice-transcript-actions button.primary:hover:not(:disabled) {
+  border-color: #225f3c;
+  background: #225f3c;
+}
+
+.voice-secondary-button:hover:not(:disabled),
+.voice-transcript-actions button:hover:not(:disabled),
+.voice-output-controls button:hover:not(:disabled) {
+  border-color: #7da98a;
+  background: #edf6ef;
+}
+
+.voice-primary-button:disabled,
+.voice-transcript-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.voice-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: voice-listening-pulse 1s ease-in-out infinite;
+}
+
+@keyframes voice-listening-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+.voice-transcript {
+  display: grid;
+  gap: 6px;
+}
+
+.voice-transcript > span {
+  color: #476052;
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.voice-transcript textarea {
+  width: 100%;
+  min-height: 76px;
+  padding: 9px 10px;
+  border: 1px solid #b9ccbf;
+  border-radius: 9px;
+  outline: none;
+  color: #25352b;
+  background: #fff;
+  font-size: 0.73rem;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.voice-transcript textarea:read-only {
+  color: #5e6b63;
+  background: #f5f8f5;
+}
+
+.voice-transcript textarea:focus {
+  border-color: #4c9166;
+  box-shadow: 0 0 0 3px rgb(60 126 83 / 14%);
+}
+
+.voice-transcript-actions button.primary {
+  border-color: #397c52;
+  color: #fff;
+  background: #2a7047;
+}
+
+.voice-output-controls {
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 9px;
+  border-top: 1px solid #e0e8e1;
+}
+
+.voice-output-controls label {
+  min-width: 0;
+  gap: 8px;
+  color: #425448;
+  cursor: pointer;
+  font-size: 0.67rem;
+  font-weight: 750;
+}
+
+.voice-output-controls input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  accent-color: #287048;
+}
+
+.voice-output-controls label > span {
+  display: grid;
+  gap: 2px;
+}
+
+.voice-output-controls small {
+  color: #77847b;
+  font-size: 0.58rem;
+  font-weight: 500;
+}
+
+.voice-output-controls button {
+  flex: 0 0 auto;
+}
+
+.voice-confirmation-note {
+  color: #707c74;
+  font-size: 0.61rem;
+  line-height: 1.45;
+}
+
 .agent-progress-button:focus-visible,
 .agent-web-guidance > button:focus-visible,
 .agent-quick-answers button:focus-visible,
 .agent-quick-answers select:focus-visible,
 .guided-question-actions button:focus-visible,
 .agent-transcript-heading button:focus-visible,
-.agent-complete-actions button:focus-visible {
+.agent-complete-actions button:focus-visible,
+.voice-primary-button:focus-visible,
+.voice-secondary-button:focus-visible,
+.voice-transcript-actions button:focus-visible,
+.voice-output-controls button:focus-visible,
+.voice-output-controls input:focus-visible {
   outline: 3px solid rgb(52 133 83 / 22%);
   outline-offset: 2px;
 }

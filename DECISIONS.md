@@ -217,3 +217,22 @@ controls, but it must not create a second state path. Reusing the existing
 event, proposal, explicit-confirmation, and PDF-preview flow prevents quick
 controls or presentation changes from bypassing validation or writing an
 unconfirmed answer.
+
+---
+
+## 2026-10-12 — Voice is an adapter over the typed interview
+
+Decision:
+Voice capture and speech output remain frontend browser capabilities. Recognized
+speech is an editable draft and enters the application only through the same
+Form Agent message event used by typed text. Spoken output reads the same
+visible `assistant_message`. Cancelling capture, stopping speech, permission
+failure, and unsupported browser capabilities have no form effect.
+
+Reason:
+A separate voice agent or voice-owned field state would duplicate routing,
+validation, and confirmation logic and could weaken the PDF safety boundary.
+Keeping voice as an input/output adapter preserves one canonical conversation,
+one explicit proposal review, one confirmed field state, and a permanent typed
+fallback while still delivering the voice-first interaction needed for the
+hackathon demonstration.

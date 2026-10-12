@@ -2569,7 +2569,7 @@ Do not implement:
 
 # Milestone 7 — Voice
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Add speech as an interface around the working typed Form Agent without creating
@@ -2583,6 +2583,34 @@ Acceptance criteria:
 - microphone permission, listening, processing, retry, and failure states are clear
 - the user can always fall back to typing
 - stopping or cancelling voice input does not change a form field
+
+Verified implementation outcome:
+- the guided interview exposes an explicit `Start voice answer` control and
+  clear permission, listening, processing, editable-review, error, and retry
+  states; it never records continuously or starts without a user action
+- browser-recognized speech remains a local draft until the user stops capture,
+  reviews and edits the visible transcript, and selects `Send transcript`
+- sending a reviewed transcript calls the existing `sendAgentMessage` path,
+  so voice uses the same `POST /agent/respond`, typed effects, proposal review,
+  explicit confirmation, canonical field state, and PDF filling flow as typing
+- cancel aborts the active recognition session, clears its draft, and sends no
+  agent event or field update; stale recognition callbacks are session-guarded
+  so they cannot restore or submit a cancelled transcript
+- spoken replies are deliberately opt-in, read the same already-visible
+  `assistant_message`, can be stopped, stop automatically when listening begins,
+  and fall back to the persistent text response if speech output fails
+- denied permission, missing microphone, no speech, unavailable recognition
+  service, unsupported language, insecure/unsupported browser input, and speech
+  output failure each have bounded recovery text while the typed composer stays
+  available
+- changing PDFs aborts active recognition and speech without persisting audio,
+  transcripts, or voice settings outside the current browser session
+- a local browser interaction harness exercised start, listening, stop,
+  editable transcript correction, submission, cancellation without submission,
+  permission denial, retry, unsupported-input fallback, opt-in speech output,
+  and visible stop-speaking controls without using real personal audio
+- all 305 backend tests pass, the frontend production build passes, and no new
+  endpoint, model, agent, persistence layer, or frontend dependency was added
 
 Do not implement:
 - always-on recording or wake-word detection

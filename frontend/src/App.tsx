@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
 import PdfViewer from "./PdfViewer";
+import VoiceAssistantPanel from "./VoiceAssistantPanel";
+import useVoiceAssistant from "./useVoiceAssistant";
 
 type ConnectionStatus = "checking" | "connected" | "disconnected";
 type ExtractionStatus = "idle" | "loading" | "ready" | "empty" | "error";
@@ -283,6 +285,7 @@ function App() {
     useState<ProposalAgentEffect | null>(null);
   const [manualDrawerOpen, setManualDrawerOpen] = useState(false);
   const [showFullTranscript, setShowFullTranscript] = useState(false);
+  const voice = useVoiceAssistant();
 
   const originalUrlRef = useRef<string | null>(null);
   const filledUrlRef = useRef<string | null>(null);
@@ -468,6 +471,7 @@ function App() {
     setPendingProposalDetails(null);
     setManualDrawerOpen(false);
     setShowFullTranscript(false);
+    voice.resetVoiceSession();
     agentMessageIdRef.current = 0;
     setExtractionStatus("loading");
     setPreviewStatus("idle");
@@ -689,6 +693,7 @@ function App() {
           ? { webGuidanceRetry: request }
           : {}),
       });
+      voice.speakAssistantMessage(assistantMessage);
 
       setAgentConversationState(conversationState);
 
@@ -877,6 +882,7 @@ function App() {
   const visibleAgentMessages = showFullTranscript
     ? agentMessages
     : agentMessages.slice(-3);
+  const latestAssistantMessage = getLatestAssistantMessage(agentMessages);
   const pendingProposalPdfField = fields.find(
     (field) => field.id === pendingProposal?.field_id,
   );
@@ -1655,6 +1661,17 @@ function App() {
                       </button>
                     </div>
                   </section>
+                ) : null}
+
+                {canUseAgent ? (
+                  <VoiceAssistantPanel
+                    voice={voice}
+                    agentIsBusy={agentStatus === "loading"}
+                    canSendMessage={canSendAgentMessage}
+                    hasAssistantMessage={latestAssistantMessage !== null}
+                    hasPendingProposal={pendingProposal !== null}
+                    onSendTranscript={sendAgentMessage}
+                  />
                 ) : null}
 
                 {canUseAgent ? (
@@ -2819,6 +2836,17 @@ function getQuestionStatusLabel(phase: ConversationPhase): string {
   };
 
   return labels[phase];
+}
+
+function getLatestAssistantMessage(
+  messages: ConversationMessage[],
+): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role === "assistant") {
+      return messages[index].content;
+    }
+  }
+  return null;
 }
 
 function getWebSourceQualityLabel(
