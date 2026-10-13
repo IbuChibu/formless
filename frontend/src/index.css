@@ -1516,14 +1516,17 @@ h1 {
     background 150ms ease;
 }
 
-.voice-assistant-panel.listening {
+.voice-assistant-panel.listening,
+.voice-assistant-panel.assistant_speaking {
   border-color: #d19083;
   background: #fff9f7;
   box-shadow: 0 0 0 3px rgb(172 73 55 / 8%);
 }
 
 .voice-assistant-panel.requesting_permission,
-.voice-assistant-panel.processing {
+.voice-assistant-panel.processing,
+.voice-assistant-panel.waiting_agent,
+.voice-assistant-panel.starting {
   border-color: #d7bf86;
   background: #fffdf7;
 }
@@ -1533,8 +1536,25 @@ h1 {
   background: #fff8f7;
 }
 
+.voice-assistant-panel.awaiting_confirmation {
+  border-color: #bcb4e2;
+  background: #faf9ff;
+}
+
+.voice-assistant-panel.paused,
+.voice-assistant-panel.unsupported {
+  border-color: #d6ddd8;
+  background: #f7f9f7;
+}
+
+.voice-assistant-panel.complete {
+  border-color: #a9d0b4;
+  background: #f5fbf6;
+}
+
 .voice-assistant-heading,
 .voice-assistant-heading > div,
+.voice-conversation-actions,
 .voice-capture-actions,
 .voice-transcript-actions,
 .voice-output-controls,
@@ -1585,7 +1605,16 @@ h1 {
   box-shadow: 0 6px 15px rgb(36 99 59 / 16%);
 }
 
-.voice-assistant-panel.listening .voice-mark {
+.voice-mark > span {
+  width: 9px;
+  height: 9px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgb(255 255 255 / 16%);
+}
+
+.voice-assistant-panel.listening .voice-mark,
+.voice-assistant-panel.assistant_speaking .voice-mark {
   background: #a44737;
   animation: voice-listening-pulse 1.4s ease-in-out infinite;
 }
@@ -1601,15 +1630,23 @@ h1 {
 }
 
 .voice-assistant-panel.listening .voice-status-label,
+.voice-assistant-panel.assistant_speaking .voice-status-label,
 .voice-assistant-panel.error .voice-status-label {
   color: #8e3c30;
   background: #f9e8e4;
 }
 
 .voice-assistant-panel.requesting_permission .voice-status-label,
-.voice-assistant-panel.processing .voice-status-label {
+.voice-assistant-panel.processing .voice-status-label,
+.voice-assistant-panel.waiting_agent .voice-status-label,
+.voice-assistant-panel.starting .voice-status-label {
   color: #7b5d1d;
   background: #fff0cc;
+}
+
+.voice-assistant-panel.awaiting_confirmation .voice-status-label {
+  color: #554b91;
+  background: #e8e4fb;
 }
 
 .voice-status-copy,
@@ -1625,6 +1662,7 @@ h1 {
   color: #8d3e34;
 }
 
+.voice-conversation-actions,
 .voice-capture-actions,
 .voice-transcript-actions {
   flex-wrap: wrap;
@@ -1671,6 +1709,12 @@ h1 {
 .voice-output-controls button:hover:not(:disabled) {
   border-color: #7da98a;
   background: #edf6ef;
+}
+
+.voice-secondary-button.quiet {
+  border-color: transparent;
+  color: #69766d;
+  background: transparent;
 }
 
 .voice-primary-button:disabled,
@@ -1784,6 +1828,21 @@ h1 {
   color: #707c74;
   font-size: 0.61rem;
   line-height: 1.45;
+}
+
+div.voice-confirmation-note {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid #ddd8f1;
+  border-radius: 8px;
+  color: #5f587f;
+  background: #f8f6ff;
+}
+
+div.voice-confirmation-note strong {
+  color: #4c4387;
+  font-size: 0.63rem;
 }
 
 .agent-progress-button:focus-visible,

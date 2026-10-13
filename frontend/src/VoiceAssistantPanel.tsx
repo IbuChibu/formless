@@ -1,240 +1,340 @@
+import type { VoiceAssistantControls } from "./useVoiceAssistant";
 import type {
-  VoiceAssistantControls,
-  VoiceInputStatus,
-} from "./useVoiceAssistant";
+  VoiceInterviewControls,
+  VoiceInterviewStatus,
+} from "./useVoiceInterview";
 
 type VoiceAssistantPanelProps = {
   voice: VoiceAssistantControls;
+  interview: VoiceInterviewControls;
   agentIsBusy: boolean;
-  canSendMessage: boolean;
-  hasAssistantMessage: boolean;
   hasPendingProposal: boolean;
-  onSendTranscript: (transcript: string) => void;
 };
 
 export default function VoiceAssistantPanel({
   voice,
+  interview,
   agentIsBusy,
-  canSendMessage,
-  hasAssistantMessage,
   hasPendingProposal,
-  onSendTranscript,
 }: VoiceAssistantPanelProps) {
-  const inputCopy = getVoiceInputCopy(voice.inputStatus, voice.inputError);
-  const inputIsBusy = [
+  const statusCopy = getInterviewStatusCopy(
+    interview.status,
+    voice.inputError,
+    hasPendingProposal,
+  );
+  const isCapturing = [
     "requesting_permission",
     "listening",
     "processing",
-  ].includes(voice.inputStatus);
-  const transcriptCanBeEdited = ["review", "error"].includes(
-    voice.inputStatus,
-  );
-
-  function submitTranscript() {
-    const normalizedTranscript = voice.transcript.trim();
-    if (!normalizedTranscript || agentIsBusy || !canSendMessage) {
-      return;
-    }
-    onSendTranscript(normalizedTranscript);
-    voice.clearTranscript();
-  }
+  ].includes(interview.status);
+  const transcriptIsEditable =
+    Boolean(voice.transcript) && interview.status !== "listening";
+  const canSubmitTranscript =
+    transcriptIsEditable &&
+    !agentIsBusy &&
+    interview.isActive &&
+    !isCapturing;
 
   return (
     <section
-      className={`voice-assistant-panel ${voice.inputStatus}`}
+      className={`voice-assistant-panel ${interview.status}`}
       aria-labelledby="voice-assistant-heading"
     >
       <div className="voice-assistant-heading">
         <div>
           <span className="voice-mark" aria-hidden="true">
-            ◉
+            <span />
           </span>
           <div>
-            <strong id="voice-assistant-heading">Voice answer</strong>
-            <span>Review every transcript before sending</span>
+            <strong id="voice-assistant-heading">
+              Talk through this form
+            </strong>
+            <span>The assistant asks, listens, and checks each answer</span>
           </div>
         </div>
-        <span className="voice-status-label">{inputCopy.label}</span>
+        <span className="voice-status-label">{statusCopy.label}</span>
       </div>
 
       <p
         className="voice-status-copy"
-        role={voice.inputStatus === "error" ? "alert" : "status"}
+        role={interview.status === "error" ? "alert" : "status"}
         aria-live="polite"
       >
-        {inputCopy.detail}
+        {statusCopy.detail}
       </p>
 
-      {voice.inputStatus !== "unsupported" ? (
-        <div className="voice-capture-actions">
-          {voice.inputStatus === "listening" ? (
+      <div className="voice-conversation-actions">
+        {interview.status === "inactive" ? (
+          <button
+            className="voice-primary-button"
+            type="button"
+            disabled={agentIsBusy || !voice.inputSupported}
+            onClick={interview.startInterview}
+          >
+            <span aria-hidden="true">●</span>
+            Start conversation
+          </button>
+        ) : interview.status === "paused" ? (
+          <>
+            <button
+              className="voice-primary-button"
+              type="button"
+              disabled={agentIsBusy || !voice.inputSupported}
+              onClick={interview.resumeInterview}
+            >
+              Resume conversation
+            </button>
+            <button
+              className="voice-secondary-button"
+              type="button"
+              onClick={interview.endInterview}
+            >
+              End conversation
+            </button>
+          </>
+        ) : interview.status === "assistant_speaking" ? (
+          <>
+            <button
+              className="voice-primary-button"
+              type="button"
+              onClick={interview.interruptAndListen}
+            >
+              <span aria-hidden="true">●</span>
+              Answer now
+            </button>
+            <SessionStopButtons interview={interview} />
+          </>
+        ) : interview.status === "listening" ? (
+          <>
             <button
               className="voice-primary-button listening"
               type="button"
               onClick={voice.stopListening}
             >
               <span aria-hidden="true">■</span>
-              Stop listening
+              Finish answer
             </button>
-          ) : inputIsBusy ? (
-            <button className="voice-primary-button" type="button" disabled>
-              <span className="voice-pulse" aria-hidden="true" />
-              {voice.inputStatus === "requesting_permission"
-                ? "Waiting for permission"
-                : "Preparing transcript"}
-            </button>
-          ) : (
+            <SessionStopButtons interview={interview} />
+          </>
+        ) : interview.status === "error" ? (
+          <>
             <button
               className="voice-primary-button"
               type="button"
-              disabled={agentIsBusy || !canSendMessage}
-              onClick={voice.startListening}
+              disabled={agentIsBusy || !voice.inputSupported}
+              onClick={interview.retryListening}
             >
-              <span aria-hidden="true">●</span>
-              {voice.inputStatus === "error"
-                ? "Try voice again"
-                : voice.inputStatus === "review"
-                  ? "Record again"
-                  : "Start voice answer"}
+              Try listening again
             </button>
-          )}
-
-          {inputIsBusy ? (
+            <SessionStopButtons interview={interview} />
+          </>
+        ) : interview.status === "complete" ? (
+          <>
             <button
-              className="voice-secondary-button"
+              className="voice-primary-button"
               type="button"
-              onClick={voice.cancelListening}
+              disabled={agentIsBusy || !voice.inputSupported}
+              onClick={interview.retryListening}
             >
-              Cancel
+              Ask a review question
             </button>
-          ) : null}
-        </div>
-      ) : null}
+            <SessionStopButtons interview={interview} />
+          </>
+        ) : interview.status === "unsupported" ? (
+          <button
+            className="voice-secondary-button"
+            type="button"
+            onClick={interview.endInterview}
+          >
+            Keep typing instead
+          </button>
+        ) : (
+          <>
+            <button className="voice-primary-button" type="button" disabled>
+              <span className="voice-pulse" aria-hidden="true" />
+              {getBusyButtonLabel(interview.status, hasPendingProposal)}
+            </button>
+            <SessionStopButtons interview={interview} />
+          </>
+        )}
+      </div>
 
-      {voice.transcript || inputIsBusy ? (
+      {voice.transcript || isCapturing ? (
         <label className="voice-transcript" htmlFor="voice-transcript">
-          <span>
-            {transcriptCanBeEdited
-              ? "Review transcript"
-              : "Listening transcript"}
-          </span>
+          <span>{isCapturing ? "What I hear" : "What I heard"}</span>
           <textarea
             id="voice-transcript"
             value={voice.transcript}
-            readOnly={!transcriptCanBeEdited}
+            readOnly={!transcriptIsEditable}
             placeholder={
-              inputIsBusy
+              isCapturing
                 ? "Your words will appear here…"
-                : "Review what the browser heard"
+                : "The recognized answer will stay visible here"
             }
             onChange={(event) => voice.setTranscript(event.target.value)}
           />
         </label>
       ) : null}
 
-      {transcriptCanBeEdited && voice.transcript.trim() ? (
+      {canSubmitTranscript ? (
         <div className="voice-transcript-actions">
           <button
             className="primary"
             type="button"
-            disabled={agentIsBusy || !canSendMessage}
-            onClick={submitTranscript}
+            onClick={() =>
+              interview.submitEditedTranscript(hasPendingProposal)
+            }
           >
-            Send transcript
+            {hasPendingProposal
+              ? "Use corrected transcript"
+              : "Send edited transcript"}
           </button>
           <button type="button" onClick={voice.clearTranscript}>
-            Clear
+            Clear transcript
           </button>
         </div>
       ) : null}
 
-      <div className="voice-output-controls">
-        <label>
-          <input
-            type="checkbox"
-            checked={voice.spokenRepliesEnabled}
-            disabled={!voice.outputSupported}
-            onChange={(event) =>
-              voice.setSpokenRepliesEnabled(event.target.checked)
-            }
-          />
+      {hasPendingProposal ? (
+        <div className="voice-confirmation-note">
+          <strong>Confirmation needed</strong>
           <span>
-            Read assistant responses aloud
-            <small>
-              {voice.outputSupported
-                ? "Text always remains visible"
-                : "Speech output is unavailable in this browser"}
-            </small>
+            Say “confirm that”, “put that in”, “no”, or “skip this”. The
+            visible proposal controls remain available.
           </span>
-        </label>
-        {voice.outputStatus === "speaking" ? (
-          <button type="button" onClick={voice.stopSpeaking}>
-            Stop speaking
-          </button>
-        ) : null}
-      </div>
+        </div>
+      ) : (
+        <small className="voice-confirmation-note">
+          The microphone listens for one turn at a time. Pause or end the
+          conversation whenever you want; typing always remains available.
+        </small>
+      )}
 
-      {voice.outputError ? (
+      {!voice.outputSupported ? (
+        <p className="voice-output-error" role="status">
+          Spoken replies are unavailable in this browser. Read the visible
+          question, or keep using the microphone and typed controls.
+        </p>
+      ) : voice.outputError ? (
         <p className="voice-output-error" role="alert">
           {voice.outputError}
         </p>
-      ) : null}
-
-      {hasPendingProposal ? (
-        <small className="voice-confirmation-note">
-          Voice does not apply this proposal. Use the visible review controls
-          to confirm, edit, reject, or skip it.
-        </small>
-      ) : hasAssistantMessage && voice.spokenRepliesEnabled ? (
-        <small className="voice-confirmation-note">
-          New assistant replies will be spoken and will remain in the
-          conversation transcript.
-        </small>
       ) : null}
     </section>
   );
 }
 
-function getVoiceInputCopy(
-  status: VoiceInputStatus,
-  error: string | null,
+function SessionStopButtons({
+  interview,
+}: {
+  interview: VoiceInterviewControls;
+}) {
+  return (
+    <>
+      <button
+        className="voice-secondary-button"
+        type="button"
+        onClick={interview.pauseInterview}
+      >
+        Pause
+      </button>
+      <button
+        className="voice-secondary-button quiet"
+        type="button"
+        onClick={interview.endInterview}
+      >
+        End
+      </button>
+    </>
+  );
+}
+
+function getBusyButtonLabel(
+  status: VoiceInterviewStatus,
+  hasPendingProposal: boolean,
+): string {
+  if (status === "requesting_permission") {
+    return "Waiting for microphone";
+  }
+  if (status === "processing") {
+    return "Preparing your words";
+  }
+  if (status === "waiting_agent") {
+    return "Thinking about your answer";
+  }
+  if (status === "awaiting_confirmation" || hasPendingProposal) {
+    return "Waiting for your decision";
+  }
+  return "Starting conversation";
+}
+
+function getInterviewStatusCopy(
+  status: VoiceInterviewStatus,
+  inputError: string | null,
+  hasPendingProposal: boolean,
 ): { label: string; detail: string } {
-  const copy: Record<VoiceInputStatus, { label: string; detail: string }> = {
-    idle: {
+  const copy: Record<VoiceInterviewStatus, { label: string; detail: string }> = {
+    inactive: {
       label: "Ready",
       detail:
-        "Start the microphone when you are ready. Nothing is sent until you review and send the transcript.",
+        "Start once, then take turns with the assistant as you work through the form.",
+    },
+    starting: {
+      label: "Starting",
+      detail:
+        "The assistant is getting the current question ready. The microphone is not listening yet.",
+    },
+    assistant_speaking: {
+      label: "Assistant speaking",
+      detail:
+        "Listen to the question, or choose Answer now to interrupt and start your turn.",
     },
     requesting_permission: {
-      label: "Permission",
+      label: "Microphone permission",
       detail:
-        "Your browser may ask for microphone access. Allow it only if you want to dictate this answer.",
+        "Your browser may ask for microphone access. It will listen for this turn only.",
     },
     listening: {
-      label: "Listening",
-      detail:
-        "Speak naturally, then stop listening. Your words are still only a draft.",
+      label: hasPendingProposal ? "Listening for your decision" : "Listening",
+      detail: hasPendingProposal
+        ? "Confirm, reject, correct, or skip the visible proposal in your own words."
+        : "Speak naturally. Pause briefly when you are finished, or choose Finish answer.",
     },
     processing: {
-      label: "Processing",
+      label: "Preparing transcript",
       detail:
-        "The browser is preparing your transcript. No form value has changed.",
+        "The browser is finishing the visible transcript. No form value has changed.",
     },
-    review: {
-      label: "Review",
+    waiting_agent: {
+      label: "Assistant thinking",
       detail:
-        "Check and edit the transcript before sending it to the form assistant.",
+        "Your transcript was sent through the same safe Form Agent path as a typed message.",
+    },
+    awaiting_confirmation: {
+      label: "Confirmation needed",
+      detail:
+        "The proposal is visible and still has not changed the PDF. Say a clear decision or use the buttons.",
+    },
+    paused: {
+      label: "Paused",
+      detail:
+        "The microphone and spoken reply are stopped. Your form and conversation are unchanged.",
+    },
+    complete: {
+      label: "Interview complete",
+      detail:
+        "The supported questions are reviewed. You can ask a review question, keep typing, or end the conversation.",
     },
     error: {
-      label: "Voice unavailable",
+      label: "Needs attention",
       detail:
-        error ??
-        "Voice input could not be completed. Try again or keep typing your answer.",
+        inputError ??
+        "Voice could not continue. Try listening again, or keep using the typed answer box.",
     },
     unsupported: {
       label: "Typing available",
       detail:
-        "Voice input is unavailable in this browser or connection. You can continue with the typed answer box.",
+        "Voice input is unavailable in this browser or connection. The typed interview and proposal controls still work.",
     },
   };
 

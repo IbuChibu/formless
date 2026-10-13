@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "suite_id": "guided-interview-baseline-v1",
+  "description": "Fixed synthetic conversations covering natural form interviews, corrections, ambiguity, explanations, interruptions, skipping, frustration, and revisiting earlier questions.",
+  "personas": [
+    {
+      "id": "efficient_multi_answer",
+      "name": "Mina",
+      "summary": "An efficient user who gives related details together instead of waiting for each prompt.",
+      "communication_style": "Friendly, concise, and expects the assistant to remember information already supplied.",
+      "behaviours": ["bundles several answers", "points out unnecessary repetition", "confirms clearly"]
+    },
+    {
+      "id": "careful_corrector",
+      "name": "Priya",
+      "summary": "A careful user who notices a previous answer needs changing.",
+      "communication_style": "Direct and precise, but expects the current value to remain until the replacement is confirmed.",
+      "behaviours": ["corrects earlier answers", "checks retained context", "reviews proposals"]
+    },
+    {
+      "id": "uncertain_answerer",
+      "name": "Elliot",
+      "summary": "A user who initially remembers only part of a requested date.",
+      "communication_style": "Tentative and incomplete at first, then provides the missing detail after a useful clarification.",
+      "behaviours": ["gives ambiguous answers", "responds to clarification", "does not want guesses"]
+    },
+    {
+      "id": "plain_language_learner",
+      "name": "Jordan",
+      "summary": "A user who needs formal form wording translated into everyday language.",
+      "communication_style": "Asks short follow-up questions and benefits from a concrete example.",
+      "behaviours": ["asks what a field means", "asks for an example", "answers after understanding"]
+    },
+    {
+      "id": "busy_interrupter",
+      "name": "Casey",
+      "summary": "A busy user who pauses the current question to check progress.",
+      "communication_style": "Conversational and prone to brief topic changes before returning to the form.",
+      "behaviours": ["interrupts with a progress question", "returns to the active field", "expects context to survive"]
+    },
+    {
+      "id": "privacy_conscious",
+      "name": "Alex",
+      "summary": "A privacy-conscious user who skips a question and later chooses to return to it.",
+      "communication_style": "Polite but firm about controlling which details are entered.",
+      "behaviours": ["skips fields", "reopens a skipped field", "confirms only after review"]
+    },
+    {
+      "id": "frustrated_reader",
+      "name": "Robin",
+      "summary": "A user frustrated by dense official wording who needs patient, simple help.",
+      "communication_style": "Expresses emotion plainly and asks the assistant to slow down and simplify.",
+      "behaviours": ["expresses frustration", "asks for simpler wording", "recovers when helped"]
+    },
+    {
+      "id": "nonlinear_reviewer",
+      "name": "Taylor",
+      "summary": "A user who moves back to an earlier confirmed question and then resumes where they left off.",
+      "communication_style": "Natural and non-linear, with occasional second thoughts.",
+      "behaviours": ["returns to an earlier field", "cancels an unnecessary correction", "resumes the pending question"]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "multiple-fields-one-message",
+      "title": "Multiple fields supplied in one answer",
+      "persona_id": "efficient_multi_answer",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_full_legal_name", "applicant_date_of_birth"],
+      "purpose": "Measure whether the assistant extracts the active answer accurately and retains the second volunteered fact for the next question.",
+      "tags": ["multiple_fields", "context_retention", "accuracy"],
+      "turns": [
+        {
+          "id": "start",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_full_legal_name"}
+        },
+        {
+          "id": "bundled-answer",
+          "event": {"type": "message", "content": "My full legal name is Mina Okafor, and I was born on 6 March 1992."},
+          "tags": ["context_retention"],
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_full_legal_name", "prepared_value": "Mina Okafor"}
+        },
+        {
+          "id": "confirm-name",
+          "event": {"type": "confirm"},
+          "visible_user_message": "Yes, use Mina Okafor.",
+          "expect": {"effects": ["confirmed"], "phase": "awaiting_answer", "field_id": "applicant_full_legal_name", "prepared_value": "Mina Okafor"}
+        },
+        {
+          "id": "refer-to-volunteered-date",
+          "event": {"type": "message", "content": "I already gave you my date of birth with my name."},
+          "tags": ["context_retention", "recovery"],
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_date_of_birth", "prepared_value": "06/03/1992"}
+        },
+        {
+          "id": "confirm-date",
+          "event": {"type": "confirm"},
+          "visible_user_message": "That's right.",
+          "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "applicant_date_of_birth", "prepared_value": "06/03/1992"}
+        }
+      ],
+      "expected_final": {
+        "confirmed_values": {"applicant_full_legal_name": "Mina Okafor", "applicant_date_of_birth": "06/03/1992"},
+        "skipped_field_ids": [],
+        "unanswered_field_ids": []
+      },
+      "allowed_proposals": {
+        "applicant_full_legal_name": ["Mina Okafor"],
+        "applicant_date_of_birth": ["06/03/1992"]
+      }
+    },
+    {
+      "id": "correct-confirmed-answer",
+      "title": "Correct a previously confirmed answer",
+      "persona_id": "careful_corrector",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name", "country"],
+      "purpose": "Verify that a correction preserves the old value until explicit replacement confirmation and does not lose another confirmed field.",
+      "tags": ["correction", "recovery", "context_retention"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}},
+        {"id": "name", "event": {"type": "message", "content": "mina okafor"}, "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "full_name", "prepared_value": "Mina Okafor"}},
+        {"id": "confirm-name", "event": {"type": "confirm"}, "visible_user_message": "Confirm that.", "expect": {"effects": ["confirmed"], "phase": "awaiting_answer", "field_id": "full_name", "prepared_value": "Mina Okafor"}},
+        {"id": "country", "event": {"type": "message", "content": "United Kingdom"}, "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "country", "prepared_value": "United Kingdom"}},
+        {"id": "confirm-country", "event": {"type": "confirm"}, "visible_user_message": "Yes.", "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "country", "prepared_value": "United Kingdom"}},
+        {"id": "start-correction", "event": {"type": "message", "content": "I need to change my full name."}, "tags": ["context_retention", "recovery"], "expect": {"effects": ["correction_started"], "phase": "awaiting_replacement", "field_id": "full_name", "message_includes_any": ["Mina Okafor"]}},
+        {"id": "replacement", "event": {"type": "message", "content": "Mina Adebayo"}, "tags": ["recovery"], "expect": {"effects": ["replacement_proposal"], "phase": "awaiting_replacement_confirmation", "field_id": "full_name", "prepared_value": "Mina Adebayo"}},
+        {"id": "confirm-replacement", "event": {"type": "confirm"}, "visible_user_message": "Yes, replace it.", "tags": ["recovery"], "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "full_name", "prepared_value": "Mina Adebayo"}}
+      ],
+      "expected_final": {
+        "confirmed_values": {"full_name": "Mina Adebayo", "country": "United Kingdom"},
+        "skipped_field_ids": [],
+        "unanswered_field_ids": []
+      },
+      "allowed_proposals": {"full_name": ["Mina Okafor", "Mina Adebayo"], "country": ["United Kingdom"]}
+    },
+    {
+      "id": "ambiguous-incomplete-date",
+      "title": "Ambiguous answer followed by clarification",
+      "persona_id": "uncertain_answerer",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_date_of_birth"],
+      "purpose": "Check that an incomplete date is not guessed and that one useful clarification leads to an accurate proposal.",
+      "tags": ["ambiguity", "clarification", "recovery", "accuracy"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_date_of_birth"}},
+        {"id": "partial-date", "event": {"type": "message", "content": "It was sometime in March 1992."}, "tags": ["clarification"], "expect": {"effects": ["none"], "phase": "awaiting_clarification", "field_id": "applicant_date_of_birth", "message_includes_any": ["day", "date"]}},
+        {"id": "complete-date", "event": {"type": "message", "content": "The sixth of March 1992."}, "tags": ["recovery"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_date_of_birth", "prepared_value": "06/03/1992"}},
+        {"id": "confirm", "event": {"type": "confirm"}, "visible_user_message": "Yes, that's the date.", "tags": ["recovery"], "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "applicant_date_of_birth", "prepared_value": "06/03/1992"}}
+      ],
+      "expected_final": {"confirmed_values": {"applicant_date_of_birth": "06/03/1992"}, "skipped_field_ids": [], "unanswered_field_ids": []},
+      "allowed_proposals": {"applicant_date_of_birth": ["06/03/1992"]}
+    },
+    {
+      "id": "field-question-and-follow-up",
+      "title": "Ask what a formal field means",
+      "persona_id": "plain_language_learner",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["occupancy_start_date"],
+      "purpose": "Measure plain-language explanation, a non-repetitive follow-up example, and a return to accurate form filling.",
+      "tags": ["field_question", "clarification", "repetition", "recovery"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "occupancy_start_date"}},
+        {"id": "ask-meaning", "event": {"type": "message", "content": "What does this mean?"}, "tags": ["clarification"], "expect": {"effects": ["none"], "phase": "awaiting_answer", "field_id": "occupancy_start_date", "state_unchanged": true}},
+        {"id": "ask-example", "event": {"type": "message", "content": "Could you give me a simple example?"}, "tags": ["clarification", "repetition_check", "context_retention"], "expect": {"effects": ["none"], "phase": "awaiting_answer", "field_id": "occupancy_start_date", "state_unchanged": true}},
+        {"id": "answer", "event": {"type": "message", "content": "I moved in on 2 September 2021."}, "tags": ["recovery"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "occupancy_start_date", "prepared_value": "02/09/2021"}},
+        {"id": "confirm", "event": {"type": "confirm"}, "visible_user_message": "Yes, put that in.", "tags": ["recovery"], "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "occupancy_start_date", "prepared_value": "02/09/2021"}}
+      ],
+      "expected_final": {"confirmed_values": {"occupancy_start_date": "02/09/2021"}, "skipped_field_ids": [], "unanswered_field_ids": []},
+      "allowed_proposals": {"occupancy_start_date": ["02/09/2021"]},
+      "forbidden_assistant_terms": ["YYYY-MM-DD"]
+    },
+    {
+      "id": "interruption-and-topic-change",
+      "title": "Interrupt with a progress question",
+      "persona_id": "busy_interrupter",
+      "fixture": "real_world/uscis_i9_2025.pdf",
+      "field_ids": ["Last Name (Family Name)", "First Name Given Name"],
+      "purpose": "Verify that a progress interruption is answered from canonical state and the assistant then accepts the pending field answer.",
+      "tags": ["interruption", "topic_change", "context_retention"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "Last Name (Family Name)"}},
+        {"id": "last-name", "event": {"type": "message", "content": "Example"}, "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "Last Name (Family Name)", "prepared_value": "Example"}},
+        {"id": "confirm-last-name", "event": {"type": "confirm"}, "visible_user_message": "Correct.", "expect": {"effects": ["confirmed"], "phase": "awaiting_answer", "field_id": "Last Name (Family Name)", "prepared_value": "Example"}},
+        {"id": "progress-interruption", "event": {"type": "message", "content": "Before that, what have we completed so far?"}, "tags": ["context_retention"], "expect": {"effects": ["none"], "phase": "awaiting_answer", "field_id": "First Name Given Name", "state_unchanged": true, "message_includes_any": ["last name", "Example"]}},
+        {"id": "resume-first-name", "event": {"type": "message", "content": "Okay, my first name is Jordan."}, "tags": ["context_retention"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "First Name Given Name", "prepared_value": "Jordan"}},
+        {"id": "confirm-first-name", "event": {"type": "confirm"}, "visible_user_message": "Yes.", "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "First Name Given Name", "prepared_value": "Jordan"}}
+      ],
+      "expected_final": {"confirmed_values": {"Last Name (Family Name)": "Example", "First Name Given Name": "Jordan"}, "skipped_field_ids": [], "unanswered_field_ids": []},
+      "allowed_proposals": {"Last Name (Family Name)": ["Example"], "First Name Given Name": ["Jordan"]}
+    },
+    {
+      "id": "skip-and-reopen",
+      "title": "Skip a field and return later",
+      "persona_id": "privacy_conscious",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_full_legal_name", "applicant_preferred_name"],
+      "purpose": "Check that skipping is explicit, later reopening is conversational, and the skipped value is never invented.",
+      "tags": ["skip", "revisit", "context_retention"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_full_legal_name"}},
+        {"id": "skip", "event": {"type": "message", "content": "I'd rather not answer this for now."}, "expect": {"effects": ["skipped"], "phase": "awaiting_answer", "field_id": "applicant_full_legal_name"}},
+        {"id": "preferred-name", "event": {"type": "message", "content": "Please call me Alex."}, "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_preferred_name", "prepared_value": "Alex"}},
+        {"id": "confirm-preferred", "event": {"type": "confirm"}, "visible_user_message": "Yes.", "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "applicant_preferred_name", "prepared_value": "Alex"}},
+        {"id": "reopen-full-name", "event": {"type": "message", "content": "Reopen my full legal name."}, "tags": ["context_retention", "recovery"], "expect": {"effects": ["field_reopened"], "phase": "awaiting_answer", "field_id": "applicant_full_legal_name"}},
+        {"id": "full-name", "event": {"type": "message", "content": "Alex Morgan"}, "tags": ["recovery"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_full_legal_name", "prepared_value": "Alex Morgan"}},
+        {"id": "confirm-full-name", "event": {"type": "confirm"}, "visible_user_message": "Use that.", "tags": ["recovery"], "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "applicant_full_legal_name", "prepared_value": "Alex Morgan"}}
+      ],
+      "expected_final": {"confirmed_values": {"applicant_full_legal_name": "Alex Morgan", "applicant_preferred_name": "Alex"}, "skipped_field_ids": [], "unanswered_field_ids": []},
+      "allowed_proposals": {"applicant_full_legal_name": ["Alex Morgan"], "applicant_preferred_name": ["Alex"]}
+    },
+    {
+      "id": "confusion-and-frustration",
+      "title": "Recover from confusion and frustration",
+      "persona_id": "frustrated_reader",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["occupancy_start_date"],
+      "purpose": "Assess whether the assistant acknowledges frustration, simplifies instead of repeating, and returns safely to the question.",
+      "tags": ["confusion", "frustration", "clarification", "recovery", "repetition"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "occupancy_start_date"}},
+        {"id": "frustration", "event": {"type": "message", "content": "I don't understand any of this. This wording is really frustrating."}, "tags": ["clarification", "emotion"], "expect": {"effects": ["none"], "phase": "awaiting_answer", "field_id": "occupancy_start_date", "state_unchanged": true}},
+        {"id": "simplify", "event": {"type": "message", "content": "Please just ask me in plain English."}, "tags": ["clarification", "emotion", "repetition_check", "context_retention"], "expect": {"effects": ["none"], "phase": "awaiting_answer", "field_id": "occupancy_start_date", "state_unchanged": true}},
+        {"id": "answer", "event": {"type": "message", "content": "I started living there on 14 January 2020."}, "tags": ["recovery"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "occupancy_start_date", "prepared_value": "14 January 2020"}},
+        {"id": "confirm", "event": {"type": "confirm"}, "visible_user_message": "That's correct.", "tags": ["recovery"], "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "occupancy_start_date", "prepared_value": "14 January 2020"}}
+      ],
+      "expected_final": {"confirmed_values": {"occupancy_start_date": "14 January 2020"}, "skipped_field_ids": [], "unanswered_field_ids": []},
+      "allowed_proposals": {"occupancy_start_date": ["14 January 2020"]},
+      "forbidden_assistant_terms": ["approximate date"]
+    },
+    {
+      "id": "return-to-earlier-question",
+      "title": "Return to an earlier confirmed question",
+      "persona_id": "nonlinear_reviewer",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name", "country"],
+      "purpose": "Verify non-linear navigation, cancellation of a correction, and resumption of the previously active unanswered field.",
+      "tags": ["revisit", "correction", "topic_change", "context_retention", "recovery"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}},
+        {"id": "name", "event": {"type": "message", "content": "Taylor Reed"}, "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "full_name", "prepared_value": "Taylor Reed"}},
+        {"id": "confirm-name", "event": {"type": "confirm"}, "visible_user_message": "Yes.", "expect": {"effects": ["confirmed"], "phase": "awaiting_answer", "field_id": "full_name", "prepared_value": "Taylor Reed"}},
+        {"id": "return-to-name", "event": {"type": "message", "content": "Can we go back to the full name question?"}, "tags": ["context_retention"], "expect": {"effects": ["correction_started"], "phase": "awaiting_replacement", "field_id": "full_name", "message_includes_any": ["Taylor Reed"]}},
+        {"id": "cancel-correction", "event": {"type": "message", "content": "Actually it was right, cancel that correction."}, "tags": ["context_retention", "recovery"], "expect": {"effects": ["correction_cancelled"], "phase": "awaiting_answer", "field_id": "full_name", "message_includes_any": ["country"]}},
+        {"id": "resume-country", "event": {"type": "message", "content": "United Kingdom"}, "tags": ["context_retention", "recovery"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "country", "prepared_value": "United Kingdom"}},
+        {"id": "confirm-country", "event": {"type": "confirm"}, "visible_user_message": "Confirm it.", "tags": ["recovery"], "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "country", "prepared_value": "United Kingdom"}}
+      ],
+      "expected_final": {"confirmed_values": {"full_name": "Taylor Reed", "country": "United Kingdom"}, "skipped_field_ids": [], "unanswered_field_ids": []},
+      "allowed_proposals": {"full_name": ["Taylor Reed"], "country": ["United Kingdom"]}
+    }
+  ]
+}

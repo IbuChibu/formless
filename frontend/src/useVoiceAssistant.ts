@@ -64,7 +64,7 @@ export type VoiceAssistantControls = {
   inputError: string | null;
   transcript: string;
   setTranscript: (value: string) => void;
-  startListening: () => void;
+  startListening: (onComplete?: (transcript: string) => void) => void;
   stopListening: () => void;
   cancelListening: () => void;
   clearTranscript: () => void;
@@ -73,7 +73,14 @@ export type VoiceAssistantControls = {
   outputError: string | null;
   spokenRepliesEnabled: boolean;
   setSpokenRepliesEnabled: (enabled: boolean) => void;
-  speakAssistantMessage: (message: string) => void;
+  speakAssistantMessage: (
+    message: string,
+    options?: {
+      force?: boolean;
+      onEnd?: () => void;
+      onError?: () => void;
+    },
+  ) => boolean;
   stopSpeaking: () => void;
   resetVoiceSession: () => void;
 };
@@ -144,14 +151,16 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const recognitionSessionRef = useRef(0);
-  const transcriptRef = useRef("");
+  const recognitionTranscriptRef = useRef("");
   const cancelRequestedRef = useRef(false);
   const recognitionFailedRef = useRef(false);
+  const recognitionCompleteRef = useRef<
+    ((transcript: string) => void) | null
+  >(null);
   const spokenRepliesEnabledRef = useRef(false);
   const speechSessionRef = useRef(0);
 
   const setTranscript = useCallback((value: string) => {
-    transcriptRef.current = value;
     setTranscriptState(value);
   }, []);
 
@@ -164,9 +173,19 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
   }, [outputSupported]);
 
   const speakAssistantMessage = useCallback(
-    (message: string) => {
-      if (!spokenRepliesEnabledRef.current || !outputSupported) {
-        return;
+    (
+      message: string,
+      options?: {
+        force?: boolean;
+        onEnd?: () => void;
+        onError?: () => void;
+      },
+    ) => {
+      if (
+        (!spokenRepliesEnabledRef.current && !options?.force) ||
+        !outputSupported
+      ) {
+        return false;
       }
 
       speechSessionRef.current += 1;
@@ -184,18 +203,22 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
       utterance.onend = () => {
         if (speechSessionRef.current === speechSession) {
           setOutputStatus("idle");
+          options?.onEnd?.();
         }
       };
       utterance.onerror = () => {
         if (speechSessionRef.current !== speechSession) {
           return;
         }
+        speechSessionRef.current += 1;
         setOutputError(
           "This response could not be spoken. It remains available as text.",
         );
         setOutputStatus("error");
+        options?.onError?.();
       };
       window.speechSynthesis.speak(utterance);
+      return true;
     },
     [outputSupported],
   );
@@ -218,93 +241,105 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
     recognitionRef.current?.abort();
     recognitionRef.current = null;
     recognitionFailedRef.current = false;
+    recognitionCompleteRef.current = null;
+    recognitionTranscriptRef.current = "";
     setInputError(null);
     setTranscript("");
     setInputStatus(inputSupported ? "idle" : "unsupported");
   }, [inputSupported, setTranscript]);
 
-  const startListening = useCallback(() => {
-    const SpeechRecognition = getSpeechRecognitionConstructor();
-    if (!inputSupported || !SpeechRecognition) {
-      setInputStatus("unsupported");
-      return;
-    }
+  const startListening = useCallback(
+    (onComplete?: (transcript: string) => void) => {
+      const SpeechRecognition = getSpeechRecognitionConstructor();
+      if (!inputSupported || !SpeechRecognition) {
+        setInputStatus("unsupported");
+        return;
+      }
 
-    recognitionSessionRef.current += 1;
-    const recognitionSession = recognitionSessionRef.current;
-    recognitionRef.current?.abort();
-    stopSpeaking();
-    cancelRequestedRef.current = false;
-    recognitionFailedRef.current = false;
-    setInputError(null);
-    setTranscript("");
+      recognitionSessionRef.current += 1;
+      const recognitionSession = recognitionSessionRef.current;
+      recognitionRef.current?.abort();
+      stopSpeaking();
+      cancelRequestedRef.current = false;
+      recognitionFailedRef.current = false;
+      recognitionCompleteRef.current = onComplete ?? null;
+      recognitionTranscriptRef.current = "";
+      setInputError(null);
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = window.navigator.language || "en-GB";
-    recognition.maxAlternatives = 1;
-    recognition.onstart = () => {
-      if (recognitionSessionRef.current === recognitionSession) {
-        setInputStatus("listening");
-      }
-    };
-    recognition.onresult = (event) => {
-      if (recognitionSessionRef.current !== recognitionSession) {
-        return;
-      }
-      const nextTranscript = transcriptFromResults(event.results);
-      if (nextTranscript) {
-        setTranscript(nextTranscript);
-      }
-    };
-    recognition.onerror = (event) => {
-      if (recognitionSessionRef.current !== recognitionSession) {
-        return;
-      }
-      if (event.error === "aborted" && cancelRequestedRef.current) {
-        return;
-      }
-      recognitionFailedRef.current = true;
-      setInputError(recognitionErrorMessage(event.error));
-      setInputStatus("error");
-    };
-    recognition.onend = () => {
-      if (recognitionSessionRef.current !== recognitionSession) {
-        return;
-      }
-      if (recognitionRef.current === recognition) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = window.navigator.language || "en-GB";
+      recognition.maxAlternatives = 1;
+      recognition.onstart = () => {
+        if (recognitionSessionRef.current === recognitionSession) {
+          setInputStatus("listening");
+        }
+      };
+      recognition.onresult = (event) => {
+        if (recognitionSessionRef.current !== recognitionSession) {
+          return;
+        }
+        const nextTranscript = transcriptFromResults(event.results);
+        if (nextTranscript) {
+          recognitionTranscriptRef.current = nextTranscript;
+          setTranscript(nextTranscript);
+        }
+      };
+      recognition.onerror = (event) => {
+        if (recognitionSessionRef.current !== recognitionSession) {
+          return;
+        }
+        if (event.error === "aborted" && cancelRequestedRef.current) {
+          return;
+        }
+        recognitionFailedRef.current = true;
+        setInputError(recognitionErrorMessage(event.error));
+        setInputStatus("error");
+      };
+      recognition.onend = () => {
+        if (recognitionSessionRef.current !== recognitionSession) {
+          return;
+        }
+        if (recognitionRef.current === recognition) {
+          recognitionRef.current = null;
+        }
+        if (cancelRequestedRef.current) {
+          cancelRequestedRef.current = false;
+          return;
+        }
+        if (recognitionFailedRef.current) {
+          return;
+        }
+        const completedTranscript = recognitionTranscriptRef.current.trim();
+        if (completedTranscript) {
+          setInputStatus("review");
+          const complete = recognitionCompleteRef.current;
+          recognitionCompleteRef.current = null;
+          complete?.(completedTranscript);
+          return;
+        }
+        setInputError(
+          "I didn't hear any speech. Try again when you are ready, or type your answer.",
+        );
+        setInputStatus("error");
+      };
+
+      recognitionRef.current = recognition;
+      setInputStatus("requesting_permission");
+      try {
+        recognition.start();
+      } catch {
         recognitionRef.current = null;
+        recognitionCompleteRef.current = null;
+        setInputError(
+          "Voice input could not start. Try again or keep typing your answer.",
+        );
+        setInputStatus("error");
       }
-      if (cancelRequestedRef.current) {
-        cancelRequestedRef.current = false;
-        return;
-      }
-      if (recognitionFailedRef.current) {
-        return;
-      }
-      if (transcriptRef.current.trim()) {
-        setInputStatus("review");
-        return;
-      }
-      setInputError(
-        "I didn't hear any speech. Try again when you are ready, or type your answer.",
-      );
-      setInputStatus("error");
-    };
-
-    recognitionRef.current = recognition;
-    setInputStatus("requesting_permission");
-    try {
-      recognition.start();
-    } catch {
-      recognitionRef.current = null;
-      setInputError(
-        "Voice input could not start. Try again or keep typing your answer.",
-      );
-      setInputStatus("error");
-    }
-  }, [inputSupported, setTranscript, stopSpeaking]);
+    },
+    [inputSupported, setTranscript, stopSpeaking],
+  );
 
   const stopListening = useCallback(() => {
     if (!recognitionRef.current) {
@@ -319,6 +354,8 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
   }, []);
 
   const clearTranscript = useCallback(() => {
+    recognitionCompleteRef.current = null;
+    recognitionTranscriptRef.current = "";
     setInputError(null);
     setTranscript("");
     setInputStatus(inputSupported ? "idle" : "unsupported");
@@ -335,6 +372,8 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
       recognitionSessionRef.current += 1;
       speechSessionRef.current += 1;
       recognitionRef.current?.abort();
+      recognitionCompleteRef.current = null;
+      recognitionTranscriptRef.current = "";
       if (outputSupported) {
         window.speechSynthesis.cancel();
       }

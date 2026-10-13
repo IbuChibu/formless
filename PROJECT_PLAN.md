@@ -70,11 +70,14 @@ Required technology:
 
 ## Current implementation status
 
-- current typed workflow separates conversation from validated form effects
-- completed through Milestone 6.15
-- Milestone 6.16 is the next planned milestone before voice
-- voice, deployment, persistence, and the later full-workflow milestone have
-  not started
+- the typed guided interview and human-helper, turn-based voice interview are
+  complete through Milestone 7.1
+- the automated conversation evaluation harness and live baseline are complete
+  through Milestone 7.2
+- Milestone 7.3 is the next planned milestone; it is an evidence-gated
+  reliability pass based on the recorded baseline, before Milestone 8
+- deployment, persistence, and the later full-workflow milestone have not
+  started
 
 ---
 
@@ -2617,6 +2620,359 @@ Do not implement:
 - voice-controlled confirmation without a visible confirmation state
 - a separate voice agent or duplicate form state
 - authentication, persistence, or a database
+
+# Milestone 7.1 — Human-helper voice interview
+
+Status: COMPLETE
+
+Problem to solve:
+Milestone 7 added safe speech input and output, but the user still has to start
+each recording, stop it, review it, send it, and separately decide when the
+assistant should speak. That is useful dictation, not the intended experience
+of a patient helper sitting beside the user, asking one question at a time,
+listening, checking what should be entered, and moving through the form.
+
+Goal:
+Turn the existing speech adapter into an explicit, turn-based voice interview
+around the same typed Form Agent. Once the user starts a voice conversation,
+the assistant speaks the visible question or response, listens for one user
+turn, sends the visible transcript through the existing message path, and
+continues from the backend's validated state and effect. The PDF changes only
+after an explicit confirmation event.
+
+Target voice rhythm:
+1. The user selects `Start conversation`; no microphone starts before this
+   deliberate action.
+2. The assistant speaks the same question or response shown in the interview.
+3. When speech finishes, the interface clearly enters one listening turn.
+4. The user answers naturally; the recognized transcript remains visible and
+   can be corrected, while the completed utterance is sent through the same
+   Form Agent message event as typed text.
+5. If the answer becomes a proposal, the visible proposal card remains the
+   source of truth and the assistant asks for confirmation aloud.
+6. A bounded confirmation phrase such as `confirm that` or `put that in` maps
+   to the existing explicit confirmation event only while that proposal card is
+   visible. The same words cannot confirm anything in another state.
+7. Rejection, correction, skip, explanation, pause, and ordinary answers remain
+   available by voice without creating a second form-state path.
+8. After confirmation or skip, the backend's existing acknowledgement and next
+   question are spoken, then the next listening turn begins.
+
+Voice-session design:
+- add a small frontend voice-session orchestrator with explicit states for
+  inactive, starting, assistant speaking, listening, preparing a transcript,
+  waiting for the Form Agent, awaiting confirmation, paused, complete, and
+  recoverable error
+- use turn-based capture rather than always-on recording; every recognition
+  session ends after one utterance or when the user stops it
+- keep microphone, speech-recognition, and speech-synthesis mechanics inside
+  the existing browser voice adapter
+- keep recognition transcripts visible during processing and proposal review;
+  typed input and the existing review buttons remain available at all times
+- allow the user to interrupt spoken output and answer immediately; starting a
+  listening turn stops current speech first
+- provide visible `Pause`, `Resume`, and `End conversation` controls that stop
+  microphone capture and speech without changing form state
+- if speech input or output is unavailable, denied, or fails, preserve the
+  current question, proposal, transcript, typed composer, and manual fallback
+- read back the backend's prepared-answer wording before accepting spoken
+  confirmation; never construct a separate voice-only proposal
+
+Closed voice-command policy:
+- outside a visible pending proposal, recognized speech is an ordinary Form
+  Agent message except for local pause/end commands and a field-scoped skip
+- while a proposal is visibly pending, only a small exact set of affirmative
+  phrases can dispatch the existing explicit `confirm` event
+- exact rejection and skip phrases dispatch their existing validated events
+- a spoken correction such as `No, I said 17 October 1987` first rejects the
+  pending proposal, then submits only the user-stated replacement through the
+  normal answer path; the replacement still requires a fresh explicit
+  confirmation
+- unrecognized or ambiguous confirmation language remains an ordinary message
+  and cannot mutate canonical field state
+- voice parsing never writes a value directly, calls the PDF service, chooses a
+  field value, or treats assistant speech as user input
+
+Architecture boundaries:
+- continue using `POST /agent/respond` as the only conversational endpoint
+- keep the existing `assistant_message`, typed `effect`, and canonical
+  `conversation_state` as the authority for every turn
+- keep one shared frontend field state for voice, typed conversation, quick
+  answers, manual editing, and PDF filling
+- keep speech recognition and synthesis entirely in the frontend; do not send
+  audio to FastAPI, Nemotron, Nebius, or Tavily
+- keep Nemotron and deterministic Form Agent routing unchanged
+- do not add a frontend state library, voice SDK, second model, second agent, or
+  voice-specific backend endpoint
+
+Acceptance criteria:
+- one explicit `Start conversation` action starts a turn-based voice session
+- the assistant speaks the same response that remains visible in the transcript
+- listening begins only during an active voice session and only for one user
+  turn at a time
+- the UI clearly distinguishes assistant speaking, listening, transcript
+  preparation, waiting for the agent, awaiting confirmation, paused, complete,
+  unsupported, and error states
+- a completed spoken answer is visibly transcribed and uses the same Form Agent
+  message event, endpoint, validation, proposal, and confirmation flow as typing
+- speech recognition never writes directly to confirmed field state or the PDF
+- a bounded spoken confirmation becomes the existing explicit confirmation
+  event only while the matching proposal card is visibly pending
+- the same confirmation phrase outside a pending proposal cannot confirm or
+  update any field
+- spoken rejection and skip use the existing closed validated events
+- a spoken correction rejects the old proposal, submits a new candidate through
+  the normal answer path, and still requires explicit confirmation before a PDF
+  update
+- after confirmation or skip, the assistant speaks the deterministic
+  acknowledgement and next real question without a separate Continue action
+- the user can interrupt assistant speech to answer, pause or end the voice
+  session, and resume without losing conversation or field state
+- pausing, ending, cancelling, permission denial, no-speech, recognition error,
+  and speech-output failure do not change confirmed values or PDF bytes
+- the recognized transcript remains visible and correctable; typed input and
+  visible proposal controls remain permanent fallbacks
+- changing PDFs terminates the active voice session and clears its transient
+  transcript without persistence
+- frontend production build and existing backend, PDF, Form Agent, safety, and
+  transcript tests pass
+
+Verified implementation outcome:
+- one `Start conversation` control begins a frontend-only session that speaks
+  the current visible assistant turn, opens one one-shot recognition turn after
+  speech ends, submits the completed transcript through the existing Form Agent
+  message path, and continues from the returned typed effect and state
+- the voice UI distinguishes inactive, starting, assistant-speaking,
+  microphone-permission, listening, transcript-processing, agent-processing,
+  pending-confirmation, paused, complete, unsupported, and recoverable-error
+  conditions while keeping the typed composer and visible proposal controls
+- exact confirmation, rejection, and skip phrases become their existing closed
+  events only in compatible state; `yes` outside a pending proposal remains an
+  ordinary message and cannot confirm or update a field
+- a spoken correction rejects the current proposal, queues only the replacement
+  stated by the user, submits it through the normal answer path, and requires a
+  fresh explicit confirmation before canonical state changes
+- pausing, ending, cancelling, interrupting speech, microphone failure, and
+  changing forms stop transient browser speech work without applying a value;
+  stale recognition and speech callbacks remain session-guarded
+- the latest transcript stays visible through agent processing and spoken
+  proposal review, can be edited and resubmitted, and is replaced only when the
+  next listening turn produces new recognized speech
+- a local browser harness using synthetic, non-personal speech exercised start,
+  answer, proposal, spoken correction, replacement proposal, explicit spoken
+  confirmation, deterministic next-question progression, spoken pause, and the
+  out-of-context `yes` boundary; the temporary harness was removed afterward
+- all 305 backend tests pass, the deterministic 5-fixture/47-turn transcript
+  evaluation reports no failures or safety-boundary regressions, and the
+  frontend production build passes with only the existing PDF-worker chunk-size
+  warning
+
+Do not implement:
+- always-on recording, background listening, wake-word detection, or recording
+  before the user starts the session
+- automatic acceptance of a proposed factual value
+- confirmation from fuzzy sentiment, assistant wording, or a voice phrase when
+  no matching proposal is visibly pending
+- direct voice-to-PDF writes, audio upload, audio storage, or transcript
+  persistence
+- a separate voice agent, second conversational endpoint, model cascade,
+  multi-agent workflow, or agent framework
+- direct PDF field interaction, final-review workspace, or other Milestone 8
+  work
+- authentication, browser storage, a database, Docker, deployment, OCR, XFA,
+  scanned-form support, or online forms
+
+# Milestone 7.2 — Automated conversation evaluation baseline
+
+Status: COMPLETE
+
+Problem to solve:
+The existing test suite proves individual routing, validation, safety, and
+state-machine behaviors, and its curated transcript evaluator proves several
+known complete paths. It does not reproduce the messier ways people actually
+talk while completing a form, retain every request/response/state transition
+as an artifact, score deterministic form correctness together with qualitative
+conversation quality, or compare the same suite between code/model versions.
+Without that baseline, changing prompts or interpretation logic risks improving
+one demo transcript while silently regressing accuracy, confirmation safety, or
+another conversational behavior.
+
+Goal:
+Add a test-only conversation evaluation lab that drives the existing Form Agent
+application boundary over real schemas extracted from the supported PDF
+fixtures. Fixed synthetic personas and conversations must exercise bundled
+answers, corrections, ambiguity, questions, interruptions, skipping,
+frustration, and revisiting. Every run must save complete evidence and support a
+like-for-like comparison before any production conversation changes are made.
+
+Evaluation architecture:
+- keep all simulator, scenario, scoring, judge, report, and comparison code
+  under `backend/evaluations`; do not put evaluation policy in the Form Agent
+- load supported `FormAgentField` schemas through the existing PDF extraction
+  service from checked-in PDF fixtures
+- drive either the public in-process `FormAgentService.respond` boundary or a
+  running API's existing `POST /agent/respond` endpoint
+- mirror the frontend's typed effects when constructing the next request, so
+  only confirmed and skipped effects change the simulator's canonical field
+  state
+- use fixed, versioned, synthetic scenarios rather than model-generated user
+  turns, keeping before/after comparisons repeatable and free of personal data
+- treat exact field state, phase/effect expectations, safe proposal grounding,
+  context checks, repetition, and recovery as deterministic evidence
+- optionally use configured Nemotron as an evaluation-only qualitative judge
+  for naturalness, context awareness, clarification quality, recovery, and
+  possible invention; qualitative scores never override form-state failures
+- write JSON containing every turn, expected result, actual form state, scores,
+  latency, and failure reasons, plus a human-readable Markdown transcript
+- attach the scenario-suite digest, target/model, Git revision, label, and time
+  to every run, and compare only reports produced from the same suite digest
+- ignore generated result files in Git while keeping the scenario definitions,
+  harness, tests, command, and checked baseline summary versioned
+
+Required scenario coverage:
+- a user supplies multiple fields in one message and expects volunteered data
+  to remain available
+- a user corrects a confirmed value while another confirmed value is preserved
+- an incomplete answer triggers one useful clarification rather than a guess
+- a user asks what a field means and asks a contextual follow-up
+- a user interrupts the active question, checks progress, and resumes
+- a user skips a field and later reopens it
+- a confused or frustrated user asks for simpler wording
+- a user returns to an earlier confirmed question and resumes the prior task
+
+Metrics:
+- conversational naturalness, both a transparent bounded heuristic and an
+  optional qualitative judge score
+- context-retention rate over explicitly tagged turns
+- expected canonical form-state accuracy
+- unnecessary adjacent-response repetition rate
+- clarification quality for tagged ambiguity/explanation turns
+- recovery success for correction and misunderstanding scenarios
+- ungrounded proposal or unsupported-claim failures
+- completed-turn rate and average Form Agent response latency
+- deterministic and qualitative failure counts with per-scenario reasons
+
+Acceptance criteria:
+- the suite includes distinct realistic personas and all required scenarios,
+  using synthetic personal information only
+- every scenario uses fields extracted from an existing PDF fixture rather than
+  a duplicate hand-written production schema
+- the simulator calls the existing Form Agent service boundary and offers an
+  HTTP mode for the existing endpoint
+- every turn records the user event, visible message, request state, fields
+  before and after, assistant response, typed effect, resulting state, latency,
+  expectation failures, and provider/API errors
+- deterministic scoring covers form accuracy, context, repetition,
+  clarification, recovery, and whether proposed information is user-grounded
+- optional qualitative scoring produces bounded naturalness, context,
+  clarification, recovery, invention, summary, and failure-reason fields
+- a run saves full JSON and Markdown artifacts without logging credentials
+- a compare command rejects unlike suite digests and reports metric deltas plus
+  stable fixed, new, and unchanged deterministic failures
+- normal tests use deterministic services and make no provider requests
+- no production Form Agent, PDF, frontend, or voice behavior changes while the
+  baseline is being established
+
+Verified implementation outcome:
+- eight synthetic personas drive eight complete scenario definitions containing
+  47 scheduled turns over the sample, household-support, and USCIS I-9 PDF
+  fixtures
+- the simulator can call `FormAgentService.respond` in process or
+  `POST /agent/respond` over HTTP, applies only validated typed effects to its
+  local canonical fields, and retains partial transcripts when a transition or
+  provider call fails
+- generated JSON and Markdown reports contain expected/actual state, full
+  transcripts, deterministic scores, optional Nemotron rubric results, failure
+  reasons, target/model identity, suite digest, Git revision, and latency
+- `python -m evaluations.conversation_harness compare` successfully compared
+  two reports with the same suite digest and reported metric deltas
+- the final live Nemotron baseline completed 42 of 47 scheduled user turns
+  (`0.894` completed-turn rate), achieved `0.500` exact form-state accuracy,
+  `0.619` context retention, `0.333` recovery success, `0.062` unnecessary
+  repetition, `4.667/5` heuristic clarification quality, `4.938/5` heuristic
+  naturalness, and zero deterministic invented-value failures
+- all eight qualitative assessments completed after one bounded invalid-rubric
+  retry; the judge reported `3.875/5` naturalness, `3.625/5` context awareness,
+  `3.833/5` clarification quality, and `3.600/5` recovery quality
+- focused harness tests pass without network access and the unchanged existing
+  backend, transcript, safety, PDF, and frontend checks remain required
+
+Baseline weaknesses to address next:
+- bundled answers are treated as ambiguous and the volunteered later-field
+  value is not recoverable on the next question
+- common conversational wrappers such as `Please call me Alex` and `Okay, my
+  first name is Jordan` are stored wholesale instead of extracting the intended
+  field value
+- complete spoken month-name dates such as `the sixth of March 1992` and `I
+  moved in on 2 September 2021` are rejected rather than safely normalized
+- progress responses retain counts and the active field but do not identify the
+  confirmed answer the user asked about
+- `go back to the full name question` does not start the already-supported
+  closed correction flow, so the following cancellation is interpreted against
+  the wrong field
+- prose can sound warm and helpful while the strict interpretation layer still
+  blocks accurate completion; deterministic state accuracy must therefore stay
+  authoritative over qualitative fluency scores
+
+Do not implement:
+- production prompt, policy, adapter, state-machine, PDF, frontend, or voice
+  changes in this baseline milestone
+- generated or real personal information
+- an autonomous user model whose changing output prevents version comparison
+- a second production agent, runtime model cascade, agent framework, database,
+  analytics service, or transcript persistence
+- Milestone 7.3 reliability changes or Milestone 8 workflow changes
+
+# Milestone 7.3 — Evidence-gated conversational reliability pass
+
+Status: NOT STARTED
+
+Goal:
+Make the smallest production changes that directly address the Milestone 7.2
+baseline failures, then rerun the exact same suite and accept changes only when
+the comparison improves form accuracy and recovery without an invention or
+confirmation-boundary regression.
+
+Planned targeted changes:
+- add field-aware extraction of common answer wrappers for names and short text
+  while preserving the user's actual spelling and factual content
+- accept and conservatively normalize unambiguous spoken month-name dates for
+  fields whose schema requests a date
+- handle a bundled active-field answer without treating the unrelated supplied
+  detail as part of that value, and use bounded history when the user says they
+  already supplied the next answer
+- expand deterministic conversational navigation for natural `go back to`
+  references to a confirmed question, retaining the old value until explicit
+  replacement confirmation
+- make progress/review answers identify relevant canonical fields and values
+  when the user asks, without exposing or inventing unrelated information
+- keep explanatory examples and format advice bounded by extracted schema or
+  verified form context
+- add unit and transcript tests for every accepted interpretation before
+  changing the baseline comparison result
+- rerun Milestone 7.2 with the same suite digest, save a candidate report, and
+  use the compare command to demonstrate fixed failures and any regressions
+
+Acceptance criteria:
+- bundled-answer, conversational-wrapper, natural-date, interruption, skip,
+  frustration, correction, and return-to-earlier scenarios all complete or
+  fail with an actionable clarification rather than an invalid transition
+- exact form-state accuracy and recovery success materially improve from the
+  recorded baseline
+- context retention does not regress
+- invented-information failures and confirmation-boundary failures remain zero
+- replacement corrections preserve the current confirmed value until explicit
+  confirmation
+- the same fixed scenarios and suite digest are used for baseline and candidate
+  reports
+- all backend, PDF, Form Agent, safety, transcript, harness, and frontend checks
+  pass
+
+Do not implement:
+- broad Form Agent rewrites or a new conversation architecture
+- a second production agent, agent debate, or runtime model cascade
+- voice changes, direct PDF interaction, final-review UI, or Milestone 8 work
+- authentication, persistence, a database, deployment, OCR, XFA, or online forms
 
 # Milestone 8 — Full workflow
 

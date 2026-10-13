@@ -236,3 +236,52 @@ Keeping voice as an input/output adapter preserves one canonical conversation,
 one explicit proposal review, one confirmed field state, and a permanent typed
 fallback while still delivering the voice-first interaction needed for the
 hackathon demonstration.
+
+---
+
+## 2026-10-12 — Voice uses an explicit turn-based interview session
+
+Decision:
+Starting voice creates a frontend-only, turn-based session over the existing
+Form Agent. The assistant speaks its already-visible response, opens one
+listening turn, sends the completed transcript through the existing message
+path, and continues from the returned typed effect and conversation state.
+Exact spoken confirmation phrases map to the existing explicit confirmation
+event only while the matching proposal card is visibly pending.
+
+Reason:
+Dictation controls do not reproduce the intended experience of a patient human
+helper who asks, listens, checks, and moves to the next question. A bounded
+session provides that rhythm without always-on recording, a voice-specific
+agent, duplicate form state, or direct speech-to-PDF writes. Restricting spoken
+confirmation to visible pending proposals retains the same review boundary as
+the typed interface.
+
+---
+
+## 2026-10-13 — Conversation changes are gated by an artifact-producing baseline
+
+Decision:
+Before changing the production Form Agent again, Formless runs fixed synthetic
+persona conversations through its existing public application boundary. The
+evaluation harness owns only test scenarios, an ephemeral mirror of typed
+effects, deterministic scoring, an optional qualitative Nemotron rubric, and
+JSON/Markdown reporting. Exact form state and closed-effect expectations remain
+authoritative. Candidate changes are compared only against reports with the
+same scenario-suite digest.
+
+Reason:
+Short happy-path tests can pass while real conversational phrasing still loses
+values, repeats questions, or blocks recovery. Free-form model judging alone is
+also unstable and can reward fluent prose despite an incorrect form. Saving the
+complete transcript, expected and actual state, stable deterministic failures,
+and bounded qualitative reasons makes the weaknesses reproducible without
+adding production analytics or storing real personal information.
+
+Outcome:
+The first live eight-scenario baseline showed that warm wording and safe
+confirmation boundaries are not the primary bottleneck. The largest gaps are
+active-value extraction from bundled or conversational answers, spoken-date
+normalization, retaining volunteered later-field context, and natural
+return-to-field navigation. Those findings define Milestone 7.3; no production
+Form Agent behavior changed while the baseline was recorded.

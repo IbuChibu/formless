@@ -4,6 +4,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import PdfViewer from "./PdfViewer";
 import VoiceAssistantPanel from "./VoiceAssistantPanel";
 import useVoiceAssistant from "./useVoiceAssistant";
+import useVoiceInterview from "./useVoiceInterview";
 
 type ConnectionStatus = "checking" | "connected" | "disconnected";
 type ExtractionStatus = "idle" | "loading" | "ready" | "empty" | "error";
@@ -471,7 +472,7 @@ function App() {
     setPendingProposalDetails(null);
     setManualDrawerOpen(false);
     setShowFullTranscript(false);
-    voice.resetVoiceSession();
+    voiceInterview.resetInterview();
     agentMessageIdRef.current = 0;
     setExtractionStatus("loading");
     setPreviewStatus("idle");
@@ -693,8 +694,6 @@ function App() {
           ? { webGuidanceRetry: request }
           : {}),
       });
-      voice.speakAssistantMessage(assistantMessage);
-
       setAgentConversationState(conversationState);
 
       if (
@@ -882,7 +881,7 @@ function App() {
   const visibleAgentMessages = showFullTranscript
     ? agentMessages
     : agentMessages.slice(-3);
-  const latestAssistantMessage = getLatestAssistantMessage(agentMessages);
+  const latestAssistantTurn = getLatestAssistantTurn(agentMessages);
   const pendingProposalPdfField = fields.find(
     (field) => field.id === pendingProposal?.field_id,
   );
@@ -926,6 +925,29 @@ function App() {
     "awaiting_replacement_confirmation",
     "form_complete",
   ].includes(agentConversationState.phase);
+  const voiceInterview = useVoiceInterview({
+    voice,
+    agentIsBusy: agentStatus === "loading",
+    agentHasError: agentStatus === "error",
+    canSendMessage: canSendAgentMessage,
+    needsAdvance:
+      (canStartAgent || canResumeAgent) && hasUnansweredAgentField,
+    latestAssistantTurn,
+    activeFieldId: agentActiveFieldId,
+    activeQuestion: activeAgentQuestion,
+    hasPendingProposal: pendingProposal !== null,
+    isFormComplete: agentConversationState.phase === "form_complete",
+    onAdvance: () => sendAgentEvent({ type: "advance" }),
+    onSendMessage: sendAgentMessage,
+    onConfirmProposal: () => {
+      if (pendingProposal) {
+        confirmPendingProposal(pendingProposal.value);
+      }
+    },
+    onRejectProposal: rejectPendingProposal,
+    onSkipField: (fieldId) =>
+      sendAgentEvent({ type: "skip", field_id: fieldId }),
+  });
 
   return (
     <div className="app-shell">
@@ -1666,11 +1688,9 @@ function App() {
                 {canUseAgent ? (
                   <VoiceAssistantPanel
                     voice={voice}
+                    interview={voiceInterview}
                     agentIsBusy={agentStatus === "loading"}
-                    canSendMessage={canSendAgentMessage}
-                    hasAssistantMessage={latestAssistantMessage !== null}
                     hasPendingProposal={pendingProposal !== null}
-                    onSendTranscript={sendAgentMessage}
                   />
                 ) : null}
 
@@ -2838,12 +2858,15 @@ function getQuestionStatusLabel(phase: ConversationPhase): string {
   return labels[phase];
 }
 
-function getLatestAssistantMessage(
+function getLatestAssistantTurn(
   messages: ConversationMessage[],
-): string | null {
+): { id: number; message: string } | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index].role === "assistant") {
-      return messages[index].content;
+      return {
+        id: messages[index].id,
+        message: messages[index].content,
+      };
     }
   }
   return null;

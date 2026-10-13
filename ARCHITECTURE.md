@@ -27,12 +27,17 @@ Voice / Text / PDF field click / Manual drawer
 Responsible for:
 - displaying PDF
 - displaying questions
-- starting and stopping browser voice capture only after an explicit user action
-- keeping recognized speech as an editable draft until the user submits it
-- sending submitted speech transcripts through the same Form Agent message path
-  and explicit proposal-confirmation flow as typed text
-- optionally speaking the already-visible assistant message through browser
-  speech synthesis, with a visible stop control and persistent text fallback
+- starting a turn-based browser voice interview only after an explicit user
+  action
+- speaking the same already-visible assistant message, then opening one bounded
+  listening turn rather than recording continuously
+- keeping the latest recognized speech visible and correctable while sending a
+  completed utterance through the same Form Agent message path as typed text
+- mapping only a small exact set of spoken decisions to existing explicit
+  confirm, reject, and skip events, with confirmation enabled only while the
+  matching proposal is visibly pending
+- pausing, resuming, ending, or interrupting a voice session without changing
+  canonical field state
 - presenting permission, listening, processing, retry, unsupported-browser, and
   speech-output failure states without removing the typed composer
 - displaying conversation
@@ -62,7 +67,38 @@ Must not:
 - contain agent reasoning
 - treat an AI proposal as a confirmed factual answer
 - let browser speech recognition or speech synthesis mutate canonical field
-  state, confirm a proposal, or create a second conversation path
+  state, create a second conversation path, or confirm anything when no matching
+  proposal is visibly pending
+
+## Voice interview
+
+The browser voice layer has two focused responsibilities. `useVoiceAssistant`
+owns the Web Speech API lifecycle, including one-shot recognition, editable
+transcript state, speech synthesis, cancellation, unsupported capability, and
+stale-callback guards. `useVoiceInterview` owns the frontend-only turn loop:
+
+```text
+explicit start
+    -> visible assistant response is spoken
+    -> one listening turn
+    -> visible completed transcript
+    -> existing Form Agent message or closed event
+    -> validated response and effect
+    -> next spoken response
+```
+
+The voice interview does not parse form values or update fields. Ordinary
+speech is sent as the existing `message` event. A field-scoped skip uses the
+existing `skip` event. A bounded affirmative phrase becomes the existing
+`confirm` event only while canonical conversation state contains a visible
+pending proposal. A spoken correction first rejects that proposal, then sends
+the user-stated replacement through the ordinary answer path; the replacement
+creates a new proposal and still requires confirmation.
+
+The loop stops on pause, end, microphone failure, provider failure, or form
+change. Audio is never uploaded or stored. Typed conversation, proposal
+buttons, and the manual drawer remain available throughout and operate on the
+same state.
 
 ## FastAPI
 
@@ -337,21 +373,51 @@ events, but the normal proposal-decision path progresses in one response.
 
 ## Agent evaluation
 
-Agent evaluation is separate from runtime orchestration. The existing
-single-turn evaluation checks focused actions, while the transcript evaluation
-runs complete ephemeral state-machine conversations over bounded representative
+Agent evaluation is separate from runtime orchestration and has three layers.
+The single-turn evaluation checks focused actions. The curated transcript
+evaluation runs known complete state-machine paths over bounded representative
 fields extracted from the sample, household-support, USCIS I-9, SBA, and DS-11
-fixtures. Every scripted turn declares its expected action, conversation state,
-confirmed values, and skipped fields.
+fixtures. The conversation harness runs deliberately messy, persona-led
+interviews through the public Form Agent application boundary and retains a
+complete version-comparable artifact.
+
+The conversation harness remains under `backend/evaluations` and imports the
+public Form Agent package; production code never imports evaluation code. Its
+versioned JSON scenarios use synthetic information and select real fields by ID
+from the existing PDF fixtures. The simulator can call
+`FormAgentService.respond` in process or post the identical request to a running
+`/agent/respond` endpoint. It mirrors the frontend's closed effect handling in
+ephemeral memory: proposal effects do not change fields, confirmed effects
+write one validated value, skipped effects mark one field, and reopened effects
+restore one field to unanswered. It never fills a PDF.
+
+For every turn the harness records the event and visible user wording, request
+state, field state before and after, assistant message, typed effect, resulting
+state, latency, expectation failures, and errors. Exact state/effect checks,
+user-grounded proposals, context-tagged turns, repetition, clarification, and
+recovery are deterministic. An optional Nemotron judge adds a bounded
+qualitative rubric for naturalness, context awareness, clarification, recovery,
+and invention, but cannot turn an incorrect form state into a pass.
+
+Each JSON and Markdown report includes the fixed scenario-suite digest, target,
+model, optional judge model, Git revision, label, timestamp, expected result,
+actual state, full transcript, metrics, and failure reasons. Comparison is
+allowed only for the same suite digest. Metric deltas and deterministic failure
+identities show whether a production change fixed or introduced behavior;
+free-form judge wording remains visible in each report but is not used as a
+stable failure identity.
 
 Normal tests use deterministic Nemotron doubles and make no network requests.
 The transcript evaluator may be run explicitly in live mode with the configured
 Nebius credentials to report model latency and calls per evaluated field. It
-does not store transcripts or add production analytics. Its offline adapter
-comparison reruns the same transcripts with the previous narrow deterministic
-interpreter to measure clarification re-prompts and invalid proposals without
-weakening invention checks. The transcript report also records prepared-value
-acceptance, user edits, transformed proposals, and unsafe transformations.
+does not add production analytics. The conversation harness writes explicit
+local artifacts under `backend/evaluations/results`, which are ignored by Git
+and contain synthetic evaluation data only. The transcript evaluator's offline
+adapter comparison reruns the same transcripts with the previous narrow
+deterministic interpreter to measure clarification re-prompts and invalid
+proposals without weakening invention checks. The transcript report also
+records prepared-value acceptance, user edits, transformed proposals, and
+unsafe transformations.
 
 ## Field update flow
 
