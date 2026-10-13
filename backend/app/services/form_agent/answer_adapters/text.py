@@ -24,13 +24,24 @@ _GENERAL_FRAMES = (
 )
 _NAME_FRAMES = (
     re.compile(
+        r"^(?:(?:okay|ok|sure|well)[,!.]?\s+)?"
+        r"(?:my\s+)?(?:full\s+legal|full|legal|family|first|last|middle)?"
+        r"\s*name\s+is\s+(?P<value>.+?),\s+and\s+i\s+was\s+born\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:(?:okay|ok|sure|well)[,!.]?\s+)?(?:please\s+)?"
+        r"call\s+me\s+(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(
         r"^(?:please\s+)?use\s+(?P<value>.+?)\s+instead[.!]?$",
         re.IGNORECASE,
     ),
     re.compile(
-        r"^(?:my\s+)?(?:full\s+|legal\s+|family\s+|first\s+|last\s+)?"
-        r"(?:middle\s+)?"
-        r"name\s+is\s+(?P<value>.+)$",
+        r"^(?:(?:okay|ok|sure|well)[,!.]?\s+)?"
+        r"(?:my\s+)?(?:full\s+legal|full|legal|family|first|last|middle)?"
+        r"\s*name\s+is\s+(?P<value>.+)$",
         re.IGNORECASE,
     ),
     re.compile(r"^i\s+am\s+(?P<value>.+)$", re.IGNORECASE),
@@ -60,6 +71,11 @@ _DATE_FRAMES = (
         r"^i\s+(?:started|began)\s+(?:living|residing)"
         r"(?:\s+at\s+(?:that|the)\s+address|\s+there|\s+here)?"
         r"\s+(?:on\s+)?(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^i\s+moved\s+in(?:\s+(?:there|here))?\s+(?:on\s+)?"
+        r"(?P<value>.+)$",
         re.IGNORECASE,
     ),
 ) + _GENERAL_FRAMES
@@ -473,7 +489,7 @@ def _parse_ordered_numeric_date(
 
 
 def _parse_named_date(value: str) -> datetime | None:
-    normalized = re.sub(r"\s+", " ", value.strip())
+    normalized = _normalize_named_date(value)
     for date_format in (
         "%d %B %Y",
         "%d %b %Y",
@@ -487,3 +503,60 @@ def _parse_named_date(value: str) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+_ORDINAL_DAY_WORDS = {
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+    "tenth": 10,
+    "eleventh": 11,
+    "twelfth": 12,
+    "thirteenth": 13,
+    "fourteenth": 14,
+    "fifteenth": 15,
+    "sixteenth": 16,
+    "seventeenth": 17,
+    "eighteenth": 18,
+    "nineteenth": 19,
+    "twentieth": 20,
+    "twenty-first": 21,
+    "twenty-second": 22,
+    "twenty-third": 23,
+    "twenty-fourth": 24,
+    "twenty-fifth": 25,
+    "twenty-sixth": 26,
+    "twenty-seventh": 27,
+    "twenty-eighth": 28,
+    "twenty-ninth": 29,
+    "thirtieth": 30,
+    "thirty-first": 31,
+}
+
+
+def _normalize_named_date(value: str) -> str:
+    normalized = value.strip().rstrip(".!")
+    normalized = re.sub(r"^the\s+", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(
+        r"^(?P<day>\d{1,2})(?:st|nd|rd|th)\b",
+        lambda match: match.group("day"),
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    ordinal_match = re.match(
+        r"^(?P<ordinal>[a-z]+(?:-[a-z]+)?)\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if ordinal_match is not None:
+        day = _ORDINAL_DAY_WORDS.get(ordinal_match.group("ordinal").casefold())
+        if day is not None:
+            normalized = f"{day}{normalized[ordinal_match.end():]}"
+    normalized = re.sub(r"\s+of\s+", " ", normalized, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", normalized).strip()

@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from ..models import FormAgentField
+from ..models import FormAgentField, FormAgentMessage
 from .common import semantic_text
-from .models import AnswerAdapterResult, ClarificationNeeded
+from .models import AnswerAdapterResult, ClarificationNeeded, MatchedAnswer
 from .scalar import adapt_checkbox, adapt_dropdown, adapt_number
 from .text import (
     adapt_address,
@@ -61,6 +61,24 @@ _NAME_HINT = re.compile(
     r"\b(?:name|surname|forename)\b",
     re.IGNORECASE,
 )
+_PRIOR_ANSWER_REFERENCE = re.compile(
+    r"\b(?:already|earlier|before|previously)\b.{0,80}"
+    r"\b(?:gave|give|provided|provide|said|shared|told)\b|"
+    r"\b(?:gave|provided|said|shared|told)\b.{0,80}"
+    r"\b(?:already|earlier|before|previously)\b",
+    re.IGNORECASE,
+)
+_VOLUNTEERED_DATE_PATTERNS = (
+    re.compile(
+        r"\bi\s+was\s+born(?:\s+on)?\s+(?P<value>[^,;]+)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:my\s+)?(?:date\s+of\s+birth|birth\s+date)\s+is\s+"
+        r"(?P<value>[^,;]+)",
+        re.IGNORECASE,
+    ),
+)
 
 
 def interpret_answer(
@@ -68,6 +86,50 @@ def interpret_answer(
     message: str,
 ) -> AnswerAdapterResult:
     return select_answer_adapter(field)(field, message)
+
+
+def recover_prior_answer(
+    field: FormAgentField,
+    message: str,
+    history: list[FormAgentMessage],
+) -> AnswerAdapterResult | None:
+    """Recover one explicit prior answer when the user points back to it.
+
+    Recovery is deliberately limited to unambiguous, field-specific cues in
+    the bounded request history. It never asks the model to infer a value.
+    """
+    if not _PRIOR_ANSWER_REFERENCE.search(message):
+        return None
+
+    metadata = semantic_text(field.id, field.label, field.question)
+    if not _DATE_HINT.search(metadata):
+        return None
+
+    matches: list[MatchedAnswer] = []
+    for history_message in history:
+        if history_message.role != "user":
+            continue
+        for pattern in _VOLUNTEERED_DATE_PATTERNS:
+            candidate_match = pattern.search(history_message.content)
+            if candidate_match is None:
+                continue
+            candidate = candidate_match.group("value").strip().rstrip(".!?")
+            result = interpret_answer(field, candidate)
+            if isinstance(result, MatchedAnswer):
+                matches.append(result)
+
+    unique = {str(match.value): match for match in matches}
+    if len(unique) == 1:
+        return next(iter(unique.values()))
+    if len(unique) > 1:
+        return ClarificationNeeded(
+            reason=(
+                "I found more than one earlier date and cannot safely tell "
+                "which one belongs in this field."
+            ),
+            accepted_shape=clarification_for_field(field).accepted_shape,
+        )
+    return None
 
 
 def select_answer_adapter(field: FormAgentField) -> AnswerAdapter:

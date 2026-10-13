@@ -7,6 +7,7 @@ from .models import (
 from .selector import (
     clarification_for_field,
     interpret_answer,
+    recover_prior_answer,
     select_answer_adapter,
 )
 from .text import adapt_email, adapt_identifier
@@ -18,6 +19,7 @@ __all__ = [
     "NotApplicable",
     "clarification_for_field",
     "interpret_answer",
+    "recover_prior_answer",
     "select_answer_adapter",
     "adapt_email",
     "adapt_identifier",

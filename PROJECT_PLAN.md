@@ -72,10 +72,9 @@ Required technology:
 
 - the typed guided interview and human-helper, turn-based voice interview are
   complete through Milestone 7.1
-- the automated conversation evaluation harness and live baseline are complete
-  through Milestone 7.2
-- Milestone 7.3 is the next planned milestone; it is an evidence-gated
-  reliability pass based on the recorded baseline, before Milestone 8
+- the automated conversation evaluation harness, live baseline, and targeted
+  evidence-gated reliability pass are complete through Milestone 7.3
+- Milestone 8 is the next planned milestone
 - deployment, persistence, and the later full-workflow milestone have not
   started
 
@@ -2925,7 +2924,7 @@ Do not implement:
 
 # Milestone 7.3 — Evidence-gated conversational reliability pass
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Make the smallest production changes that directly address the Milestone 7.2
@@ -2967,6 +2966,28 @@ Acceptance criteria:
   reports
 - all backend, PDF, Form Agent, safety, transcript, harness, and frontend checks
   pass
+
+Verified implementation outcome recorded 13 October 2026:
+- the unchanged `guided-interview-baseline-v1` suite and digest
+  `c5d8e5503835468a` were used for both the recorded baseline and candidate
+- all 47 scheduled turns completed, up from 42; no scenario stopped on an
+  invalid transition
+- exact form-state accuracy improved from `0.500` to `0.875`, recovery success
+  from `0.333` to `0.857`, and context retention from `0.619` to `1.000`
+- unnecessary repetition fell from `0.062` to zero and deterministic failures
+  fell from 34 to 3
+- deterministic invention failures, single-turn invented facts and purposes,
+  transcript confirmation-boundary failures, invalid actions, invalid
+  proposals, and unsafe transformations all remained zero
+- the existing confirmed value remained canonical throughout replacement
+  correction and cancellation scenarios
+- the only remaining suite mismatch is presentation-only: for an occupancy-date
+  field whose extracted schema specifies no format, the assistant safely keeps
+  the unambiguous user wording `2 September 2021` instead of silently changing
+  it to the scenario's expected `02/09/2021`
+- 323 backend tests pass, the 47-turn curated transcript evaluation has no
+  failures, the 14-scenario safety evaluation has no failures, and the frontend
+  production build succeeds with only the existing bundle-size warning
 
 Do not implement:
 - broad Form Agent rewrites or a new conversation architecture

@@ -99,6 +99,7 @@ Rules:
 - A next message must ask the selected field in natural language and must not repeat start, continue, next, or other navigation commands.
 - Explain and clarify actions must stay on the active field.
 - Form text may explain what to provide, but it is not proof of a purpose. Never infer why the form owner asks for information. If an authoritative reason is unavailable, say so and direct the user to official instructions or the form owner.
+- Do not claim that the form requires a date or answer format unless that format appears in active_field.question, label, help_text, options, or supplied verified guidance. When no format is supplied, explain the kind of answer without presenting an example format as mandatory.
 - When the user asks to skip the active unanswered field, return skip for that field; do not advance until later context marks it skipped.
 - When the user supplies an answer for the active field, return a proposal rather than advancing.
 - A propose action is invalid without a value. Copy only the user's supplied answer into the value property; if no exact value is available, return clarify instead.

@@ -29,11 +29,12 @@ def field(
     status: str = "unanswered",
     value: str | bool | None = None,
     section: str | None = None,
+    question: str | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "id": field_id,
         "label": label,
-        "question": f"What is your {label.lower()}?",
+        "question": question or f"What is your {label.lower()}?",
         "type": "text",
         "status": status,
     }
@@ -51,6 +52,7 @@ def request(
     event: dict[str, Any],
     active_field_id: str | None = None,
     pending_proposal: dict[str, Any] | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> FormAgentRequest:
     return FormAgentRequest.model_validate(
         {
@@ -61,6 +63,7 @@ def request(
                 "pending_proposal": pending_proposal,
             },
             "event": event,
+            "history": history or [],
         }
     )
 
@@ -252,6 +255,126 @@ def test_replacement_rejection_and_cancellation_preserve_confirmed_value() -> No
     assert cancelled.effect.effect == "correction_cancelled"
     assert cancelled.conversation_state.phase == "form_complete"
     assert "remains \"Ada Lovelace\"" in cancelled.assistant_message
+
+
+def test_natural_return_and_cancellation_use_closed_correction_flow() -> None:
+    fields = [
+        field("full_name", "Full name", status="confirmed", value="Taylor Reed"),
+        field("country", "Country"),
+    ]
+    correction, provider = respond(
+        request(
+            fields=fields,
+            phase="awaiting_answer",
+            active_field_id="country",
+            event={
+                "type": "message",
+                "content": "Can we go back to the full name question?",
+            },
+        )
+    )
+
+    assert correction.effect.effect == "correction_started"
+    assert correction.conversation_state.phase == "awaiting_replacement"
+    assert correction.conversation_state.active_field_id == "full_name"
+    assert "Taylor Reed" in correction.assistant_message
+    assert fields[0]["confirmed_value"] == "Taylor Reed"
+    assert provider.calls == []
+
+    cancelled, provider = respond(
+        request(
+            fields=fields,
+            phase="awaiting_replacement",
+            active_field_id="full_name",
+            event={
+                "type": "message",
+                "content": "Actually it was right, cancel that correction.",
+            },
+        )
+    )
+
+    assert cancelled.effect.effect == "correction_cancelled"
+    assert cancelled.conversation_state.phase == "awaiting_answer"
+    assert cancelled.conversation_state.active_field_id == "country"
+    assert "country" in cancelled.assistant_message.casefold()
+    assert fields[0]["confirmed_value"] == "Taylor Reed"
+    assert provider.calls == []
+
+
+def test_explicit_reference_recovers_one_prior_volunteered_date() -> None:
+    date_field = field(
+        "date_of_birth",
+        "Date of birth",
+        question="Date of birth (DD/MM/YYYY)",
+    )
+    proposal, provider = respond(
+        request(
+            fields=[date_field],
+            phase="awaiting_answer",
+            active_field_id="date_of_birth",
+            event={
+                "type": "message",
+                "content": "I already gave you my date of birth with my name.",
+            },
+            history=[
+                {
+                    "role": "user",
+                    "content": (
+                        "My full legal name is Mina Okafor, and I was born "
+                        "on 6 March 1992."
+                    ),
+                },
+                {
+                    "role": "assistant",
+                    "content": "Thanks. Your name is awaiting confirmation.",
+                },
+            ],
+        )
+    )
+
+    assert proposal.effect.model_dump() == {
+        "effect": "proposal",
+        "field_id": "date_of_birth",
+        "original_value": "6 March 1992",
+        "prepared_value": "06/03/1992",
+        "transformation": "Formatted to match the date format requested.",
+    }
+    assert proposal.conversation_state.phase == "awaiting_confirmation"
+    assert provider.calls == []
+
+
+def test_prior_answer_recovery_clarifies_when_dates_conflict() -> None:
+    date_field = field(
+        "date_of_birth",
+        "Date of birth",
+        question="Date of birth (DD/MM/YYYY)",
+    )
+    response, provider = respond(
+        request(
+            fields=[date_field],
+            phase="awaiting_answer",
+            active_field_id="date_of_birth",
+            event={
+                "type": "message",
+                "content": "I already gave you my date of birth.",
+            },
+            history=[
+                {
+                    "role": "user",
+                    "content": "I was born on 6 March 1992.",
+                },
+                {
+                    "role": "user",
+                    "content": "My date of birth is 7 March 1992.",
+                },
+            ],
+        )
+    )
+
+    assert response.effect.effect == "none"
+    assert response.conversation_state.phase == "awaiting_clarification"
+    assert "more than one earlier date" in response.assistant_message
+    assert provider.calls == []
 
 
 def test_edit_confirmation_replaces_once_and_duplicate_event_is_stale() -> None:

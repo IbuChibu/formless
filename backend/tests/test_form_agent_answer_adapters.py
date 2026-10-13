@@ -91,17 +91,36 @@ def test_adapter_selection_uses_field_metadata(
     assert select_answer_adapter(field).__name__ == expected_adapter
 
 
-def test_name_and_free_text_remove_only_clear_conversational_framing() -> None:
-    name_result = interpret_answer(
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ("My full name is Ada Lovelace.", "Ada Lovelace"),
+        ("Okay, my first name is Jordan.", "Jordan"),
+        ("Please call me Alex.", "Alex"),
+        (
+            "My full legal name is Mina Okafor, and I was born on 6 March 1992.",
+            "Mina Okafor",
+        ),
+    ],
+)
+def test_name_removes_only_clear_conversational_framing(
+    answer: str,
+    expected: str,
+) -> None:
+    result = interpret_answer(
         _field(field_id="name", label="Full legal name"),
-        "My full name is Ada Lovelace.",
+        answer,
     )
+
+    assert result == MatchedAnswer(expected)
+
+
+def test_free_text_removes_only_clear_conversational_framing() -> None:
     text_result = interpret_answer(
         _field(field_id="label", label="Expense item description"),
         "Keep the label as Monthly rent.",
     )
 
-    assert name_result == MatchedAnswer("Ada Lovelace")
     assert text_result == MatchedAnswer("Monthly rent")
 
 
@@ -137,6 +156,41 @@ def test_date_adapter_extracts_a_clear_date_from_a_conversational_answer() -> No
     )
 
     assert result == MatchedAnswer("12 June 2019")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "The sixth of March 1992.",
+        "6th March 1992",
+        "I was born on 6 March 1992.",
+    ],
+)
+def test_date_adapter_normalizes_unambiguous_spoken_ordinal_dates(
+    answer: str,
+) -> None:
+    result = interpret_answer(
+        _field(
+            field_id="dob",
+            label="Date of birth (DD/MM/YYYY)",
+            question="Date of birth (DD/MM/YYYY)",
+        ),
+        answer,
+    )
+
+    assert result == MatchedAnswer("06/03/1992")
+
+
+def test_date_adapter_understands_moved_in_framing_without_inventing_format() -> None:
+    result = interpret_answer(
+        _field(
+            field_id="move_in_date",
+            label="Date occupancy commenced",
+        ),
+        "I moved in on 2 September 2021.",
+    )
+
+    assert result == MatchedAnswer("2 September 2021")
 
 
 def test_date_adapter_acknowledges_partial_season_information() -> None:

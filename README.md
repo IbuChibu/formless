@@ -147,3 +147,6 @@ and stable fixed, new, and unchanged deterministic failures so changing
 qualitative wording does not disguise a form-state regression. The checked
 Milestone 7.2 baseline and its largest observed weaknesses are summarized in
 [`docs/milestone-7.2-conversation-evaluation-baseline.md`](docs/milestone-7.2-conversation-evaluation-baseline.md).
+The accepted Milestone 7.3 comparison and its one conservative residual format
+difference are summarized in
+[`docs/milestone-7.3-conversation-reliability-result.md`](docs/milestone-7.3-conversation-reliability-result.md).

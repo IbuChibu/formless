@@ -285,3 +285,27 @@ active-value extraction from bundled or conversational answers, spoken-date
 normalization, retaining volunteered later-field context, and natural
 return-to-field navigation. Those findings define Milestone 7.3; no production
 Form Agent behavior changed while the baseline was recorded.
+
+---
+
+## 2026-10-13 — Prior-answer recovery is explicit, bounded, and proposal-only
+
+Decision:
+The Form Agent may recover a user-supplied value from the existing bounded
+request history only when the current message explicitly refers to an earlier
+answer, the field type has a deterministic cue for that value, and exactly one
+adapter-validated candidate remains. Recovery produces an ordinary unconfirmed
+proposal. It cannot confirm a value, alter canonical field state, or use model
+inference to choose between candidates.
+
+Reason:
+People naturally provide related answers together and reasonably expect the
+assistant to remember them. Restricting recovery to explicit references and
+field-specific deterministic extraction improves continuity without treating
+the transcript as a hidden database or weakening the confirmation boundary.
+
+Outcome:
+On the unchanged Milestone 7.2 suite, all 47 turns completed, exact form-state
+accuracy rose from 0.500 to 0.875, context retention reached 1.000, recovery
+rose from 0.333 to 0.857, and invention and confirmation-boundary failures
+remained zero.

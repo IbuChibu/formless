@@ -18,6 +18,7 @@ from .answer_adapters import (
     MatchedAnswer,
     clarification_for_field,
     interpret_answer,
+    recover_prior_answer,
 )
 from .models import (
     AdvanceEvent,
@@ -777,7 +778,13 @@ def deterministic_action(
     }:
         return None
 
-    adapter_result = answer_interpreter(active_field, message)
+    adapter_result = recover_prior_answer(
+        active_field,
+        message,
+        request.history,
+    )
+    if adapter_result is None:
+        adapter_result = answer_interpreter(active_field, message)
     if isinstance(adapter_result, ClarificationNeeded):
         return _adapter_clarification(active_field, adapter_result)
     if not isinstance(adapter_result, MatchedAnswer):
@@ -1376,7 +1383,15 @@ def _status_review_message(
     for status in statuses:
         matching = [field for field in fields if field.status == status]
         visible = matching[:6]
-        names = "; ".join(_field_display_name(field) for field in visible)
+        names = "; ".join(
+            (
+                f"{_field_display_name(field)} is "
+                f"{format_agent_value(field.confirmed_value)}"
+                if status == "confirmed"
+                else _field_display_name(field)
+            )
+            for field in visible
+        )
         if len(matching) > len(visible):
             names += f"; and {len(matching) - len(visible)} more"
         sections.append(
@@ -1527,10 +1542,25 @@ def _progress_action(
         recovery = (
             "You can answer it, ask me to explain it, or skip it for now."
         )
+    confirmed_fields = [
+        field
+        for field in request.fields
+        if field.status == "confirmed" and field.confirmed_value is not None
+    ][:3]
+    confirmed_summary = ""
+    if confirmed_fields:
+        values = "; ".join(
+            f'“{_field_display_name(field)}” is '
+            f"{format_agent_value(field.confirmed_value)}"
+            for field in confirmed_fields
+        )
+        confirmed_summary = f" Confirmed so far: {values}."
+
     return ExplainAction(
         action="explain",
         message=(
-            f"{', '.join(parts)}. We were working on “{question}”. "
+            f"{', '.join(parts)}.{confirmed_summary} "
+            f"We were working on “{question}”. "
             f"{recovery}"
         ),
         field_id=active_field.id,

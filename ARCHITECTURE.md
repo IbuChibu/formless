@@ -154,6 +154,9 @@ Responsible for:
 - processing model actions
 - preparing user-supplied candidate values through deterministic field-aware
   formatting before they become reviewable proposals
+- recovering a previously volunteered candidate only when the user explicitly
+  points back to it and one field-specific value can be validated from the
+  bounded request history
 - returning a natural assistant message separately from a closed validated
   effect describing any workflow or form-state consequence
 - deciding when clarification is needed
@@ -172,7 +175,8 @@ The Form Agent is one service boundary with small internal modules:
   response wording
 - `answer_adapters` selects focused field-type interpreters from deterministic
   field metadata and returns a matched value, a specific clarification, or a
-  signal that model interpretation is still needed
+  signal that model interpretation is still needed; it also owns bounded,
+  field-specific recovery of explicitly referenced prior answers
 - `answer_preparation` preserves the original candidate, applies conservative
   field-aware presentation changes, records the transformation, and verifies
   that factual meaning was not changed
@@ -359,6 +363,13 @@ reopen, or correction effect; multiple matches produce a bounded clarification
 and no transition. Read-only review summaries and specifically requested
 confirmed values come directly from canonical field state and use a `none`
 effect.
+
+When a user explicitly says that an answer was supplied earlier, deterministic
+recovery may inspect only the bounded history already present in the request.
+It accepts a value only when a field-specific cue yields one adapter-validated
+candidate; zero candidates fall back to normal interpretation and multiple
+candidates require clarification. Recovered values still become proposals and
+cross the same explicit confirmation boundary as current-message answers.
 
 After an explicit confirmation, edited confirmation, or skip, the backend
 deterministically selects the next unanswered field. The response action still

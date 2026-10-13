@@ -25,8 +25,10 @@ class NavigationDecision:
 
 
 _CANCEL_CORRECTION_PATTERN = re.compile(
-    r"^(?:please\s+)?(?:cancel|stop|abandon|forget)"
-    r"(?:\s+(?:this|the))?\s+(?:correction|change|replacement)"
+    r"^(?:(?:actually|wait)[,!]?\s+(?:(?:it|that)\s+)?"
+    r"(?:was|is)\s+(?:right|correct)[,!]?\s+)?"
+    r"(?:please\s+)?(?:cancel|stop|abandon|forget)"
+    r"(?:\s+(?:this|that|the))?\s+(?:correction|change|replacement)"
     r"(?:\s+for\s+now)?[.!]?$",
     re.IGNORECASE,
 )
@@ -64,6 +66,12 @@ _CORRECTION_PATTERNS = (
     re.compile(
         r"^(?:please\s+)?(?:can|could|would)\s+(?:we|you)\s+"
         r"(?:change|correct|update|replace|edit)\s+"
+        r"(?P<reference>.+?)[?!.]?$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:please\s+)?(?:can|could|would)\s+(?:we|you)\s+"
+        r"(?:go|come|return)\s+back\s+to\s+"
         r"(?P<reference>.+?)[?!.]?$",
         re.IGNORECASE,
     ),

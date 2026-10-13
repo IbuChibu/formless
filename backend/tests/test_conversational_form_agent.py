@@ -508,6 +508,8 @@ def test_progress_question_is_deterministic_and_preserves_the_active_field() -> 
     assert "confirmed 1 of 4 supported questions" in response.action.message
     assert "skipped 1" in response.action.message
     assert "2 unanswered" in response.action.message
+    assert "full name" in response.action.message.casefold()
+    assert "Ada Lovelace" in response.action.message
     assert "date you began living" in response.action.message.casefold()
     assert response.conversation_state == request.conversation_state
     assert nemotron.calls == []
