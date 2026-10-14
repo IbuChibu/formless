@@ -286,6 +286,8 @@ def test_confirming_an_edited_answer_uses_the_same_progression() -> None:
 
     assert response.action.action == "confirmed"
     assert response.action.value == "Ada Lovelace"
+    assert "your edit" in response.action.message
+    assert "Ada Lovelace" in response.action.message
     assert response.conversation_state.model_dump() == {
         "phase": "awaiting_answer",
         "active_field_id": "country",

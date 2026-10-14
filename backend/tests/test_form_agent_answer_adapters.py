@@ -251,6 +251,43 @@ def test_number_adapter_clarifies_estimates_ranges_and_multiple_values(
 
 @pytest.mark.parametrize(
     ("answer", "expected"),
+    [
+        ("Zero.", "0"),
+        ("One.", "1"),
+        ("There are twelve.", "12"),
+        ("The answer is twenty.", "20"),
+    ],
+)
+def test_number_adapter_uses_unambiguous_spoken_whole_numbers(
+    answer: str,
+    expected: str,
+) -> None:
+    result = interpret_answer(
+        _field(field_id="count", label="Number of people"),
+        answer,
+    )
+
+    assert result == MatchedAnswer(expected)
+
+
+def test_count_yourself_field_clarifies_nobody_instead_of_assuming_zero() -> None:
+    result = interpret_answer(
+        _field(
+            field_id="household_count",
+            label="Count yourself and other people who normally live with you",
+            question="How many people share essential living costs with you?",
+        ),
+        "Nobody.",
+    )
+
+    assert isinstance(result, ClarificationNeeded)
+    assert "nobody else" in result.reason.casefold()
+    assert "yourself" in result.reason.casefold()
+    assert "1" in result.reason
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
     [("Yes, I do.", True), ("No, I don't.", False), ("unchecked", False)],
 )
 def test_checkbox_adapter_handles_positive_and_negated_answers(
@@ -292,6 +329,20 @@ def test_dropdown_adapter_returns_the_exact_available_option() -> None:
 
     assert interpret_answer(field, "I rent my home.") == MatchedAnswer("Rent")
     assert interpret_answer(field, "own") == MatchedAnswer("Own")
+
+
+def test_dropdown_adapter_accepts_only_a_unique_high_confidence_near_match() -> None:
+    field = _field(
+        field_id="housing",
+        label="Housing arrangement",
+        field_type="dropdown",
+        options=["Sole tenant", "Joint tenant", "Owner-occupier"],
+    )
+
+    assert interpret_answer(field, "Solo tenant.") == MatchedAnswer("Sole tenant")
+    unrelated = interpret_answer(field, "Sultanate.")
+
+    assert isinstance(unrelated, ClarificationNeeded)
 
 
 @pytest.mark.parametrize(

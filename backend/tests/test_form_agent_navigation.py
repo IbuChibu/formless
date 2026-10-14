@@ -405,6 +405,8 @@ def test_edit_confirmation_replaces_once_and_duplicate_event_is_stale() -> None:
     }
     assert confirmed.conversation_state.phase == "awaiting_answer"
     assert confirmed.conversation_state.active_field_id == "date_of_birth"
+    assert "your edited value" in confirmed.assistant_message
+    assert "Katherine Johnson" in confirmed.assistant_message
     assert confirmation_request.fields[0].confirmed_value == "Ada Lovelace"
     assert nemotron.calls == []
 

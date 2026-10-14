@@ -28,6 +28,9 @@ class TurnExpectation(HarnessModel):
     prepared_value: Optional[FieldValue] = None
     state_unchanged: bool = False
     message_includes_any: list[str] = Field(default_factory=list)
+    message_includes_all: list[str] = Field(default_factory=list)
+    message_excludes_all: list[str] = Field(default_factory=list)
+    max_assistant_words: Optional[int] = Field(default=None, ge=1, le=500)
 
 
 class ScenarioTurn(HarnessModel):
@@ -41,6 +44,9 @@ class ScenarioTurn(HarnessModel):
             "emotion",
             "recovery",
             "repetition_check",
+            "latest_answer",
+            "contradiction_check",
+            "style_check",
         ]
     ] = Field(default_factory=list)
     expect: TurnExpectation = Field(default_factory=TurnExpectation)
@@ -151,6 +157,8 @@ class ScenarioScores(HarnessModel):
     recovery_success: Optional[float] = Field(default=None, ge=0, le=1)
     heuristic_naturalness: float = Field(ge=1, le=5)
     invention_failures: int = Field(ge=0)
+    latest_answer_adherence: Optional[float] = Field(default=None, ge=0, le=1)
+    contradiction_failures: int = Field(default=0, ge=0)
 
 
 class ScenarioReport(HarnessModel):
@@ -187,6 +195,12 @@ class SuiteMetrics(HarnessModel):
     deterministic_failure_count: int
     qualitative_failure_count: int
     average_turn_latency_ms: float
+    latest_answer_adherence_rate: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=1,
+    )
+    contradiction_failure_count: int = Field(default=0, ge=0)
 
 
 class SuiteReport(HarnessModel):

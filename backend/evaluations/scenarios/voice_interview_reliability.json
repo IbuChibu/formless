@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "suite_id": "voice-interview-reliability-v1",
+  "description": "Fixed synthetic regressions based on a voice-like form interview: grounded format explanations, finite-choice near matches, newest short numeric answers, and visible edited confirmations.",
+  "personas": [
+    {
+      "id": "plain_language_voice_user",
+      "name": "Morgan",
+      "summary": "A synthetic user who asks for ordinary language before answering a formal housing question.",
+      "communication_style": "Brief, spoken-style questions and direct answers.",
+      "behaviours": ["asks what formal wording means", "expects no invented requirements", "answers after understanding"]
+    },
+    {
+      "id": "approximate_choice_speaker",
+      "name": "Jamie",
+      "summary": "A synthetic user whose spoken finite-choice answer is close to one visible option.",
+      "communication_style": "Uses everyday wording rather than reading option labels verbatim.",
+      "behaviours": ["uses a safe near-match", "expects review before confirmation"]
+    },
+    {
+      "id": "short_answer_corrector",
+      "name": "Riley",
+      "summary": "A synthetic user who first gives an ambiguous household count and then answers with one short number word.",
+      "communication_style": "Very concise and expects the newest reply to replace the earlier ambiguity.",
+      "behaviours": ["answers nobody", "clarifies with one", "notices stale-answer repetition"]
+    },
+    {
+      "id": "proposal_editor",
+      "name": "Samira",
+      "summary": "A synthetic user who edits a prepared name before confirming it.",
+      "communication_style": "Careful and explicit about the final reviewed spelling.",
+      "behaviours": ["reviews a proposal", "edits before confirmation", "expects the edit to be acknowledged"]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "explain-without-invented-date-format",
+      "title": "Explain occupancy wording without inventing a format",
+      "persona_id": "plain_language_voice_user",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["occupancy_start_date"],
+      "purpose": "Check that a plain-language explanation stays grounded in the active field and does not turn an absent date format into a requirement.",
+      "tags": ["field_question", "clarification", "accuracy", "voice_regression"],
+      "turns": [
+        {
+          "id": "start",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "occupancy_start_date"}
+        },
+        {
+          "id": "ask-meaning",
+          "event": {"type": "message", "content": "What does that mean?"},
+          "tags": ["clarification", "context_retention", "contradiction_check", "style_check"],
+          "expect": {
+            "effects": ["none"],
+            "phase": "awaiting_answer",
+            "field_id": "occupancy_start_date",
+            "state_unchanged": true,
+            "message_includes_any": ["living", "moved", "started"],
+            "message_excludes_all": ["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD", "first unanswered field"],
+            "max_assistant_words": 65
+          }
+        },
+        {
+          "id": "answer",
+          "event": {"type": "message", "content": "I moved in on 4 March 2020."},
+          "tags": ["latest_answer", "recovery", "style_check"],
+          "expect": {
+            "effects": ["proposal"],
+            "phase": "awaiting_confirmation",
+            "field_id": "occupancy_start_date",
+            "prepared_value": "4 March 2020",
+            "message_includes_all": ["4 March 2020", "review"],
+            "max_assistant_words": 55
+          }
+        },
+        {
+          "id": "confirm",
+          "event": {"type": "confirm"},
+          "visible_user_message": "Yes, use that.",
+          "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "occupancy_start_date", "prepared_value": "4 March 2020"}
+        }
+      ],
+      "expected_final": {"confirmed_values": {"occupancy_start_date": "4 March 2020"}, "skipped_field_ids": [], "unanswered_field_ids": []},
+      "allowed_proposals": {"occupancy_start_date": ["4 March 2020"]},
+      "forbidden_assistant_terms": ["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"]
+    },
+    {
+      "id": "safe-dropdown-near-match",
+      "title": "Understand one safe spoken dropdown near-match",
+      "persona_id": "approximate_choice_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["residency_arrangement"],
+      "purpose": "Measure whether a unique high-confidence spoken near-match becomes a reviewable exact option without permitting arbitrary fuzzy guessing.",
+      "tags": ["finite_choice", "latest_answer", "accuracy", "voice_regression"],
+      "turns": [
+        {
+          "id": "start",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "residency_arrangement"}
+        },
+        {
+          "id": "spoken-near-match",
+          "event": {"type": "message", "content": "Solo tenant."},
+          "tags": ["latest_answer", "style_check"],
+          "expect": {
+            "effects": ["proposal"],
+            "phase": "awaiting_confirmation",
+            "field_id": "residency_arrangement",
+            "prepared_value": "Sole tenant",
+            "message_includes_all": ["Sole tenant", "review"],
+            "message_excludes_all": ["could not match"],
+            "max_assistant_words": 55
+          }
+        }
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["residency_arrangement"]},
+      "allowed_proposals": {"residency_arrangement": ["Sole tenant"]}
+    },
+    {
+      "id": "newest-household-count-answer",
+      "title": "Use the newest short count answer",
+      "persona_id": "short_answer_corrector",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["household_member_count"],
+      "purpose": "Check that nobody receives a count-yourself clarification and the following word one is used instead of stale transcript text.",
+      "tags": ["ambiguity", "clarification", "latest_answer", "recovery", "voice_regression"],
+      "turns": [
+        {
+          "id": "start",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "household_member_count"}
+        },
+        {
+          "id": "ambiguous-nobody",
+          "event": {"type": "message", "content": "Nobody."},
+          "tags": ["clarification", "contradiction_check", "style_check"],
+          "expect": {
+            "effects": ["none"],
+            "phase": "awaiting_clarification",
+            "field_id": "household_member_count",
+            "message_includes_all": ["nobody else", "yourself", "1"],
+            "message_excludes_all": ["proposal", "saved"],
+            "max_assistant_words": 55
+          }
+        },
+        {
+          "id": "newest-answer-one",
+          "event": {"type": "message", "content": "One."},
+          "tags": ["latest_answer", "recovery", "contradiction_check", "style_check"],
+          "expect": {
+            "effects": ["proposal"],
+            "phase": "awaiting_confirmation",
+            "field_id": "household_member_count",
+            "prepared_value": "1",
+            "message_includes_all": ["1", "review"],
+            "message_excludes_all": ["zero", "nobody"],
+            "max_assistant_words": 55
+          }
+        }
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["household_member_count"]},
+      "allowed_proposals": {"household_member_count": ["1"]}
+    },
+    {
+      "id": "visible-edited-confirmation",
+      "title": "Acknowledge the value edited at confirmation",
+      "persona_id": "proposal_editor",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_full_legal_name"],
+      "purpose": "Ensure that confirm-edit keeps the closed confirmation effect while making the changed reviewed value explicit in the conversation.",
+      "tags": ["correction", "context_retention", "confirmation_boundary", "voice_regression"],
+      "turns": [
+        {
+          "id": "start",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_full_legal_name"}
+        },
+        {
+          "id": "answer",
+          "event": {"type": "message", "content": "samira khan"},
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_full_legal_name", "prepared_value": "Samira Khan"}
+        },
+        {
+          "id": "confirm-edit",
+          "event": {"type": "confirm_edit", "value": "Samira Noor Khan"},
+          "visible_user_message": "Use my edit: Samira Noor Khan.",
+          "tags": ["context_retention", "style_check"],
+          "expect": {
+            "effects": ["confirmed"],
+            "phase": "form_complete",
+            "field_id": "applicant_full_legal_name",
+            "prepared_value": "Samira Noor Khan",
+            "message_includes_all": ["edit", "Samira Noor Khan"],
+            "max_assistant_words": 55
+          }
+        }
+      ],
+      "expected_final": {"confirmed_values": {"applicant_full_legal_name": "Samira Noor Khan"}, "skipped_field_ids": [], "unanswered_field_ids": []},
+      "allowed_proposals": {"applicant_full_legal_name": ["Samira Khan"]}
+    }
+  ]
+}

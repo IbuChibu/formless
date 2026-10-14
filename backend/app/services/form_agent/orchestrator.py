@@ -243,7 +243,7 @@ class FormAgentService:
                         )
                 validate_guidance_action(action, guidance)
                 validate_web_guidance_action(action, web_guidance)
-                validate_action_for_turn(action, request)
+                validate_action_for_turn(action, request, guidance)
                 navigation_clarification = (
                     unexpected_navigation_clarification(action, request)
                 )

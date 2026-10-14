@@ -39,6 +39,10 @@ _ADDRESS_HINT = re.compile(
     r"telephone|mobile|email|passport|account|reference|identifier|id)\b",
     re.IGNORECASE,
 )
+_NUMBER_HINT = re.compile(
+    r"\b(?:count|quantity|how\s+many|number\s+of|persons?\s+ordinarily)\b",
+    re.IGNORECASE,
+)
 _NAME_PARTICLES = frozenset(
     {
         "al",
@@ -218,6 +222,12 @@ def prepare_answer(
             transformation = "Removed presentation characters from the number."
         elif field.type == "dropdown":
             transformation = "Matched your answer to an available option."
+        elif _NUMBER_HINT.search(metadata) and prepared_value.replace(
+            ".",
+            "",
+            1,
+        ).isdigit():
+            transformation = "Converted your spoken number to digits."
         else:
             transformation = "Normalized spacing for the form."
 

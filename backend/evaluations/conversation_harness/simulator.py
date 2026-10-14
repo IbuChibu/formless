@@ -295,4 +295,31 @@ def _check_turn_expectation(
                 "assistant message did not include any expected term: "
                 + ", ".join(expected_terms)
             )
+    required_terms: list[str] = getattr(expectation, "message_includes_all")
+    normalized_message = assistant_message.casefold()
+    missing_terms = [
+        term for term in required_terms if term.casefold() not in normalized_message
+    ]
+    if missing_terms:
+        failures.append(
+            "assistant message did not include all expected terms: "
+            + ", ".join(missing_terms)
+        )
+    excluded_terms: list[str] = getattr(expectation, "message_excludes_all")
+    present_terms = [
+        term for term in excluded_terms if term.casefold() in normalized_message
+    ]
+    if present_terms:
+        failures.append(
+            "assistant message included forbidden terms: "
+            + ", ".join(present_terms)
+        )
+    max_words: Optional[int] = getattr(expectation, "max_assistant_words")
+    if max_words is not None:
+        actual_words = len(assistant_message.split())
+        if actual_words > max_words:
+            failures.append(
+                f"assistant message used {actual_words} words; maximum is "
+                f"{max_words}"
+            )
     return failures

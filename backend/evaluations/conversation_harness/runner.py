@@ -86,6 +86,11 @@ def _aggregate_metrics(
         for report in reports
         if report.scores.context_retention is not None
     ]
+    latest_answer_scores = [
+        report.scores.latest_answer_adherence
+        for report in reports
+        if report.scores.latest_answer_adherence is not None
+    ]
     clarification_scores = [
         report.scores.clarification_quality
         for report in reports
@@ -151,6 +156,10 @@ def _aggregate_metrics(
         ),
         qualitative_failure_count=qualitative_failures,
         average_turn_latency_ms=_average([turn.latency_ms for turn in all_turns]),
+        latest_answer_adherence_rate=_optional_average(latest_answer_scores),
+        contradiction_failure_count=sum(
+            report.scores.contradiction_failures for report in reports
+        ),
     )
 
 

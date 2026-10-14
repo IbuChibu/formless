@@ -73,7 +73,8 @@ Required technology:
 - the typed guided interview and human-helper, turn-based voice interview are
   complete through Milestone 7.1
 - the automated conversation evaluation harness, live baseline, and targeted
-  evidence-gated reliability pass are complete through Milestone 7.3
+  evidence-gated voice-like reliability passes are complete through Milestone
+  7.4
 - Milestone 8 is the next planned milestone
 - deployment, persistence, and the later full-workflow milestone have not
   started
@@ -2994,6 +2995,163 @@ Do not implement:
 - a second production agent, agent debate, or runtime model cascade
 - voice changes, direct PDF interaction, final-review UI, or Milestone 8 work
 - authentication, persistence, a database, deployment, OCR, XFA, or online forms
+
+# Milestone 7.4 — Voice-like conversation reliability benchmark and repair
+
+Status: COMPLETE
+
+Problem to solve:
+The first real turn-based voice interview showed that speech capture is usable,
+but semantic handling and response presentation can still feel like a rigid
+form validator. In particular, the assistant may ignore the newest short
+answer in favour of an older transcript value, reject a safe near-match for a
+finite option, repeat formal validation text, claim a date format that is not
+present in the extracted schema, or confirm an edited value without making the
+edit visible in the conversation. These failures must be made reproducible
+before production behavior changes again.
+
+Goal:
+Extend the existing test-only conversation harness with a fixed synthetic
+regression suite modelled on the observed voice interview, record the current
+baseline, make only bounded interpretation and response-policy improvements,
+then rerun the identical suite. Improve the sense that a patient helper heard
+the user's latest answer while preserving closed effects, explicit
+confirmation, exact form state, and the no-invention boundary.
+
+Evaluation-harness scope:
+- add per-turn positive and negative message assertions so a scenario can
+  require acknowledgement of the current answer and reject stale or
+  contradictory wording
+- add explicit tags and aggregate metrics for latest-answer adherence and
+  assistant contradictions instead of hiding those failures inside the broad
+  context-retention score
+- make the qualitative naturalness rubric explicitly penalize templated status
+  narration, failure to answer the latest utterance, and contradictions with
+  the visible transcript or canonical state
+- add a separate fixed synthetic suite covering an unsupported format claim,
+  a voice-like dropdown near-match, `nobody` followed by the newer answer
+  `one`, and an edited confirmation whose changed value must be visible
+- save baseline, candidate, comparison, full transcript, expected result,
+  actual state, metrics, and failure reasons using the existing ignored results
+  directory and compare only the same suite digest
+- keep the completed Milestone 7.2 baseline suite unchanged and rerun it as a
+  regression check after the targeted changes
+
+Targeted production scope:
+- treat an unambiguous spoken whole-number word as the current numeric answer,
+  with the newest user message authoritative for that turn
+- when a count question explicitly says to include the user, interpret
+  `nobody` or `no one` as ambiguous and ask whether the user means nobody else,
+  rather than proposing zero or letting old transcript text override the next
+  answer
+- accept only a unique, high-confidence finite-option near-match; ambiguous or
+  materially different dropdown wording must still receive clarification
+- validate model explanations against the active field metadata so the
+  assistant cannot present an absent date format as a requirement
+- make deterministic proposal, clarification, and edited-confirmation wording
+  shorter and more conversational while retaining an explicit review boundary
+  and never implying that an unconfirmed value reached the PDF
+- strengthen the model prompt to treat the latest user message as the current
+  turn's source and bounded history only as context
+
+Representative repaired exchange:
+
+```text
+Assistant: How many people normally live with you and share food or essential
+costs? Include yourself.
+
+User: Nobody.
+
+Assistant: Do you mean nobody else? This question says to count yourself, so
+if it is just you the number would be 1. Tell me the exact count to use.
+
+User: One.
+
+Assistant: I heard 1. Please check it before I add it to the form.
+```
+
+Acceptance criteria:
+- the new fixed suite uses only synthetic information and real extracted fields
+  from checked-in PDF fixtures
+- every regression turn records the same complete evidence as the existing
+  harness and can run through the in-process service or existing HTTP endpoint
+- per-turn assertions can require all expected terms and reject forbidden terms
+- reports expose latest-answer adherence and contradiction counts, and the
+  compare command reports their direction and deltas
+- a current baseline is saved before targeted production changes and a
+  candidate is run against the identical suite digest afterward
+- `one` deterministically proposes `1` for the observed count field even after
+  an earlier `nobody` clarification, without repeating or proposing the stale
+  answer
+- `nobody` on a count-yourself question produces a focused clarification and
+  no proposal or canonical field change
+- `solo tenant` may prepare the single safe `Sole tenant` option for explicit
+  review, while unrelated or ambiguous wording is not guessed
+- an explanation cannot claim `DD/MM/YYYY`, `MM/DD/YYYY`, or another required
+  date format unless that format is present in active field metadata or
+  supplied verified guidance
+- edited confirmation wording explicitly tells the user that their reviewed
+  edit, rather than the earlier proposal, was applied
+- deterministic messages are concise, refer to the current answer or question,
+  and retain explicit confirmation before any canonical value changes
+- exact canonical form-state accuracy does not regress; proposal/action
+  accuracy and latest-answer adherence improve on the targeted baseline;
+  contradiction failures decrease; invention and confirmation-boundary
+  failures remain zero
+- the unchanged Milestone 7.2 suite does not regress on exact form-state
+  accuracy, context retention, recovery, invention, or confirmation safety
+- focused harness and Form Agent tests, the complete backend suite, curated
+  transcript and safety evaluations, and frontend production build pass
+
+Verified implementation outcome recorded 14 October 2026:
+- a separate four-persona, four-scenario synthetic suite now exercises real
+  extracted household-support fields for unsupported date advice, a safe
+  dropdown near-match, `nobody` followed by `one`, and edited confirmation
+- per-turn expectations can require every relevant phrase, reject stale or
+  contradictory phrases, and bound response length; reports now expose
+  latest-answer adherence and contradiction failures, while suites without
+  those tagged turns report the metric as not scored
+- the pre-change and final live reports use the identical suite digest
+  `d8aac2d7708deb62`; all 12 turns completed in both runs
+- latest-answer adherence improved from `0.000` to `1.000`, context retention
+  from `0.500` to `1.000`, recovery from `0.000` to `1.000`, and unnecessary
+  repetition from `0.125` to zero
+- contradiction failures fell from 1 to zero, deterministic failures from 14
+  to zero, and qualitative failure reasons from 10 to zero; the comparison
+  reports 14 fixed failures, no new failures, and no unchanged failures
+- exact canonical form-state accuracy remained `1.000`, deterministic
+  invention remained zero, and every value still required the existing
+  proposal and explicit-confirmation boundary
+- spoken whole numbers zero through twenty are normalized without a model
+  call; `nobody` on a count-yourself question now asks whether the user means
+  nobody else; and only one unique option match at or above the bounded
+  similarity threshold can become a reviewable dropdown proposal
+- explanation validation rejects both absent explicit date formats and claims
+  that an unsupported partial date or estimate is acceptable; one correction
+  attempt is allowed before a grounded deterministic fallback
+- proposal and clarification responses are shorter, and confirm-edit responses
+  explicitly acknowledge that the reviewed edit was used
+- the unchanged Milestone 7.2 suite still completes all 47 turns with exact
+  state `0.875`, context `1.000`, recovery `0.857`, zero repetition, zero
+  invention, and only its three existing conservative occupancy-date
+  presentation mismatches
+- all 332 backend tests pass; the 47-turn curated transcript and 14-scenario
+  safety evaluations have no failures; the frontend production build passes
+  with only the existing PDF-worker bundle-size warning
+- the final targeted run's average latency was higher than its baseline because
+  the explanation safety check may use the existing single correction retry;
+  deterministic answer turns do not add model calls
+
+Do not implement:
+- a second agent, agent debate, a new model cascade, or a stronger default model
+- model-generated user scenarios or evaluation data containing real personal
+  information
+- automatic confirmation, direct model-to-state writes, or weaker proposal
+  validation
+- voice-capture changes, direct PDF interaction, final-review UI, or any
+  Milestone 8 work
+- authentication, persistence, analytics, a database, deployment, OCR, XFA, or
+  online forms
 
 # Milestone 8 — Full workflow
 

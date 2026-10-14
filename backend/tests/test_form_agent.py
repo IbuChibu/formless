@@ -126,9 +126,8 @@ def test_agent_returns_a_validated_proposal_without_confirming_it() -> None:
     action = response.action
 
     expected_message = (
-        "Got it — for “Which option best describes where you live”, I "
-        'understood your answer as "Rent". It is awaiting your '
-        "confirmation and has not been applied to the form."
+        'I heard "Rent" for “Which option best describes where you live”. '
+        "Please review and confirm it before I add it to the form."
     )
     assert action.action == "propose"
     assert action.message == expected_message
@@ -185,7 +184,8 @@ def test_agent_retries_one_invalid_proposal_schema() -> None:
 
     assert action.action == "propose"
     assert action.value == "Rent"
-    assert "awaiting your confirmation" in action.message
+    assert "review and confirm" in action.message
+    assert "before I add it to the form" in action.message
     assert len(nemotron.calls) == 2
     assert "previous response failed" in nemotron.calls[1][
         "system_prompt"
@@ -329,7 +329,8 @@ def test_agent_handles_unambiguous_structured_answers_without_model_call(
     assert action.action == "propose"
     assert action.field_id == field_id
     assert action.value == expected_value
-    assert "awaiting your confirmation" in action.message
+    assert "review and confirm" in action.message
+    assert "before I add it to the form" in action.message
     assert nemotron.calls == []
 
 
@@ -667,9 +668,9 @@ def test_repeated_invalid_proposal_value_becomes_clarification(
 
     assert response.status_code == 200
     assert response.json()["assistant_message"] == (
-        "For “Which option best describes where you live?”: I could not "
-        "safely validate one value for this field. Choose one available "
-        "option: Rent, Own, Staying with someone."
+        "I want to make sure I get “Which option best describes where you "
+        "live” right. I could not safely validate one value for this field. "
+        "Choose one available option: Rent, Own, Staying with someone."
     )
     assert response.json()["effect"] == {
         "effect": "none",
@@ -724,9 +725,9 @@ def test_model_cannot_silently_advance_past_an_active_field() -> None:
 
     assert response.status_code == 200
     assert response.json()["assistant_message"] == (
-        "For “Which option best describes where you live?”: I could not "
-        "safely validate one value for this field. Choose one available "
-        "option: Rent, Own, Staying with someone."
+        "I want to make sure I get “Which option best describes where you "
+        "live” right. I could not safely validate one value for this field. "
+        "Choose one available option: Rent, Own, Staying with someone."
     )
     assert response.json()["effect"] == {
         "effect": "none",

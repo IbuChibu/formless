@@ -176,7 +176,11 @@ The Form Agent is one service boundary with small internal modules:
 - `answer_adapters` selects focused field-type interpreters from deterministic
   field metadata and returns a matched value, a specific clarification, or a
   signal that model interpretation is still needed; it also owns bounded,
-  field-specific recovery of explicitly referenced prior answers
+  field-specific recovery of explicitly referenced prior answers. Numeric
+  adapters recognize bounded whole-number words, and finite-choice adapters
+  accept a near-match only when one option clears a strict unique similarity
+  threshold. A count-yourself question treats `nobody` as ambiguous rather
+  than silently storing zero
 - `answer_preparation` preserves the original candidate, applies conservative
   field-aware presentation changes, records the transformation, and verifies
   that factual meaning was not changed
@@ -189,6 +193,14 @@ The Form Agent is one service boundary with small internal modules:
 FastAPI and evaluation code import the public Form Agent package rather than
 depending on those internal modules. The internal split does not create
 multiple agents or allow any module to bypass the Nemotron Service.
+
+The latest user message is authoritative for the current turn; bounded history
+is context, not a replacement answer. Model explanations are checked against
+the active field and reviewed guidance before they are returned. An explicit
+date format or claim that a partial or estimated date is acceptable is rejected
+unless the relevant constraint appears in that trusted context. The existing
+single correction attempt may repair the explanation; otherwise deterministic
+grounded wording is returned with no form effect.
 
 ## Official guidance
 
@@ -405,10 +417,13 @@ restore one field to unanswered. It never fills a PDF.
 For every turn the harness records the event and visible user wording, request
 state, field state before and after, assistant message, typed effect, resulting
 state, latency, expectation failures, and errors. Exact state/effect checks,
-user-grounded proposals, context-tagged turns, repetition, clarification, and
-recovery are deterministic. An optional Nemotron judge adds a bounded
-qualitative rubric for naturalness, context awareness, clarification, recovery,
-and invention, but cannot turn an incorrect form state into a pass.
+user-grounded proposals, required and forbidden message phrases, response
+length, context-tagged turns, latest-answer use, contradictions, repetition,
+clarification, and recovery are deterministic. An optional Nemotron judge adds
+a bounded qualitative rubric for naturalness, context awareness,
+clarification, recovery, and invention, but cannot turn an incorrect form state
+into a pass. Latest-answer metrics are reported only for suites with explicitly
+tagged turns.
 
 Each JSON and Markdown report includes the fixed scenario-suite digest, target,
 model, optional judge model, Git revision, label, timestamp, expected result,

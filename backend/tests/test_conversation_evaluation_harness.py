@@ -31,6 +31,14 @@ from evaluations.conversation_harness.targets import (
 )
 
 
+VOICE_RELIABILITY_SCENARIOS = (
+    Path(__file__).parents[1]
+    / "evaluations"
+    / "scenarios"
+    / "voice_interview_reliability.json"
+)
+
+
 class NeverCalledNemotron:
     model = "test-never-called"
 
@@ -98,11 +106,15 @@ def _scenario() -> ConversationScenario:
             ScenarioTurn(
                 id="answer",
                 event={"type": "message", "content": "ada example"},
+                tags=["latest_answer", "contradiction_check", "style_check"],
                 expect=TurnExpectation(
                     effects=["proposal"],
                     phase="awaiting_confirmation",
                     field_id="full_name",
                     prepared_value="Ada Example",
+                    message_includes_all=["Ada Example", "confirm"],
+                    message_excludes_all=["zero"],
+                    max_assistant_words=100,
                 ),
             ),
             ScenarioTurn(
@@ -150,6 +162,22 @@ def test_default_suite_covers_required_conversation_behaviours() -> None:
     assert "synthetic" in suite.description.casefold()
 
 
+def test_voice_reliability_suite_covers_observed_failures() -> None:
+    suite = load_scenario_suite(VOICE_RELIABILITY_SCENARIOS)
+
+    assert suite.suite_id == "voice-interview-reliability-v1"
+    assert len(suite.personas) == 4
+    assert {scenario.id for scenario in suite.scenarios} == {
+        "explain-without-invented-date-format",
+        "safe-dropdown-near-match",
+        "newest-household-count-answer",
+        "visible-edited-confirmation",
+    }
+    assert all(
+        "synthetic" in persona.summary.casefold() for persona in suite.personas
+    )
+
+
 def test_simulator_drives_real_service_and_records_canonical_state() -> None:
     report = asyncio.run(
         ConversationSimulator(_target()).run(_scenario(), _persona())
@@ -174,6 +202,8 @@ def test_simulator_drives_real_service_and_records_canonical_state() -> None:
     }
     assert report.scores.form_state_accuracy == 1.0
     assert report.scores.invention_failures == 0
+    assert report.scores.latest_answer_adherence == 1.0
+    assert report.scores.contradiction_failures == 0
 
 
 def test_suite_report_saves_full_transcript_and_qualitative_scores(
@@ -199,6 +229,8 @@ def test_suite_report_saves_full_transcript_and_qualitative_scores(
 
     assert restored.metrics.form_state_accuracy == 1.0
     assert restored.metrics.judged_naturalness == 4.0
+    assert restored.metrics.latest_answer_adherence_rate == 1.0
+    assert restored.metrics.contradiction_failure_count == 0
     assert restored.scenarios[0].transcript[0].request_state["phase"] == "asking"
     assert restored.scenarios[0].expected_final_state.confirmed_values == {
         "full_name": "Ada Example"
@@ -248,6 +280,12 @@ def test_comparison_reports_metric_deltas_and_failure_changes() -> None:
     assert comparison.metric_deltas["form_state_accuracy"].delta == 0.5
     assert comparison.metric_deltas["form_state_accuracy"].direction == (
         "higher_is_better"
+    )
+    assert comparison.metric_deltas["latest_answer_adherence_rate"].direction == (
+        "higher_is_better"
+    )
+    assert comparison.metric_deltas["contradiction_failure_count"].direction == (
+        "lower_is_better"
     )
     assert comparison.fixed_failures == [
         "deterministic-name: test weakness"

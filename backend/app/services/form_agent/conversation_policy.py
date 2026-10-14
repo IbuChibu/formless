@@ -239,6 +239,20 @@ _UNRELATED_WORKFLOW_ERROR = (
     "Form Agent added unrelated workflow commentary to an explanation"
 )
 _LOST_ACTIVE_FIELD_ERROR = "Form Agent lost the active field context"
+_UNSUPPORTED_FORMAT_CLAIM_ERROR = (
+    "Form Agent claimed a format that is absent from the field context"
+)
+_EXPLICIT_DATE_FORMAT_PATTERN = re.compile(
+    r"\b(?:dd[/.-]mm[/.-]yyyy|mm[/.-]dd[/.-]yyyy|yyyy[/.-]mm[/.-]dd|"
+    r"mm[/.-]yyyy|yyyy[/.-]mm)\b",
+    re.IGNORECASE,
+)
+_UNSUPPORTED_DATE_PRECISION_PATTERN = re.compile(
+    r"\b(?:you\s+can|it(?:\s+is|'s)\s+okay\s+to)\s+"
+    r"(?:give|enter|provide|use)\b.{0,70}\b(?:month\s+and\s+year|"
+    r"month/year|best\s+estimate|approximate\s+date)\b",
+    re.IGNORECASE,
+)
 
 
 def classify_turn_intent(request: FormAgentRequest) -> TurnIntent:
@@ -381,6 +395,7 @@ def explanation_repair_fallback(
         _REPEATED_EXPLANATION_ERROR,
         _UNRELATED_WORKFLOW_ERROR,
         _LOST_ACTIVE_FIELD_ERROR,
+        _UNSUPPORTED_FORMAT_CLAIM_ERROR,
     }:
         return None
     if classify_turn_intent(request) != "wording_clarification":
@@ -397,7 +412,13 @@ def explanation_repair_fallback(
         return None
 
     question = truncate_text(field_question(field), 220).rstrip(" .?")
-    if str(error) == _LOST_ACTIVE_FIELD_ERROR:
+    if str(error) == _UNSUPPORTED_FORMAT_CLAIM_ERROR:
+        subject = truncate_text(field.label, 220).rstrip(" .?")
+        message = (
+            f"This is asking for {subject}. The form text available to me "
+            "does not specify a required date format, so I won't invent one."
+        )
+    elif str(error) == _LOST_ACTIVE_FIELD_ERROR:
         message = (
             f'Let me stay with the question “{question}”. Which part of '
             "that wording would you like me to explain differently? Your "
@@ -672,6 +693,7 @@ def deterministic_action(
                 request.conversation_state.phase
                 == "awaiting_replacement_confirmation"
             ),
+            edited=True,
         )
 
     if isinstance(event, RejectEvent):
@@ -1090,6 +1112,7 @@ def unexpected_navigation_clarification(
 def validate_action_for_turn(
     action: FormAgentAction,
     request: FormAgentRequest,
+    guidance: tuple[OfficialGuidanceCitation, ...] = (),
 ) -> None:
     intent = classify_turn_intent(request)
     if intent == "evidence_question" and not isinstance(action, ExplainAction):
@@ -1117,6 +1140,11 @@ def validate_action_for_turn(
         raise FormAgentError(
             "This conversational turn requires an explanation action"
         )
+    if isinstance(action, ExplainAction) or (
+        intent == "wording_clarification"
+        and isinstance(action, ConversationAction)
+    ):
+        _validate_explanation_formats(action, request, guidance)
     if intent != "wording_clarification" or not isinstance(
         action,
         (ExplainAction, ConversationAction),
@@ -1134,6 +1162,62 @@ def validate_action_for_turn(
         raise FormAgentError(_UNRELATED_WORKFLOW_ERROR)
     if not _response_mentions_active_field(action.message, request):
         raise FormAgentError(_LOST_ACTIVE_FIELD_ERROR)
+
+
+def _validate_explanation_formats(
+    action: ExplainAction | ConversationAction,
+    request: FormAgentRequest,
+    guidance: tuple[OfficialGuidanceCitation, ...],
+) -> None:
+    claimed_formats = {
+        match.group(0).casefold()
+        for match in _EXPLICIT_DATE_FORMAT_PATTERN.finditer(action.message)
+    }
+    claims_partial_or_estimated_date = (
+        _UNSUPPORTED_DATE_PRECISION_PATTERN.search(action.message) is not None
+    )
+    if not claimed_formats and not claims_partial_or_estimated_date:
+        return
+
+    active_field_id = request_active_field_id(request)
+    field = next(
+        (
+            candidate
+            for candidate in request.fields
+            if candidate.id == active_field_id
+        ),
+        None,
+    )
+    if field is None:
+        raise FormAgentError(_UNSUPPORTED_FORMAT_CLAIM_ERROR)
+    allowed_context = " ".join(
+        value
+        for value in (
+            field.id,
+            field.label,
+            field.question,
+            field.help_text,
+            *(field.options or []),
+            *(citation.excerpt for citation in guidance),
+        )
+        if value
+    ).casefold()
+    has_unsupported_format = any(
+        format_value not in allowed_context for format_value in claimed_formats
+    )
+    precision_is_supported = any(
+        phrase in allowed_context
+        for phrase in (
+            "month and year",
+            "month/year",
+            "best estimate",
+            "approximate date",
+        )
+    )
+    if has_unsupported_format or (
+        claims_partial_or_estimated_date and not precision_is_supported
+    ):
+        raise FormAgentError(_UNSUPPORTED_FORMAT_CLAIM_ERROR)
 
 
 def normalize_action_message(
@@ -1171,17 +1255,19 @@ def normalize_action_message(
                 if action.original_value is not None
                 else action.value
             )
+            if isinstance(action.original_value, str):
+                original_display = format_agent_value(
+                    action.original_value.rstrip(".!?")
+                )
             message = (
-                f'For “{question}”, I understood your answer as '
-                f"{original_display}. {action.transformation} I prepared "
-                f"{display_value} for your review. It is awaiting your "
-                "confirmation and has not been applied to the form."
+                f"You said {original_display}. I prepared {display_value} "
+                f'for “{question}”. {action.transformation} Please review '
+                "and confirm it before I add it to the form."
             )
         else:
             message = (
-                f'Got it — for “{question}”, I understood your answer '
-                f"as {display_value}. It is awaiting your confirmation "
-                "and has not been applied to the form."
+                f'I heard {display_value} for “{question}”. Please review '
+                "and confirm it before I add it to the form."
             )
         return action.model_copy(update={"message": message})
 
@@ -1199,11 +1285,10 @@ def normalize_action_message(
         return action.model_copy(
             update={
                 "message": (
-                    f'For “{question}”, the current confirmed answer is '
-                    f"{previous}. I understood your replacement as {original}."
-                    f"{transformation} I prepared {prepared} for review. It "
-                    "is awaiting explicit confirmation, so the current answer "
-                    "has not changed."
+                    f'The current answer for “{question}” is {previous}. '
+                    f"You said {original}; I prepared {prepared} for review."
+                    f"{transformation} Explicitly confirm it before I replace "
+                    "the current answer."
                 )
             }
         )
@@ -1479,15 +1564,27 @@ def _confirmed_action(
     fields: list[FormAgentField],
     *,
     replacement: bool = False,
+    edited: bool = False,
 ) -> ConfirmedAction:
     question = truncate_text(field_question(field), 180).rstrip(" .?")
     next_field = _next_unanswered_field(fields, resolved_field_id=field.id)
     progression = _progression_message(next_field)
-    verb = "replaced the answer with" if replacement else "added"
+    if replacement:
+        acknowledgement = (
+            "Thanks — I replaced the answer with your edited value"
+            if edited
+            else "Thanks — I replaced the answer with"
+        )
+    else:
+        acknowledgement = (
+            "Thanks — I added your edit"
+            if edited
+            else "Thanks — I added"
+        )
     return ConfirmedAction(
         action="confirmed",
         message=(
-            f'Confirmed — I {verb} {format_agent_value(value)} for “{question}”. '
+            f'{acknowledgement} {format_agent_value(value)} for “{question}”. '
             f"{progression}"
         ),
         field_id=field.id,
@@ -1503,13 +1600,17 @@ def _adapter_clarification(
     field: FormAgentField,
     clarification: ClarificationNeeded,
 ) -> ClarifyAction:
-    question = truncate_text(field_question(field), 220)
+    if clarification.reason.startswith(("Do you mean", "You said")):
+        message = f"{clarification.reason} {clarification.accepted_shape}"
+    else:
+        question = truncate_text(field_question(field), 180).rstrip(" .?")
+        message = (
+            f'I want to make sure I get “{question}” right. '
+            f"{clarification.reason} {clarification.accepted_shape}"
+        )
     return ClarifyAction(
         action="clarify",
-        message=(
-            f'For “{question}”: {clarification.reason} '
-            f"{clarification.accepted_shape}"
-        ),
+        message=message,
         field_id=field.id,
     )
 

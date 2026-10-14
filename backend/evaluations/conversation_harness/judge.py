@@ -13,10 +13,15 @@ Score the assistant, not the synthetic user. Use only the supplied transcript,
 persona, expected result, actual state, and deterministic findings.
 
 Rubric:
-- naturalness: warm, direct, flexible, human-sounding, and not robotic
-- context_awareness: remembers prior user statements and the active task
+- naturalness: warm, direct, flexible, human-sounding, and not robotic; penalize
+  repeated status narration, bureaucratic templates, and unnecessarily long replies
+- context_awareness: responds to the latest user utterance as authoritative for
+  the current turn, remembers useful prior context, and never describes an older
+  answer as though the user just said it
 - clarification_quality: explains ambiguity specifically and helps the user answer
 - recovery_quality: responds constructively to corrections or misunderstandings
+- treat a contradiction with the visible transcript or canonical field state as
+  a serious failure even if the surrounding prose is fluent
 - invents_information: true if the assistant supplies a personal fact or form value
   the user did not provide, or makes an unsupported factual claim
 

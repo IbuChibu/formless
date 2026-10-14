@@ -4,6 +4,8 @@ import asyncio
 import json
 from typing import Any
 
+import pytest
+
 from app.services.form_agent import FormAgentRequest, FormAgentService
 
 
@@ -147,6 +149,49 @@ def test_wording_clarification_uses_nemotron_once_without_tavily() -> None:
     assert "calm, patient, plain-speaking form guide" in (
         nemotron.calls[0]["system_prompt"]
     )
+    assert "authoritative answer for this turn" in (
+        nemotron.calls[0]["system_prompt"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("invalid_message", "forbidden_text"),
+    [
+        (
+            "This asks when you began living there. Enter the date in "
+            "DD/MM/YYYY format.",
+            "DD/MM/YYYY",
+        ),
+        (
+            "This asks when you began living there. If you are unsure, you "
+            "can give a month and year or your best estimate.",
+            "best estimate",
+        ),
+    ],
+)
+def test_wording_clarification_rejects_an_unsupported_date_format_claim(
+    invalid_message: str,
+    forbidden_text: str,
+) -> None:
+    request = _request("What does this mean?")
+    invalid = json.dumps(
+        {
+            "action": "explain",
+            "message": invalid_message,
+            "field_id": "move_in_date",
+        }
+    )
+    nemotron = StubNemotronService([invalid, invalid])
+    tavily = StubTavilyService()
+
+    response = _respond(request, nemotron, tavily)
+
+    assert response.action.action == "explain"
+    assert "does not specify a required date format" in response.action.message
+    assert forbidden_text not in response.action.message
+    assert response.conversation_state == request.conversation_state
+    assert len(nemotron.calls) == 2
+    assert tavily.queries == []
 
 
 def test_pronoun_follow_up_uses_active_field_and_bounded_history() -> None:
@@ -581,7 +626,8 @@ def test_clear_conversational_date_becomes_a_proposal_without_services() -> None
     assert response.action.action == "propose"
     assert response.action.value == "12 June 2019"  # type: ignore[union-attr]
     assert response.conversation_state.phase == "awaiting_confirmation"
-    assert "awaiting your confirmation" in response.action.message
+    assert "review and confirm" in response.action.message
+    assert "before I add it to the form" in response.action.message
     assert nemotron.calls == []
     assert tavily.queries == []
 

@@ -12,6 +12,8 @@ _METRIC_DIRECTIONS = {
     "completed_turn_rate": "higher_is_better",
     "form_state_accuracy": "higher_is_better",
     "context_retention_rate": "higher_is_better",
+    "latest_answer_adherence_rate": "higher_is_better",
+    "contradiction_failure_count": "lower_is_better",
     "unnecessary_repetition_rate": "lower_is_better",
     "clarification_quality": "higher_is_better",
     "recovery_success_rate": "higher_is_better",
@@ -108,6 +110,8 @@ def _stable_failure_key(failure: str) -> str:
             "expected effect field",
             "expected the conversation state",
             "assistant message did not include",
+            "assistant message included forbidden terms",
+            "assistant message used",
             "The application interface did not return",
             "proposal",
             "assistant introduced",
@@ -142,6 +146,9 @@ def _suite_markdown(report: SuiteReport) -> str:
         "",
         f"- Form-state accuracy: {metrics.form_state_accuracy:.3f}",
         f"- Context retention: {metrics.context_retention_rate:.3f}",
+        "- Latest-answer adherence: "
+        f"{_optional_ratio(metrics.latest_answer_adherence_rate)}",
+        f"- Contradiction failures: {metrics.contradiction_failure_count}",
         f"- Unnecessary repetition: {metrics.unnecessary_repetition_rate:.3f}",
         f"- Clarification quality: {metrics.clarification_quality:.3f}/5",
         f"- Recovery success: {metrics.recovery_success_rate:.3f}",
@@ -233,3 +240,7 @@ def _event_label(event: dict[str, object]) -> str:
 
 def _optional_metric(value: float | None) -> str:
     return "not scored" if value is None else f"{value:.3f}/5"
+
+
+def _optional_ratio(value: float | None) -> str:
+    return "not scored" if value is None else f"{value:.3f}"

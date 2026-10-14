@@ -309,3 +309,37 @@ On the unchanged Milestone 7.2 suite, all 47 turns completed, exact form-state
 accuracy rose from 0.500 to 0.875, context retention reached 1.000, recovery
 rose from 0.333 to 0.857, and invention and confirmation-boundary failures
 remained zero.
+
+---
+
+## 2026-10-14 — Latest-turn semantics are deterministic before model fluency
+
+Decision:
+For bounded high-confidence cases, the active user message is interpreted
+before Nemotron sees the turn. Whole-number words become reviewable digits;
+`nobody` on a question that explicitly says to count yourself requires a
+specific clarification; and dropdown near-matching is permitted only when one
+option clears a strict unique similarity threshold. Bounded history remains
+available for context and explicit prior-answer recovery, but it cannot replace
+the newest answer. All results remain unconfirmed proposals.
+
+Model explanations are also validated against active field metadata and
+reviewed guidance. Unsupported explicit date formats and unsupported claims
+that partial or estimated dates are acceptable receive the existing single
+correction attempt, then a deterministic grounded fallback. Confirm-edit
+acknowledgements explicitly identify the edited value used.
+
+Reason:
+The first real voice-like interview showed that successful speech recognition
+does not guarantee conversational understanding. The model repeated an older
+`nobody` answer after the user said `one`, while simple finite choices and
+edited confirmations sounded mechanical. Deterministic handling is safer,
+faster, and easier to evaluate for these closed cases than adding another
+agent or stronger default model.
+
+Outcome:
+On the fixed Milestone 7.4 suite, latest-answer adherence improved from zero to
+1.000, context retention from 0.500 to 1.000, contradictions from one to zero,
+repetition from 0.125 to zero, and all 14 deterministic failures were fixed.
+Canonical form-state accuracy and invention failures remained unchanged at
+1.000 and zero. The prior 47-turn suite introduced no new failure identity.

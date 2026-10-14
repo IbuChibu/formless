@@ -30,6 +30,8 @@ _HELPFUL_CLARIFICATION_TERMS = (
     "for example",
     "in other words",
     "it means",
+    "asks for",
+    "is asking",
     "you can",
     "tell me",
     "which part",
@@ -167,6 +169,28 @@ def score_scenario(
             and all(not turn.expectation_failures for turn in recovery_turns)
         )
 
+    latest_answer_turns = [
+        turn for turn in transcript if "latest_answer" in turn.tags
+    ]
+    latest_answer_adherence = (
+        _rate(
+            sum(
+                not turn.expectation_failures and turn.error is None
+                for turn in latest_answer_turns
+            ),
+            len(latest_answer_turns),
+        )
+        if latest_answer_turns
+        else None
+    )
+    contradiction_failures = sum(
+        1
+        for turn in transcript
+        if "contradiction_check" in turn.tags
+        for failure in turn.expectation_failures
+        if failure.startswith("assistant message included forbidden terms:")
+    )
+
     naturalness_scores = [
         _naturalness_score(turn, transcript)
         for turn in transcript
@@ -187,6 +211,8 @@ def score_scenario(
             recovery_success=recovery_success,
             heuristic_naturalness=heuristic_naturalness,
             invention_failures=invention_failures,
+            latest_answer_adherence=latest_answer_adherence,
+            contradiction_failures=contradiction_failures,
         ),
         failures,
     )
@@ -213,6 +239,16 @@ def _naturalness_score(
         score -= 1.5
     if "emotion" in turn.tags and not any(
         term in normalized for term in _EMPATHY_TERMS
+    ):
+        score -= 1.0
+    if "contradiction_check" in turn.tags and any(
+        failure.startswith("assistant message included forbidden terms:")
+        for failure in turn.expectation_failures
+    ):
+        score -= 2.0
+    if "style_check" in turn.tags and any(
+        failure.startswith("assistant message used ")
+        for failure in turn.expectation_failures
     ):
         score -= 1.0
     return max(1.0, round(score, 3))

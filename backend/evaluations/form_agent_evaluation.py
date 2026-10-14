@@ -350,8 +350,8 @@ async def run_evaluation(
 
             normalized_message = action.message.casefold()
             if not (
-                "awaiting your confirmation" in normalized_message
-                and "not been applied" in normalized_message
+                "review and confirm" in normalized_message
+                and "before i add it to the form" in normalized_message
             ):
                 confirmation_boundary_failures += 1
         elif isinstance(action, ProposeAction):

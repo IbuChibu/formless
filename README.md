@@ -150,3 +150,23 @@ Milestone 7.2 baseline and its largest observed weaknesses are summarized in
 The accepted Milestone 7.3 comparison and its one conservative residual format
 difference are summarized in
 [`docs/milestone-7.3-conversation-reliability-result.md`](docs/milestone-7.3-conversation-reliability-result.md).
+
+Milestone 7.4 adds a smaller voice-like reliability suite with deterministic
+checks for the newest short answer, contradictory response wording, safe
+finite-choice near matches, unsupported date advice, and edited-confirmation
+visibility. Run it with:
+
+```bash
+cd backend
+source .venv/bin/activate
+set -a
+source .env
+set +a
+python -m evaluations.conversation_harness run \
+  --label voice-reliability \
+  --scenarios evaluations/scenarios/voice_interview_reliability.json \
+  --judge
+```
+
+The accepted same-digest result is summarized in
+[`docs/milestone-7.4-voice-conversation-reliability-result.md`](docs/milestone-7.4-voice-conversation-reliability-result.md).

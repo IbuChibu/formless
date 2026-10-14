@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import re
 
 from ..models import FormAgentField
 from ..value_normalizer import canonicalize_field_value
-from .common import preflight_message
+from .common import preflight_message, semantic_text
 from .models import (
     AnswerAdapterResult,
     ClarificationNeeded,
@@ -41,6 +42,44 @@ _APPROXIMATE_NUMBER_PATTERN = re.compile(
     r"more\s+than|less\s+than|at\s+least|at\s+most|between|from)\b|[~≈]",
     re.IGNORECASE,
 )
+_NO_PEOPLE_PATTERN = re.compile(
+    r"^(?:nobody|no[-\s]?one|none)(?:\s+else)?[.!]?$",
+    re.IGNORECASE,
+)
+_COUNT_SELF_PATTERN = re.compile(
+    r"\b(?:count|include)\s+(?:yourself|the\s+applicant)\b",
+    re.IGNORECASE,
+)
+_SPOKEN_NUMBER_PATTERN = re.compile(
+    r"^(?:(?:the\s+answer\s+is|it\s+is|it's|there\s+(?:is|are)|just|only)\s+)?"
+    r"(?P<number>zero|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
+    r"nineteen|twenty)[.!]?$",
+    re.IGNORECASE,
+)
+_SPOKEN_NUMBER_VALUES = {
+    "zero": "0",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+    "eleven": "11",
+    "twelve": "12",
+    "thirteen": "13",
+    "fourteen": "14",
+    "fifteen": "15",
+    "sixteen": "16",
+    "seventeen": "17",
+    "eighteen": "18",
+    "nineteen": "19",
+    "twenty": "20",
+}
 
 
 def adapt_checkbox(field: FormAgentField, message: str) -> AnswerAdapterResult:
@@ -105,6 +144,10 @@ def adapt_dropdown(field: FormAgentField, message: str) -> AnswerAdapterResult:
             reason="Your answer could refer to more than one available option.",
             accepted_shape=accepted_shape,
         )
+
+    near_matches = _unique_safe_option_near_match(normalized_candidate, options)
+    if near_matches is not None:
+        return MatchedAnswer(near_matches, original_value=candidate)
     if len(candidate.split()) <= 4:
         return ClarificationNeeded(
             reason="I could not match your answer to an available option.",
@@ -133,6 +176,31 @@ def adapt_number(
             accepted_shape=accepted_shape,
         )
 
+    if _NO_PEOPLE_PATTERN.fullmatch(candidate):
+        metadata = semantic_text(
+            field.id,
+            field.label,
+            field.question,
+            field.help_text,
+        )
+        if _COUNT_SELF_PATTERN.search(metadata):
+            return ClarificationNeeded(
+                reason=(
+                    "Do you mean nobody else? This question says to count "
+                    "yourself, so if it is just you the count is 1."
+                ),
+                accepted_shape="Tell me the exact count you want to use.",
+            )
+        return MatchedAnswer("0", original_value=candidate.rstrip(".!?"))
+
+    spoken_match = _SPOKEN_NUMBER_PATTERN.fullmatch(candidate)
+    if spoken_match is not None:
+        spoken_number = spoken_match.group("number")
+        return MatchedAnswer(
+            _SPOKEN_NUMBER_VALUES[spoken_number.casefold()],
+            original_value=spoken_number,
+        )
+
     matches = [match.group(0) for match in _NUMBER_PATTERN.finditer(candidate)]
     if not matches:
         return NotApplicable()
@@ -155,3 +223,34 @@ def adapt_number(
 
 def _normalize_words(value: str) -> str:
     return " ".join(re.findall(r"[\w]+", value.casefold(), re.UNICODE))
+
+
+def _unique_safe_option_near_match(
+    normalized_candidate: str,
+    options: list[str],
+) -> str | None:
+    candidate_words = normalized_candidate.split()
+    if not candidate_words:
+        return None
+
+    ranked: list[tuple[float, str]] = []
+    for option in options:
+        normalized_option = _normalize_words(option)
+        if len(normalized_option.split()) != len(candidate_words):
+            continue
+        ranked.append(
+            (
+                SequenceMatcher(
+                    None,
+                    normalized_candidate,
+                    normalized_option,
+                ).ratio(),
+                option,
+            )
+        )
+    ranked.sort(reverse=True)
+    if not ranked or ranked[0][0] < 0.9:
+        return None
+    if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < 0.1:
+        return None
+    return ranked[0][1]
