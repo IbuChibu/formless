@@ -343,3 +343,23 @@ On the fixed Milestone 7.4 suite, latest-answer adherence improved from zero to
 repetition from 0.125 to zero, and all 14 deterministic failures were fixed.
 Canonical form-state accuracy and invention failures remained unchanged at
 1.000 and zero. The prior 47-turn suite introduced no new failure identity.
+
+---
+
+## 2026-10-15 — Hands-free interruption uses a local activity gate
+
+Decision:
+While an explicitly started voice interview is speaking an already-visible
+assistant response, the frontend may briefly open the microphone and analyse
+only audio levels. After calibration, sustained speech-like activity cancels
+speech synthesis, releases that detector, and starts the existing one-turn Web
+Speech recognizer. A short spike is insufficient. The detector stops on every
+speech/session exit, and `Answer now` plus typing remain permanent fallbacks.
+
+Reason:
+Requiring a button press whenever the user wants to answer early breaks the
+intended human-helper rhythm. Full continuous recognition, audio streaming, or
+a separate voice agent would add privacy, cost, and state risks. A bounded
+local gate enables natural barge-in without interpreting words, sending audio
+to Formless, or bypassing the existing transcript, proposal, and explicit
+confirmation path.

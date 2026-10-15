@@ -40,13 +40,16 @@ unavailable.
 Voice input uses the browser's speech-recognition capability and therefore
 requires a supported browser on `localhost` or HTTPS. After uploading a form,
 select **Start conversation** once. The assistant reads the visible question,
-listens for one answer, displays the transcript, and sends it through the same
-Form Agent path as typed text. A proposal still changes nothing until it is
-explicitly confirmed; while its review card is visible, phrases such as
-`confirm that`, `put that in`, `no`, and `skip this` use the same validated
-events as the buttons. **Pause** and **End** stop microphone capture and spoken
-output without changing the form. Typing and visible proposal controls remain
-available when voice is unsupported, denied, interrupted, or misheard.
+and temporarily analyses local microphone levels while speaking. Start talking
+to interrupt it hands-free, or use **Answer now**; either route opens the same
+one-turn recognizer, displays the transcript, and sends it through the same
+Form Agent path as typed text. Level detection does not transcribe, store, or
+upload audio. A proposal still changes nothing until it is explicitly
+confirmed; while its review card is visible, phrases such as `confirm that`,
+`put that in`, `no`, and `skip this` use the same validated events as the
+buttons. **Pause** and **End** stop microphone capture and spoken output without
+changing the form. Typing and visible proposal controls remain available when
+voice is unsupported, denied, interrupted, or misheard.
 
 ## Checks
 
@@ -57,6 +60,7 @@ python -m pytest -q
 python -m evaluations.form_agent_transcript_evaluation
 
 cd ../frontend
+npm run test:voice-interruption
 npm run build
 ```
 

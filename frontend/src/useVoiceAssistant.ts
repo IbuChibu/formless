@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  browserSupportsVoiceInterruption,
+  startVoiceInterruptionDetector,
+  type VoiceInterruptionDetector,
+} from "./voiceInterruptionDetector";
+
 export type VoiceInputStatus =
   | "idle"
   | "requesting_permission"
@@ -10,6 +16,13 @@ export type VoiceInputStatus =
   | "unsupported";
 
 type VoiceOutputStatus = "idle" | "speaking" | "error" | "unsupported";
+
+export type VoiceInterruptionStatus =
+  | "idle"
+  | "arming"
+  | "armed"
+  | "error"
+  | "unsupported";
 
 interface SpeechRecognitionAlternativeLike {
   transcript: string;
@@ -73,6 +86,11 @@ export type VoiceAssistantControls = {
   outputError: string | null;
   spokenRepliesEnabled: boolean;
   setSpokenRepliesEnabled: (enabled: boolean) => void;
+  interruptionSupported: boolean;
+  interruptionStatus: VoiceInterruptionStatus;
+  interruptionError: string | null;
+  startInterruptionDetection: (onInterrupt: () => void) => void;
+  stopInterruptionDetection: () => void;
   speakAssistantMessage: (
     message: string,
     options?: {
@@ -138,6 +156,7 @@ function transcriptFromResults(results: SpeechRecognitionResultListLike): string
 export default function useVoiceAssistant(): VoiceAssistantControls {
   const inputSupported = browserSupportsVoiceInput();
   const outputSupported = browserSupportsVoiceOutput();
+  const interruptionSupported = browserSupportsVoiceInterruption();
   const [inputStatus, setInputStatus] = useState<VoiceInputStatus>(
     inputSupported ? "idle" : "unsupported",
   );
@@ -148,6 +167,13 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
   );
   const [outputError, setOutputError] = useState<string | null>(null);
   const [spokenRepliesEnabled, setSpokenRepliesEnabledState] = useState(false);
+  const [interruptionStatus, setInterruptionStatus] =
+    useState<VoiceInterruptionStatus>(
+      interruptionSupported ? "idle" : "unsupported",
+    );
+  const [interruptionError, setInterruptionError] = useState<string | null>(
+    null,
+  );
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const recognitionSessionRef = useRef(0);
@@ -159,18 +185,75 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
   >(null);
   const spokenRepliesEnabledRef = useRef(false);
   const speechSessionRef = useRef(0);
+  const interruptionDetectorRef = useRef<VoiceInterruptionDetector | null>(
+    null,
+  );
+  const interruptionSessionRef = useRef(0);
 
   const setTranscript = useCallback((value: string) => {
     setTranscriptState(value);
   }, []);
 
+  const stopInterruptionDetection = useCallback(() => {
+    interruptionSessionRef.current += 1;
+    interruptionDetectorRef.current?.stop();
+    interruptionDetectorRef.current = null;
+    setInterruptionStatus(
+      interruptionSupported ? "idle" : "unsupported",
+    );
+  }, [interruptionSupported]);
+
+  const startInterruptionDetection = useCallback(
+    (onInterrupt: () => void) => {
+      interruptionSessionRef.current += 1;
+      const interruptionSession = interruptionSessionRef.current;
+      interruptionDetectorRef.current?.stop();
+      interruptionDetectorRef.current = null;
+      setInterruptionError(null);
+
+      if (!interruptionSupported) {
+        setInterruptionStatus("unsupported");
+        return;
+      }
+
+      setInterruptionStatus("arming");
+      const detector = startVoiceInterruptionDetector({
+        onArmed: () => {
+          if (interruptionSessionRef.current === interruptionSession) {
+            setInterruptionStatus("armed");
+          }
+        },
+        onVoice: () => {
+          if (interruptionSessionRef.current !== interruptionSession) {
+            return;
+          }
+          interruptionSessionRef.current += 1;
+          interruptionDetectorRef.current = null;
+          setInterruptionStatus("idle");
+          onInterrupt();
+        },
+        onError: (message) => {
+          if (interruptionSessionRef.current !== interruptionSession) {
+            return;
+          }
+          interruptionDetectorRef.current = null;
+          setInterruptionError(message);
+          setInterruptionStatus("error");
+        },
+      });
+      interruptionDetectorRef.current = detector;
+    },
+    [interruptionSupported],
+  );
+
   const stopSpeaking = useCallback(() => {
+    stopInterruptionDetection();
     if (outputSupported) {
       speechSessionRef.current += 1;
       window.speechSynthesis.cancel();
       setOutputStatus("idle");
     }
-  }, [outputSupported]);
+  }, [outputSupported, stopInterruptionDetection]);
 
   const speakAssistantMessage = useCallback(
     (
@@ -190,6 +273,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
 
       speechSessionRef.current += 1;
       const speechSession = speechSessionRef.current;
+      stopInterruptionDetection();
       window.speechSynthesis.cancel();
       setOutputError(null);
       const utterance = new window.SpeechSynthesisUtterance(message);
@@ -220,7 +304,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
       window.speechSynthesis.speak(utterance);
       return true;
     },
-    [outputSupported],
+    [outputSupported, stopInterruptionDetection],
   );
 
   const setSpokenRepliesEnabled = useCallback(
@@ -364,6 +448,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
   const resetVoiceSession = useCallback(() => {
     cancelListening();
     stopSpeaking();
+    setInterruptionError(null);
   }, [cancelListening, stopSpeaking]);
 
   useEffect(() => {
@@ -371,7 +456,10 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
       cancelRequestedRef.current = true;
       recognitionSessionRef.current += 1;
       speechSessionRef.current += 1;
+      interruptionSessionRef.current += 1;
       recognitionRef.current?.abort();
+      interruptionDetectorRef.current?.stop();
+      interruptionDetectorRef.current = null;
       recognitionCompleteRef.current = null;
       recognitionTranscriptRef.current = "";
       if (outputSupported) {
@@ -395,6 +483,11 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
     outputError,
     spokenRepliesEnabled,
     setSpokenRepliesEnabled,
+    interruptionSupported,
+    interruptionStatus,
+    interruptionError,
+    startInterruptionDetection,
+    stopInterruptionDetection,
     speakAssistantMessage,
     stopSpeaking,
     resetVoiceSession,

@@ -118,6 +118,7 @@ export default function useVoiceInterview(
   const lastHandledAssistantIdRef = useRef<number | null>(null);
   const queuedCorrectionRef = useRef<string | null>(null);
   const submitTranscriptRef = useRef<(transcript: string) => void>(() => {});
+  const assistantSpeechSessionRef = useRef(0);
 
   const setMode = useCallback((mode: SessionMode) => {
     sessionModeRef.current = mode;
@@ -126,6 +127,7 @@ export default function useVoiceInterview(
 
   const pauseInterview = useCallback(() => {
     const { voice } = optionsRef.current;
+    assistantSpeechSessionRef.current += 1;
     voice.cancelListening();
     voice.stopSpeaking();
     queuedCorrectionRef.current = null;
@@ -135,6 +137,7 @@ export default function useVoiceInterview(
 
   const endInterview = useCallback(() => {
     const { voice } = optionsRef.current;
+    assistantSpeechSessionRef.current += 1;
     voice.cancelListening();
     voice.stopSpeaking();
     queuedCorrectionRef.current = null;
@@ -200,16 +203,40 @@ export default function useVoiceInterview(
       setBaseStatus("assistant_speaking");
 
       const { voice } = optionsRef.current;
+      assistantSpeechSessionRef.current += 1;
+      const assistantSpeechSession = assistantSpeechSessionRef.current;
+      const finishSpeechTurn = () => {
+        if (
+          assistantSpeechSessionRef.current !== assistantSpeechSession
+        ) {
+          return;
+        }
+        assistantSpeechSessionRef.current += 1;
+        voice.stopInterruptionDetection();
+        continueAfterSpeech();
+      };
       const started = voice.speakAssistantMessage(turn.message, {
         force: true,
-        onEnd: continueAfterSpeech,
-        onError: continueAfterSpeech,
+        onEnd: finishSpeechTurn,
+        onError: finishSpeechTurn,
       });
       if (!started) {
-        continueAfterSpeech();
+        finishSpeechTurn();
+        return;
       }
+      voice.startInterruptionDetection(() => {
+        if (
+          sessionModeRef.current !== "active" ||
+          assistantSpeechSessionRef.current !== assistantSpeechSession
+        ) {
+          return;
+        }
+        assistantSpeechSessionRef.current += 1;
+        voice.stopSpeaking();
+        beginListening();
+      });
     },
-    [continueAfterSpeech],
+    [beginListening, continueAfterSpeech],
   );
 
   const startOrResume = useCallback(() => {
@@ -241,6 +268,7 @@ export default function useVoiceInterview(
     if (sessionModeRef.current !== "active") {
       return;
     }
+    assistantSpeechSessionRef.current += 1;
     optionsRef.current.voice.stopSpeaking();
     beginListening();
   }, [beginListening]);

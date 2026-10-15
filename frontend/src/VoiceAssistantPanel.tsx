@@ -1,4 +1,7 @@
-import type { VoiceAssistantControls } from "./useVoiceAssistant";
+import type {
+  VoiceAssistantControls,
+  VoiceInterruptionStatus,
+} from "./useVoiceAssistant";
 import type {
   VoiceInterviewControls,
   VoiceInterviewStatus,
@@ -21,6 +24,8 @@ export default function VoiceAssistantPanel({
     interview.status,
     voice.inputError,
     hasPendingProposal,
+    voice.interruptionStatus,
+    voice.interruptionError,
   );
   const isCapturing = [
     "requesting_permission",
@@ -205,8 +210,9 @@ export default function VoiceAssistantPanel({
         </div>
       ) : (
         <small className="voice-confirmation-note">
-          The microphone listens for one turn at a time. Pause or end the
-          conversation whenever you want; typing always remains available.
+          During assistant speech, temporary local sound detection lets you
+          interrupt by talking. Transcription still runs for one visible turn
+          at a time; typing and Answer now remain available.
         </small>
       )}
 
@@ -272,6 +278,8 @@ function getInterviewStatusCopy(
   status: VoiceInterviewStatus,
   inputError: string | null,
   hasPendingProposal: boolean,
+  interruptionStatus: VoiceInterruptionStatus,
+  interruptionError: string | null,
 ): { label: string; detail: string } {
   const copy: Record<VoiceInterviewStatus, { label: string; detail: string }> = {
     inactive: {
@@ -285,9 +293,23 @@ function getInterviewStatusCopy(
         "The assistant is getting the current question ready. The microphone is not listening yet.",
     },
     assistant_speaking: {
-      label: "Assistant speaking",
+      label:
+        interruptionStatus === "armed"
+          ? "Speak when ready"
+          : interruptionStatus === "arming"
+            ? "Preparing microphone"
+            : "Assistant speaking",
       detail:
-        "Listen to the question, or choose Answer now to interrupt and start your turn.",
+        interruptionStatus === "armed"
+          ? "Start talking whenever you are ready. The assistant will stop and open your one-turn transcript."
+          : interruptionStatus === "arming"
+            ? "Hands-free interruption is getting ready. You can still choose Answer now immediately."
+            : interruptionStatus === "error"
+              ? (interruptionError ??
+                "Hands-free interruption could not start. Use Answer now or type your reply.")
+              : interruptionStatus === "unsupported"
+                ? "Hands-free interruption is unavailable here. Use Answer now or type your reply."
+                : "Listen to the question, or choose Answer now to interrupt and start your turn.",
     },
     requesting_permission: {
       label: "Microphone permission",

@@ -31,6 +31,9 @@ Responsible for:
   action
 - speaking the same already-visible assistant message, then opening one bounded
   listening turn rather than recording continuously
+- monitoring only transient local microphone levels while that spoken response
+  is active, so sustained user speech can stop it and open the same bounded
+  listening turn
 - keeping the latest recognized speech visible and correctable while sending a
   completed utterance through the same Form Agent message path as typed text
 - mapping only a small exact set of spoken decisions to existing explicit
@@ -75,11 +78,15 @@ Must not:
 The browser voice layer has two focused responsibilities. `useVoiceAssistant`
 owns the Web Speech API lifecycle, including one-shot recognition, editable
 transcript state, speech synthesis, cancellation, unsupported capability, and
-stale-callback guards. `useVoiceInterview` owns the frontend-only turn loop:
+stale-callback guards. Its small `voiceInterruptionDetector` dependency uses
+Web Audio only while assistant speech is active: it calibrates to local noise,
+requires sustained activity, and releases the microphone before recognition
+starts. `useVoiceInterview` owns the frontend-only turn loop:
 
 ```text
 explicit start
-    -> visible assistant response is spoken
+    -> visible assistant response is spoken and local interruption arms
+    -> user speech may stop the response
     -> one listening turn
     -> visible completed transcript
     -> existing Form Agent message or closed event
@@ -95,10 +102,13 @@ pending proposal. A spoken correction first rejects that proposal, then sends
 the user-stated replacement through the ordinary answer path; the replacement
 creates a new proposal and still requires confirmation.
 
-The loop stops on pause, end, microphone failure, provider failure, or form
-change. Audio is never uploaded or stored. Typed conversation, proposal
-buttons, and the manual drawer remain available throughout and operate on the
-same state.
+The activity detector is not a recognizer: it observes no words, buffers no
+audio, and dispatches no form action. It stops on speech completion, manual
+interruption, recognition start, pause, end, error, form change, or unmount.
+The interview loop stops on pause, end, microphone failure, provider failure,
+or form change. Audio is never uploaded or stored. Typed conversation,
+`Answer now`, proposal buttons, and the manual drawer remain available
+throughout and operate on the same state.
 
 ## FastAPI
 

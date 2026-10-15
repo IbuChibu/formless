@@ -71,7 +71,7 @@ Required technology:
 ## Current implementation status
 
 - the typed guided interview and human-helper, turn-based voice interview are
-  complete through Milestone 7.1
+  complete through Milestone 7.5
 - the automated conversation evaluation harness, live baseline, and targeted
   evidence-gated voice-like reliability passes are complete through Milestone
   7.4
@@ -3152,6 +3152,118 @@ Do not implement:
   Milestone 8 work
 - authentication, persistence, analytics, a database, deployment, OCR, XFA, or
   online forms
+
+# Milestone 7.5 — Hands-free voice interruption
+
+Status: COMPLETE
+
+Problem to solve:
+The turn-based voice interview now continues automatically after one initial
+start, but the user still has to press `Answer now` whenever they want to speak
+before the assistant finishes. That push-to-interrupt pattern does not feel
+like a patient helper sitting beside the user. The user should be able to begin
+answering naturally, while keeping capture bounded, visible, and recoverable.
+
+Goal:
+During an explicitly active voice interview, temporarily monitor local
+microphone sound levels while the assistant is speaking. Sustained user speech
+stops the spoken response and opens the existing one-turn browser speech
+recognition flow. Preserve `Answer now`, typed input, and every existing closed
+Form Agent event as fallbacks. Do not create a second conversation or state
+path.
+
+Interaction design:
+1. The user still deliberately selects `Start conversation`; no microphone is
+   accessed before that action.
+2. While a visible assistant response is being spoken, the UI indicates when
+   hands-free interruption is being prepared, armed, or unavailable.
+3. The browser analyses only transient local audio levels during that spoken
+   response. It does not transcribe, buffer, upload, or persist this audio.
+4. After sustained speech-like activity rather than a single noise spike, the
+   assistant stops speaking and the existing one-shot speech recognizer opens.
+5. The recognized utterance remains visible and follows the existing message,
+   proposal, correction, skip, and explicit-confirmation flow.
+6. If local interruption detection is unsupported, denied, or unreliable, the
+   visible `Answer now` control and typed composer remain usable without losing
+   the current question or form state.
+7. Pause, end, form replacement, speech completion, recognition start, error,
+   and component cleanup immediately release interruption monitoring.
+
+Architecture boundaries:
+- keep interruption detection inside the frontend browser voice adapter and
+  orchestration hook
+- use the browser microphone and Web Audio API only for a short-lived local
+  voice-activity gate while speech synthesis is active
+- use the existing one-turn Web Speech recognition only after interruption is
+  detected or the user selects `Answer now`
+- keep `POST /agent/respond`, typed effects, canonical conversation state,
+  proposal validation, confirmation, and PDF filling unchanged
+- do not send audio samples, levels, or interruption events to FastAPI,
+  Nemotron, Nebius, Tavily, or the PDF service
+- do not add a voice SDK, state library, backend endpoint, or dependency
+
+Acceptance criteria:
+- microphone access for hands-free interruption begins only after an explicit
+  voice-session start and only while the assistant is speaking
+- sustained speech-like microphone activity stops the current spoken response
+  and starts exactly one existing speech-recognition turn
+- short noise spikes do not trigger interruption, and a stale detector cannot
+  start recognition after its assistant turn has ended
+- speech completion, manual `Answer now`, pause, end, form change, error, and
+  unmount stop and release the detector's stream, animation frame, audio nodes,
+  and audio context
+- the UI clearly distinguishes an armed hands-free interruption state from a
+  preparing or unavailable fallback state
+- detector permission or capability failure does not stop the interview,
+  change a field, confirm a proposal, or hide `Answer now` and typed controls
+- post-interruption transcripts use the same visible one-turn recognition,
+  Form Agent endpoint, closed effects, and explicit-confirmation boundary as
+  all other voice answers
+- no audio is stored, uploaded, or transcribed during level detection
+- no backend, Form Agent, PDF extraction, PDF filling, or canonical field-state
+  behavior changes
+- frontend production build and the existing backend, transcript, safety, and
+  conversation regression checks pass
+
+Verified implementation outcome recorded 15 October 2026:
+- a dependency-free Web Audio detector now opens only while synthesized
+  assistant speech is active, calibrates against the current local level, and
+  requires sustained activity before dispatching one interruption callback
+- a detected interruption invalidates the current speech turn, stops speech
+  synthesis, releases the detector, and starts the existing one-shot Web Speech
+  recognizer; it does not create a second transcript or Form Agent path
+- speech completion, manual `Answer now`, pause, end, form reset, recognition
+  start, detector error, stale async setup, and component cleanup all invalidate
+  the detector and release its animation frame, stream tracks, source node, and
+  audio context
+- the assistant-speaking UI reports preparing, armed, unsupported, and failed
+  interruption states while retaining `Answer now`, typed input, proposal
+  controls, and explicit confirmation
+- a dependency-free frontend check executes the production detector policy and
+  mocked runtime, proving that calibration and short spikes cannot trigger,
+  sustained activity triggers exactly once, resources close, and a detector
+  stopped during asynchronous permission setup cannot later arm or fire
+- the local app loaded without browser console warnings or errors; the in-app
+  test browser exposed no speech or microphone APIs and therefore exercised the
+  intended capability fallback rather than real-device acoustic sensitivity
+- all 332 backend tests pass; the five-fixture/47-turn transcript evaluation
+  and 14-scenario safety evaluation report no failures; the interruption check
+  and frontend production build pass with only the existing PDF-worker
+  bundle-size warning
+- acoustic echo cancellation and microphone sensitivity remain browser- and
+  device-dependent, so `Answer now` and typing intentionally remain permanent
+  fallbacks rather than treating detector availability as a safety dependency
+
+Do not implement:
+- continuous speech recognition, always-on or background listening, wake-word
+  detection, speaker identification, audio recording, or audio persistence
+- server-side voice activity detection, audio upload, streaming audio, or a
+  voice-specific backend endpoint
+- automatic proposal confirmation, fuzzy confirmation, direct voice-to-PDF
+  writes, or a second conversation state
+- a voice SDK, second agent, model cascade, new model, authentication,
+  persistence, analytics, a database, deployment, OCR, XFA, or online forms
+- direct PDF interaction, the final-review workspace, or any Milestone 8 work
 
 # Milestone 8 — Full workflow
 
