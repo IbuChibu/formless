@@ -76,7 +76,9 @@ Required technology:
 - the automated conversation evaluation harness, live baseline, and targeted
   evidence-gated voice-like reliability passes are complete through Milestone
   7.4; human-helper experience measurement is complete through Milestone 7.7
-- Milestone 8 full workflow is the next planned milestone
+- Milestone 7.8 targeted human-helper conversation repairs is the next planned
+  milestone; Milestone 8 follows only after those repairs pass the fixed
+  evaluation gates
 - deployment has not started; persistence remains outside the current plan
 
 ---
@@ -3641,6 +3643,161 @@ Do not implement:
 - a second production agent, model cascade, agent framework, or automatic
   confirmation
 - Milestone 8 direct PDF interaction or final-review work
+
+# Milestone 7.8 — Targeted human-helper conversation repairs
+
+Status: NOT STARTED
+
+Problem to solve:
+The fixed Milestone 7.7 baseline shows that the assistant remains safe but does
+not yet consistently behave like a patient person filling in the form beside
+the user. It can lose later facts volunteered in a multi-answer message, retain
+conversational wrappers or sentence punctuation as field values, mistake a
+question about the active field for navigation, give a generic completion
+message when the user asks a specific review question, and push the workflow
+before clearly acknowledging or resolving the user's latest concern.
+
+Goal:
+Make the smallest evidence-backed production changes that repair those observed
+conversation failures while preserving one Form Agent, bounded request state,
+closed typed effects, explicit confirmation, canonical frontend field state,
+and the rule that the user is the only source of personal facts.
+
+Targeted conversation changes:
+
+1. Bounded volunteered-answer memory
+   - separate the active answer from explicitly cued answers for later real
+     fields when a user supplies several facts in one message
+   - retain at most a small fixed number of validated, unconfirmed candidates
+     in the request-carried conversation state, tied to stable field IDs and
+     their original user wording
+   - capture a later candidate only when one real field and one compatible value
+     can be identified with high confidence; otherwise leave it unrecorded and
+     ask a focused clarification when that field becomes active
+   - when a remembered field becomes active, present its candidate as a normal
+     reviewable proposal instead of asking the user to repeat it
+   - never treat a remembered candidate as confirmed, write it to canonical
+     form state, or send it to the PDF Service without explicit confirmation
+   - clear or replace remembered candidates deterministically after review,
+     skip, correction, form replacement, or other relevant state transitions
+
+2. Conservative conversational-wrapper cleanup
+   - extend field-type adapters to isolate the value in phrases such as
+     `My surname is Okafor.` and `I am back. It is J.`
+   - remove terminal sentence punctuation only when it is clearly prose around
+     a compatible candidate; preserve meaningful internal punctuation,
+     apostrophes, hyphens, abbreviations, email addresses, and identity spelling
+   - keep the original candidate, prepared value, and visible transformation
+     explanation whenever cleanup changes the proposed text
+   - do not add speculative spelling correction or general-purpose prose
+     rewriting to factual fields
+
+3. Active-field side-question recovery
+   - classify a direct informational question about the active field before
+     attempting global field-reference or navigation matching
+   - ground pronouns and field-local wording in the active question, bounded
+     schema metadata, and verified guidance already allowed by the architecture
+   - answer the question without proposing a value, retain the active field,
+     then return naturally to it without repeating an unnecessary menu
+   - if the available context cannot support the answer, say what is unknown
+     and ask one useful clarifying question rather than inventing a rule
+
+4. Post-completion review and correction
+   - evaluate specific review, status, and correction intent before returning a
+     generic form-complete response
+   - answer questions about confirmed, skipped, and unanswered fields from
+     canonical state, including a specific field's stored status or value
+   - start an existing closed correction transition when the user asks to
+     replace a confirmed value; keep the confirmed value until the replacement
+     is explicitly confirmed
+   - reserve the generic completion response for genuinely general next-step
+     requests
+
+5. Acknowledge, answer, then progress
+   - make the assistant respond first to the user's latest concern, confusion,
+     interruption, or frustration
+   - use one concise acknowledgement when useful, answer the concern, and only
+     then return to the active question
+   - avoid repeated workflow instructions, premature advancement, and generic
+     `all fields reviewed` messages in response to a specific question
+   - keep ordinary responses suitable for spoken delivery without enforcing one
+     exact sentence or making the model's prose authoritative over state
+
+Implementation boundaries:
+- keep the existing Form Agent as one public service and place routing, state,
+  adapter, prompt, and parsing changes in their existing focused modules
+- any remembered candidate is bounded ephemeral conversation state supplied in
+  requests; it is not persistence, canonical form data, or model memory
+- deterministic field identification and field-type validation remain
+  authoritative; Nemotron may help phrase or interpret an ambiguous turn but
+  cannot create a candidate for a field the user did not answer
+- all form-changing outcomes remain closed typed effects and use the existing
+  proposal, replacement, confirmation, rejection, skip, and correction paths
+- the frontend may transport and validate the expanded conversation state, but
+  this milestone does not redesign the workspace or add new visible controls
+
+Evaluation method:
+- preserve `human-helper-experience-v1` and its recorded suite digest unchanged
+  so the live candidate is compared with the existing baseline on identical
+  personas, fixtures, turns, branches, and behavioural expectations
+- add focused deterministic and transcript tests for every repaired failure,
+  including bundled answers, `Okafor.`, `I am back. It is J.`, an active-field
+  `Do I count myself?` question, and specific post-completion review/correction
+- save the candidate report and compare it with the checked-in baseline; report
+  both hard correctness and human-helper gates rather than relying on a single
+  aggregate score
+- do not tune to exact assistant sentences or alter a failing expectation merely
+  to make the candidate appear better
+
+Acceptance criteria:
+- one multi-field message can produce the active field proposal and retain
+  uniquely identified later candidates without confirming any of them
+- progression to a remembered field offers the retained value for explicit
+  review rather than asking the same factual question again
+- ambiguous, incompatible, duplicate, or uncued values are not silently stored
+  as remembered candidates
+- conversational wrappers and safe terminal punctuation are removed in the
+  covered field types while meaningful identity punctuation is preserved
+- a question about the active field is answered before any navigation or value
+  interpretation, leaves canonical values unchanged, and returns to the same
+  field
+- form-complete review questions list or describe confirmed, skipped, and
+  unanswered fields accurately from canonical state
+- post-completion correction uses the existing replacement proposal and
+  explicit-confirmation boundary
+- all newly introduced conversation state has a strict size bound, validates
+  against the supplied schema, and is accepted and returned consistently by
+  the backend and frontend
+- the unchanged human-helper suite passes its correctness gate and human-helper
+  gate, including zero invention and confirmation-boundary failures
+- the existing five-fixture transcript evaluation, 14-scenario safety
+  evaluation, backend test suite, voice and interruption checks, and frontend
+  production build pass without regression
+
+Expected implementation files:
+- `backend/app/services/form_agent/models.py`
+- `backend/app/services/form_agent/orchestrator.py`
+- `backend/app/services/form_agent/conversation_policy.py`
+- `backend/app/services/form_agent/answer_adapters.py`
+- `backend/app/services/form_agent/answer_preparation.py`
+- `backend/app/services/form_agent/prompt_builder.py` only if bounded side-
+  question context needs adjustment
+- focused backend Form Agent and transcript tests
+- `frontend/src/App.tsx` only for expanded conversation-state transport and
+  validation
+- evaluation artifacts and source-of-truth documentation after verification
+
+Do not implement:
+- a second agent, runtime model cascade, model debate, autonomous planning, an
+  agent framework, or a model-generated user
+- automatic confirmation, silent application of remembered answers, direct
+  model-to-state writes, or any weakening of proposal review
+- unbounded chat history, server-side transcript storage, browser persistence,
+  analytics, authentication, a database, or user profiling
+- broad spell correction, inferred personal facts, form-specific answer hacks,
+  or Tavily searches containing user answers
+- voice-capture changes, a frontend redesign, direct PDF field interaction,
+  PDF extraction or filling changes, OCR, XFA, or Milestone 8 review work
 
 # Milestone 8 — Full workflow
 
