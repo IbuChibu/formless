@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:workspace-layout": "node scripts/test-workspace-layout.mjs",
     "test:voice-interruption": "node scripts/test-voice-interruption.mjs",
     "preview": "vite preview"
   },

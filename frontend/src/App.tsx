@@ -11,6 +11,7 @@ type ExtractionStatus = "idle" | "loading" | "ready" | "empty" | "error";
 type PreviewStatus = "idle" | "pending" | "updating" | "ready" | "error";
 type AgentStatus = "idle" | "loading" | "error";
 type AgentActivity = "responding" | "guidance";
+type MobileWorkspaceView = "assistant" | "form";
 type FieldValue = string | boolean;
 type AgentEffectKind =
   | "none"
@@ -286,6 +287,8 @@ function App() {
     useState<ProposalAgentEffect | null>(null);
   const [manualDrawerOpen, setManualDrawerOpen] = useState(false);
   const [showFullTranscript, setShowFullTranscript] = useState(false);
+  const [mobileWorkspaceView, setMobileWorkspaceView] =
+    useState<MobileWorkspaceView>("assistant");
   const voice = useVoiceAssistant();
 
   const originalUrlRef = useRef<string | null>(null);
@@ -472,6 +475,7 @@ function App() {
     setPendingProposalDetails(null);
     setManualDrawerOpen(false);
     setShowFullTranscript(false);
+    setMobileWorkspaceView("assistant");
     voiceInterview.resetInterview();
     agentMessageIdRef.current = 0;
     setExtractionStatus("loading");
@@ -880,7 +884,7 @@ function App() {
     : [];
   const visibleAgentMessages = showFullTranscript
     ? agentMessages
-    : agentMessages.slice(-3);
+    : agentMessages.slice(-2);
   const latestAssistantTurn = getLatestAssistantTurn(agentMessages);
   const pendingProposalPdfField = fields.find(
     (field) => field.id === pendingProposal?.field_id,
@@ -950,63 +954,82 @@ function App() {
   });
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
+    <div className={`app-shell${selectedFile ? " document-loaded" : ""}`}>
+      <header
+        className={`app-header${selectedFile ? " workspace-header" : ""}`}
+      >
         <div className="brand-lockup">
           <span className="brand-mark" aria-hidden="true">
             F
           </span>
           <div>
             <p className="brand-name">Formless</p>
-            <p className="brand-tagline">AI-assisted PDF workspace</p>
+            <p className="brand-tagline">Voice-first form companion</p>
           </div>
         </div>
 
-        <div className={`connection-status ${connectionStatus}`}>
-          <span className="status-dot" aria-hidden="true" />
-          <span>{connectionCopy}</span>
-        </div>
+        {selectedFile ? (
+          <>
+            <div className="workspace-document-summary">
+              <span>Current form</span>
+              <strong title={selectedFile.name}>{selectedFile.name}</strong>
+              {currentAgentFields.length > 0 ? (
+                <small>
+                  {reviewedAgentFieldCount} of {currentAgentFields.length}{" "}
+                  questions reviewed
+                </small>
+              ) : (
+                <small>{formatFileSize(selectedFile.size)}</small>
+              )}
+            </div>
+            <div className="workspace-header-actions">
+              <div
+                className={`connection-status compact ${connectionStatus}`}
+                aria-label={connectionCopy}
+                title={connectionCopy}
+              >
+                <span className="status-dot" aria-hidden="true" />
+                <span>API</span>
+              </div>
+              <label className="header-file-button">
+                Change PDF
+                <input
+                  className="file-input"
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  onChange={handleFileSelection}
+                />
+              </label>
+              {downloadUrl ? (
+                <a
+                  className="header-download-button"
+                  href={downloadUrl}
+                  download={completedFilename}
+                >
+                  Download
+                </a>
+              ) : (
+                <span
+                  className="header-download-button disabled"
+                  aria-disabled="true"
+                  title="Confirm an answer to create a completed copy"
+                >
+                  Download
+                </span>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className={`connection-status ${connectionStatus}`}>
+            <span className="status-dot" aria-hidden="true" />
+            <span>{connectionCopy}</span>
+          </div>
+        )}
       </header>
 
-      <main className="app-main">
-        <section className="intro-panel">
-          <div className="intro-copy">
-            <p className="eyebrow">Fill with confidence</p>
-            <h1>Understand your form as you fill it.</h1>
-            <p>
-              Choose a fillable PDF, ask the assistant to explain confusing
-              fields, and download a completed copy. Your original stays
-              unchanged.
-            </p>
-          </div>
-
-          <div className="upload-area">
-            <label className="file-button">
-              {selectedFile ? "Choose another PDF" : "Choose a fillable PDF"}
-              <input
-                className="file-input"
-                id="pdf-upload"
-                type="file"
-                accept="application/pdf,.pdf"
-                onChange={handleFileSelection}
-              />
-            </label>
-            {selectedFile ? (
-              <div className="selected-file">
-                <span className="file-icon" aria-hidden="true">
-                  PDF
-                </span>
-                <span>
-                  <strong>{selectedFile.name}</strong>
-                  <small>{formatFileSize(selectedFile.size)}</small>
-                </span>
-              </div>
-            ) : (
-              <p>PDF files stay in this browser session.</p>
-            )}
-          </div>
-        </section>
-
+      <main
+        className={`app-main${selectedFile ? " workspace-main" : " landing-main"}`}
+      >
         {extractionError ? (
           <div className="error-banner" role="alert">
             <strong>Could not read this form.</strong>
@@ -1015,24 +1038,116 @@ function App() {
         ) : null}
 
         {!selectedFile ? (
-          <section className="empty-workspace">
-            <div className="empty-preview" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </div>
-            <div>
-              <p className="eyebrow">Ready when you are</p>
-              <h2>Your PDF workspace will appear here.</h2>
-              <p>
-                The document preview and guided assistant will sit side by
-                side.
+          <section
+            className="upload-landing"
+            aria-labelledby="upload-landing-heading"
+          >
+            <div className="upload-landing-copy">
+              <p className="eyebrow">A calmer way through forms</p>
+              <h1 id="upload-landing-heading">
+                Bring the form. We’ll fill it out together.
+              </h1>
+              <p className="upload-landing-intro">
+                Formless stays beside you, asks one question at a time, and
+                helps make confusing wording easier to understand.
               </p>
+              <div className="upload-landing-actions">
+                <label className="file-button">
+                  Choose a fillable PDF
+                  <input
+                    className="file-input"
+                    id="pdf-upload"
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    onChange={handleFileSelection}
+                  />
+                </label>
+                <span>AcroForm PDF · Your original is never overwritten</span>
+              </div>
+              <ul
+                className="upload-assurances"
+                aria-label="How Formless works"
+              >
+                <li>
+                  <span aria-hidden="true">1</span>
+                  <div>
+                    <strong>Talk naturally</strong>
+                    <small>
+                      Speak or type, and ask when a question is unclear.
+                    </small>
+                  </div>
+                </li>
+                <li>
+                  <span aria-hidden="true">2</span>
+                  <div>
+                    <strong>Check every answer</strong>
+                    <small>
+                      Nothing reaches the PDF until you explicitly confirm it.
+                    </small>
+                  </div>
+                </li>
+                <li>
+                  <span aria-hidden="true">3</span>
+                  <div>
+                    <strong>Keep the form in sight</strong>
+                    <small>
+                      Watch the completed copy update beside the conversation.
+                    </small>
+                  </div>
+                </li>
+              </ul>
+            </div>
+            <div className="upload-landing-visual" aria-hidden="true">
+              <div className="landing-document">
+                <span className="landing-document-heading" />
+                <span />
+                <span />
+                <span className="landing-document-field" />
+                <span />
+                <span className="landing-document-field short" />
+              </div>
+              <div className="landing-conversation-card">
+                <span className="landing-voice-orb" />
+                <div>
+                  <small>Formless</small>
+                  <strong>Let’s take this one question at a time.</strong>
+                </div>
+              </div>
             </div>
           </section>
         ) : (
-          <section className="workspace">
-            <article className="panel preview-panel">
+          <>
+            <nav
+              className="mobile-workspace-switch"
+              aria-label="Choose workspace view"
+            >
+              <button
+                type="button"
+                aria-controls="assistant-workspace"
+                aria-pressed={mobileWorkspaceView === "assistant"}
+                onClick={() => setMobileWorkspaceView("assistant")}
+              >
+                Assistant
+              </button>
+              <button
+                type="button"
+                aria-controls="document-workspace"
+                aria-pressed={mobileWorkspaceView === "form"}
+                onClick={() => setMobileWorkspaceView("form")}
+              >
+                Form
+              </button>
+            </nav>
+            <section
+              className="workspace"
+              data-mobile-view={mobileWorkspaceView}
+            >
+            <article
+              className={`panel preview-panel mobile-workspace-view${
+                mobileWorkspaceView === "form" ? " mobile-view-active" : ""
+              }`}
+              id="document-workspace"
+            >
               <div className="panel-header">
                 <div>
                   <p className="panel-kicker">Document</p>
@@ -1060,17 +1175,34 @@ function App() {
               ) : null}
             </article>
 
-            <aside className="panel fields-panel assistant-workspace">
+            <aside
+              className={`panel fields-panel assistant-workspace mobile-workspace-view${
+                mobileWorkspaceView === "assistant"
+                  ? " mobile-view-active"
+                  : ""
+              }`}
+              id="assistant-workspace"
+            >
               <div className="panel-header assistant-heading">
                 <div>
                   <p className="panel-kicker">Guided completion</p>
                   <h2>Form assistant</h2>
                 </div>
-                {currentAgentFields.length > 0 ? (
-                  <span className="assistant-progress-count">
-                    {reviewedAgentFieldCount}/{currentAgentFields.length}
-                  </span>
-                ) : null}
+                <div className="assistant-heading-actions">
+                  {currentAgentFields.length > 0 ? (
+                    <span className="assistant-progress-count">
+                      {reviewedAgentFieldCount}/{currentAgentFields.length}
+                    </span>
+                  ) : null}
+                  <details className="assistant-technology">
+                    <summary>About</summary>
+                    <p>
+                      Natural-language help uses NVIDIA Nemotron through
+                      Nebius. Every prepared answer still waits for your
+                      explicit review.
+                    </p>
+                  </details>
+                </div>
               </div>
 
               {currentAgentFields.length > 0 ? (
@@ -1141,15 +1273,14 @@ function App() {
                 aria-busy={agentStatus === "loading"}
                 aria-live="polite"
               >
-                <div className="ai-explanation-heading">
-                  <span className="ai-mark" aria-hidden="true">
-                    AI
-                  </span>
-                  <div>
-                    <strong>Form assistant</strong>
-                    <span>NVIDIA Nemotron via Nebius Token Factory</span>
-                  </div>
-                </div>
+                {canUseAgent ? (
+                  <VoiceAssistantPanel
+                    voice={voice}
+                    interview={voiceInterview}
+                    agentIsBusy={agentStatus === "loading"}
+                    hasPendingProposal={pendingProposal !== null}
+                  />
+                ) : null}
 
                 {activeAgentField && activeAgentQuestion ? (
                   <section
@@ -1295,7 +1426,7 @@ function App() {
                         <strong>Conversation</strong>
                         <span>{agentMessages.length} messages</span>
                       </div>
-                      {agentMessages.length > 3 ? (
+                      {agentMessages.length > 2 ? (
                         <button
                           type="button"
                           aria-controls="agent-conversation-log"
@@ -1319,6 +1450,9 @@ function App() {
                       {visibleAgentMessages.map((message) => {
                         const messageField = fields.find(
                           (field) => field.id === message.fieldId,
+                        );
+                        const hasGuidance = Boolean(
+                          message.guidance?.length || message.webGuidance,
                         );
 
                         return (
@@ -1348,76 +1482,87 @@ function App() {
                               </div>
                             </div>
                             <p>{message.content}</p>
-                            {message.guidance?.map((citation) => (
-                              <aside
-                                className="agent-guidance"
-                                key={`${message.id}-${citation.source_id}-${citation.excerpt}`}
-                              >
-                                <span>Official guidance · paraphrased</span>
-                                <p>{citation.excerpt}</p>
-                                <a
-                                  href={citation.url}
-                                  rel="noreferrer"
-                                  target="_blank"
-                                >
-                                  {citation.title}
-                                </a>
-                                <small>
-                                  {citation.organization} · Form version{" "}
-                                  {citation.form_version} · Retrieved{" "}
-                                  {citation.retrieved_at}
-                                </small>
-                              </aside>
-                            ))}
-                            {message.webGuidance &&
-                            message.webGuidance.sources.length > 0 ? (
-                              <aside
-                                className={`agent-web-guidance ${message.webGuidance.status}`}
-                              >
-                                <span>Live web guidance · Tavily</span>
-                                <p>{message.webGuidance.notice}</p>
-                                {message.webGuidance.sources.map((source) => (
-                                  <article
-                                    className="agent-web-source"
-                                    key={`${message.id}-${source.source_id}`}
-                                  >
-                                    <a
-                                      href={source.url}
-                                      rel="noreferrer"
-                                      target="_blank"
+                            {hasGuidance ? (
+                              <details className="agent-guidance-disclosure">
+                                <summary>View guidance and sources</summary>
+                                <div>
+                                  {message.guidance?.map((citation) => (
+                                    <aside
+                                      className="agent-guidance"
+                                      key={`${message.id}-${citation.source_id}-${citation.excerpt}`}
                                     >
-                                      {source.title}
-                                    </a>
-                                    <p>{source.snippet}</p>
-                                    <small>
-                                      {getWebSourceQualityLabel(
-                                        source.source_quality,
-                                      )} · {source.hostname} · Retrieved{" "}
-                                      {source.retrieved_at}
-                                      {source.form_version
-                                        ? ` · Form version ${source.form_version}`
-                                        : ""}
-                                    </small>
-                                  </article>
-                                ))}
-                              </aside>
-                            ) : null}
-                            {message.webGuidance &&
-                            message.webGuidance.sources.length === 0 &&
-                            message.webGuidanceRetry ? (
-                              <div className="agent-guidance-recovery">
-                                <button
-                                  type="button"
-                                  disabled={agentStatus === "loading"}
-                                  onClick={() =>
-                                    void requestAgent(
-                                      message.webGuidanceRetry as AgentRequest,
-                                    )
-                                  }
-                                >
-                                  Retry guidance check
-                                </button>
-                              </div>
+                                      <span>
+                                        Official guidance · paraphrased
+                                      </span>
+                                      <p>{citation.excerpt}</p>
+                                      <a
+                                        href={citation.url}
+                                        rel="noreferrer"
+                                        target="_blank"
+                                      >
+                                        {citation.title}
+                                      </a>
+                                      <small>
+                                        {citation.organization} · Form version{" "}
+                                        {citation.form_version} · Retrieved{" "}
+                                        {citation.retrieved_at}
+                                      </small>
+                                    </aside>
+                                  ))}
+                                  {message.webGuidance &&
+                                  message.webGuidance.sources.length > 0 ? (
+                                    <aside
+                                      className={`agent-web-guidance ${message.webGuidance.status}`}
+                                    >
+                                      <span>Live web guidance · Tavily</span>
+                                      <p>{message.webGuidance.notice}</p>
+                                      {message.webGuidance.sources.map(
+                                        (source) => (
+                                          <article
+                                            className="agent-web-source"
+                                            key={`${message.id}-${source.source_id}`}
+                                          >
+                                            <a
+                                              href={source.url}
+                                              rel="noreferrer"
+                                              target="_blank"
+                                            >
+                                              {source.title}
+                                            </a>
+                                            <p>{source.snippet}</p>
+                                            <small>
+                                              {getWebSourceQualityLabel(
+                                                source.source_quality,
+                                              )} · {source.hostname} · Retrieved{" "}
+                                              {source.retrieved_at}
+                                              {source.form_version
+                                                ? ` · Form version ${source.form_version}`
+                                                : ""}
+                                            </small>
+                                          </article>
+                                        ),
+                                      )}
+                                    </aside>
+                                  ) : null}
+                                  {message.webGuidance &&
+                                  message.webGuidance.sources.length === 0 &&
+                                  message.webGuidanceRetry ? (
+                                    <div className="agent-guidance-recovery">
+                                      <button
+                                        type="button"
+                                        disabled={agentStatus === "loading"}
+                                        onClick={() =>
+                                          void requestAgent(
+                                            message.webGuidanceRetry as AgentRequest,
+                                          )
+                                        }
+                                      >
+                                        Retry guidance check
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </details>
                             ) : null}
                           </article>
                         );
@@ -1633,13 +1778,13 @@ function App() {
                 hasUnansweredAgentField &&
                 agentStatus !== "loading" ? (
                   <button
-                    className="agent-progress-button"
+                    className="agent-progress-button secondary"
                     type="button"
                     onClick={() => sendAgentEvent({ type: "advance" })}
                   >
                     {canStartAgent
-                      ? "Start guided interview"
-                      : "Resume guided interview"}
+                      ? "Start with typing"
+                      : "Continue with typing"}
                   </button>
                 ) : null}
 
@@ -1685,73 +1830,64 @@ function App() {
                   </section>
                 ) : null}
 
-                {canUseAgent ? (
-                  <VoiceAssistantPanel
-                    voice={voice}
-                    interview={voiceInterview}
-                    agentIsBusy={agentStatus === "loading"}
-                    hasPendingProposal={pendingProposal !== null}
-                  />
-                ) : null}
-
-                {canUseAgent ? (
-                  <form
-                    className="ai-question-form agent-message-form"
-                    onSubmit={submitAgentMessage}
-                  >
-                    <label htmlFor="agent-message">
-                      {activeAgentField
-                        ? pendingProposal
-                          ? "Ask a question or use the review controls"
-                          : "Your answer or question"
-                        : agentConversationState.phase === "form_complete"
-                          ? "Ask about your answers or name one to correct"
-                        : "Start or continue the guided form"}
-                    </label>
-                    <div className="ai-question-controls">
-                      <input
-                        ref={agentInputRef}
-                        id="agent-message"
-                        type="text"
-                        maxLength={2000}
-                        placeholder={
-                          activeAgentField
-                            ? pendingProposal
-                              ? "Ask about this proposal"
-                              : "Type your answer or ask for help"
-                            : agentConversationState.phase === "form_complete"
-                              ? "For example: Change my home address"
-                            : "Ask for help with the form"
-                        }
-                        value={agentInput}
-                        disabled={
-                          agentStatus === "loading" || !canSendAgentMessage
-                        }
-                        onChange={(event) => setAgentInput(event.target.value)}
-                      />
-                      <button
-                        type="submit"
-                        disabled={
-                          agentStatus === "loading" ||
-                          !agentInput.trim() ||
-                          !canSendAgentMessage
-                        }
-                      >
-                        Send
-                      </button>
-                    </div>
-                    <small>
-                      Nothing is added to the PDF until you explicitly confirm
-                      a prepared answer. The full conversation remains
-                      available above.
-                    </small>
-                  </form>
-                ) : extractionStatus === "ready" ? (
-                  <p className="agent-complete-state">
-                    This form has no fields supported by the assistant.
-                  </p>
-                ) : null}
               </section>
+
+              {canUseAgent ? (
+                <form
+                  className="ai-question-form agent-message-form"
+                  onSubmit={submitAgentMessage}
+                >
+                  <label htmlFor="agent-message">
+                    {activeAgentField
+                      ? pendingProposal
+                        ? "Ask a question or use the review controls"
+                        : "Your answer or question"
+                      : agentConversationState.phase === "form_complete"
+                        ? "Ask about your answers or name one to correct"
+                        : "Type to use the assistant without voice"}
+                  </label>
+                  <div className="ai-question-controls">
+                    <input
+                      ref={agentInputRef}
+                      id="agent-message"
+                      type="text"
+                      maxLength={2000}
+                      placeholder={
+                        activeAgentField
+                          ? pendingProposal
+                            ? "Ask about this proposal"
+                            : "Type your answer or ask for help"
+                          : agentConversationState.phase === "form_complete"
+                            ? "For example: Change my home address"
+                            : "Ask for help with the form"
+                      }
+                      value={agentInput}
+                      disabled={
+                        agentStatus === "loading" || !canSendAgentMessage
+                      }
+                      onChange={(event) => setAgentInput(event.target.value)}
+                    />
+                    <button
+                      type="submit"
+                      disabled={
+                        agentStatus === "loading" ||
+                        !agentInput.trim() ||
+                        !canSendAgentMessage
+                      }
+                    >
+                      Send
+                    </button>
+                  </div>
+                  <small>
+                    Prepared answers only reach the PDF after your explicit
+                    confirmation.
+                  </small>
+                </form>
+              ) : extractionStatus === "ready" ? (
+                <p className="agent-complete-state">
+                  This form has no fields supported by the assistant.
+                </p>
+              ) : null}
 
               <section className="manual-fields-drawer">
                 <button
@@ -1870,29 +2006,9 @@ function App() {
                   ) : null}
                 </div>
               </section>
-
-              <div className="fields-footer">
-                <p>
-                  {downloadUrl
-                    ? "Your latest changes are ready to download."
-                    : "Confirm an answer or edit a field to create a completed copy."}
-                </p>
-                {downloadUrl ? (
-                  <a
-                    className="download-button"
-                    href={downloadUrl}
-                    download={completedFilename}
-                  >
-                    Download completed PDF
-                  </a>
-                ) : (
-                  <span className="download-button disabled" aria-disabled="true">
-                    Download completed PDF
-                  </span>
-                )}
-              </div>
             </aside>
-          </section>
+            </section>
+          </>
         )}
       </main>
     </div>

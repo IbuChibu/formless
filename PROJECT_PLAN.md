@@ -70,14 +70,14 @@ Required technology:
 
 ## Current implementation status
 
-- the typed guided interview and human-helper, turn-based voice interview are
-  complete through Milestone 7.5
+- the typed guided interview, human-helper voice interview, hands-free
+  interruption, and voice-first workspace redesign are complete through
+  Milestone 7.6
 - the automated conversation evaluation harness, live baseline, and targeted
   evidence-gated voice-like reliability passes are complete through Milestone
   7.4
-- Milestone 8 is the next planned milestone
-- deployment, persistence, and the later full-workflow milestone have not
-  started
+- Milestone 8 full workflow is the next planned milestone
+- deployment has not started; persistence remains outside the current plan
 
 ---
 
@@ -3264,6 +3264,240 @@ Do not implement:
 - a voice SDK, second agent, model cascade, new model, authentication,
   persistence, analytics, a database, deployment, OCR, XFA, or online forms
 - direct PDF interaction, the final-review workspace, or any Milestone 8 work
+
+# Milestone 7.6 — Voice-first workspace redesign
+
+Status: COMPLETE
+
+Problem to solve:
+The current frontend contains the working PDF viewer, guided interview,
+proposal review, voice session, typed fallback, manual editor, and download
+flow, but their presentation still resembles a generic dashboard. The large
+introductory hero remains visible after a document is loaded, the assistant is
+compressed into a dense rail of similarly weighted cards, important text is
+small, and voice appears as one control among many rather than the primary way
+to complete the form. On a mobile-sized screen the PDF is encountered before
+the active interview, forcing users to scroll past the document to reach the
+current question.
+
+Goal:
+Redesign the existing frontend as a calm form companion: a focused upload
+experience before a document is selected and a dedicated voice-first workspace
+afterwards. Keep the PDF as the main visual surface, make the assistant the
+primary interaction, and use progressive disclosure for transcript history,
+guidance, technical status, and manual controls. This milestone changes visual
+hierarchy and responsive presentation only; it does not change the Form Agent,
+voice-session policy, canonical field state, PDF behavior, or confirmation
+boundary.
+
+Design principles:
+- present one obvious task and one visually dominant action for the current
+  state
+- make the current question, latest assistant response, and voice state readable
+  at a glance
+- keep the PDF prominent without allowing it to push the interview out of view
+- feel like a patient person helping beside the user, not an administration
+  dashboard or collection of unrelated widgets
+- reveal detail when requested instead of displaying the full transcript,
+  source detail, technical status, and manual editor at equal prominence
+- preserve permanent typed, visible proposal-review, and manual fallbacks when
+  voice is unavailable or undesirable
+- use a restrained visual language: warm paper-like surfaces, dark readable
+  text, one purposeful green accent, larger type, fewer borders, and limited
+  motion that respects reduced-motion preferences
+
+Experience structure:
+
+1. Before upload:
+   - show a compact Formless brand header, one plain-language value proposition,
+     and one clear PDF selection action
+   - use concise reassurance about local selection and review-before-apply
+     behavior without turning the screen into a marketing page
+   - show connection or capability problems as secondary recoverable status,
+     not as the visual focus when the application is healthy
+2. After upload on desktop:
+   - replace the marketing hero with a compact application bar containing the
+     product name, current document name, supported-field progress, and the
+     contextually valid review or download action
+   - use a stable two-pane workspace with approximately 58–62% of the available
+     width for the PDF stage and 38–42% for the assistant
+   - keep PDF page navigation associated with the document stage
+   - make the assistant pane a single coherent surface rather than a vertical
+     stack of equally prominent cards
+   - pin the voice/session state and current question near the top and keep the
+     microphone or typed composer reachable near the bottom
+3. Inside the assistant pane:
+   - show the current section, progress, and real active question first
+   - show the latest relevant exchange without letting older turns compete with
+     the current task
+   - place a pending proposal immediately after the related conversation and
+     keep Confirm, Edit, Use original, Reject, and Skip explicit when valid
+   - distinguish listening, assistant speaking, thinking, awaiting review,
+     paused, complete, unsupported, and recoverable-error states through clear
+     labels and restrained visual cues
+   - while the assistant is speaking and hands-free interruption is armed, show
+     a concise cue that the user can speak to interrupt
+   - keep the full transcript, reviewed or live guidance, and manual `Edit all
+     fields` controls available through clearly labelled disclosure controls
+4. On mobile:
+   - provide an accessible `Assistant` / `Form` view switch instead of placing
+     a tall PDF before the interview
+   - default to the assistant during an active interview and keep the current
+     voice/question controls within the first viewport where practical
+   - retain the current PDF page and all conversation and field state when the
+     user switches views
+   - avoid horizontal overflow, clipped proposal controls, and fixed elements
+     that obscure the composer or browser controls
+
+State-specific primary actions:
+- no document: `Choose a fillable PDF`
+- document ready and voice inactive: `Start conversation`
+- assistant speaking: visible speaking state with `Answer now` and the existing
+  hands-free interruption cue when available
+- listening: visible listening state with the existing bounded stop or cancel
+  controls
+- waiting for the Form Agent: one processing state without duplicate spinners
+- proposal pending: explicit proposal review is primary; conversational
+  acknowledgements cannot replace its controls
+- paused or recoverable error: one clear resume or retry action while typing
+  remains available
+- form complete: canonical completion summary and existing review or download
+  route, without implementing the Milestone 8 final-review workspace
+
+Implementation plan:
+- retain the existing `App` state, event handlers, API client, voice hooks,
+  `PdfViewer`, and canonical field-value flow
+- reorganize `frontend/src/App.tsx` into the upload and loaded-workspace modes;
+  extract small presentational components only when that makes the hierarchy
+  clearer and does not create duplicate state
+- revise the existing design tokens and responsive rules in
+  `frontend/src/index.css`; do not add a component, animation, icon, or CSS
+  framework
+- refine `frontend/src/VoiceAssistantPanel.tsx` so the current session state and
+  primary action fit naturally into the assistant surface without changing the
+  voice orchestrator or browser adapter behavior
+- modify `frontend/src/PdfViewer.tsx` only if small presentational or
+  accessibility adjustments are required for the new document stage; its
+  rendering and page-navigation behavior must remain unchanged
+- add focused dependency-free frontend checks only where new responsive view
+  state or disclosure behavior could lose conversation, PDF page, or field
+  state
+- perform visual QA at representative laptop and mobile viewport sizes across
+  upload, ready, speaking, listening, processing, proposal, error, and complete
+  states using synthetic fixture data
+
+Expected file scope:
+- modify `frontend/src/App.tsx`
+- modify `frontend/src/index.css`
+- modify `frontend/src/VoiceAssistantPanel.tsx` if required by the final
+  component boundary
+- modify `frontend/src/PdfViewer.tsx` only for presentation or accessibility if
+  required
+- add or modify narrowly scoped frontend test/check files only if needed to
+  protect new view-switch or disclosure behavior
+- make no backend, PDF Service, Form Agent, prompt, evaluation-scenario, or
+  dependency changes
+
+Acceptance criteria:
+- before upload, the page presents one concise purpose statement and one clear
+  PDF selection action without displaying an empty application dashboard
+- after upload, the introductory hero no longer consumes workspace height and
+  the PDF plus assistant are visible together in the initial desktop viewport
+  at a representative 1280 by 720 size
+- the PDF occupies the larger desktop pane and remains the main visual surface
+- the assistant's current question, voice state, and next valid action are
+  visually dominant and available without searching through unrelated cards
+- the loaded workspace reads as one PDF stage and one coherent companion pane,
+  with substantially fewer equally weighted nested panels and badges
+- the full transcript remains available but is visually secondary to the
+  current exchange and is never discarded
+- reviewed guidance, live guidance, provider details, and manual editing remain
+  accessible but do not compete with an ordinary active question
+- the typed composer remains permanently available throughout the interview
+- proposal review stays visually distinct, names the question, shows original
+  and prepared values when applicable, states that the PDF is unchanged, and
+  retains every currently valid explicit review control
+- listening, assistant speaking, interruption armed or unavailable, thinking,
+  awaiting confirmation, paused, complete, unsupported, and recoverable-error
+  states are distinguishable without relying on colour alone
+- core question, response, input, and action text use comfortable readable
+  sizing; compact metadata remains legible and is not used for essential
+  instructions
+- at a representative 390 by 844 mobile size, there is no horizontal overflow
+  and an accessible `Assistant` / `Form` switch keeps the active interview from
+  being placed below the full PDF viewport
+- switching mobile views preserves the current PDF page, transcript, proposal,
+  conversation phase, and canonical field values
+- keyboard order and visible focus remain logical through upload, view switch,
+  voice controls, conversation, proposal review, disclosures, PDF navigation,
+  and the manual drawer
+- status and error changes remain announced to assistive technology, controls
+  retain meaningful labels, contrast remains readable, and nonessential motion
+  honours reduced-motion preferences
+- loading, connection, model, microphone, recognition, speech, filling, and PDF
+  errors retain their existing recovery paths and do not clear user progress
+- upload, extraction, typed interview, quick answers, voice session, hands-free
+  interruption fallback, explicit confirmation, live preview, manual editing,
+  and download continue to use the existing behavior and shared state
+- no new runtime dependency is introduced
+- the frontend production build, existing voice and interruption checks, and
+  unchanged backend, PDF, Form Agent, transcript, safety, and conversation
+  regression suites pass
+
+Verified implementation outcome recorded 15 October 2026:
+- the application now has a focused pre-upload experience with one purpose
+  statement, one PDF action, concise safety reassurance, and a restrained
+  paper-and-conversation visual rather than an empty dashboard
+- loading a document removes the marketing hero and opens a compact application
+  workspace with the PDF in the larger pane and the assistant in one coherent
+  companion pane
+- the loaded header contains the current filename and progress, a secondary API
+  indicator and PDF replacement action, and the existing completed-PDF download
+  action without duplicating download controls in the assistant
+- voice status and controls, the current grounded question, the most recent
+  exchange, pending proposal review, and the permanent typed composer now form
+  the primary assistant hierarchy; provider detail, older transcript messages,
+  sources, and manual fields remain accessible through secondary disclosures
+- the typed composer remains outside the scrollable conversation region, so it
+  and the collapsed manual fallback stay reachable while the current interview
+  content scrolls independently
+- pending proposals preserve their original/prepared comparison, unchanged-PDF
+  warning, and every existing state-valid explicit review control
+- small screens expose an accessible `Assistant` / `Form` switch that defaults
+  to the interview; both panes remain mounted so switching does not recreate the
+  PDF viewer or reset conversation and field state
+- responsive measurement at 390 by 844 confirmed the selected assistant pane,
+  current question, and composer are visible with document width equal to the
+  viewport and no horizontal overflow
+- visual QA at 1280 by 720 confirmed the PDF and assistant share the first
+  viewport, the PDF holds the larger pane, and voice, the current question, and
+  typed fallback remain visible together
+- a dependency-free workspace layout check protects the assistant-first mobile
+  default, stable pane landmarks, accessible switch targets, mounted-pane CSS,
+  viewport sizing, and permanent composer placement
+- no backend, Form Agent, PDF Service, prompt, model, Tavily, voice policy, or
+  runtime dependency changed
+- all 332 backend tests pass; the five-fixture, 47-turn transcript evaluation
+  and 14-scenario safety evaluation report no failures; the workspace-layout
+  and voice-interruption checks pass; and the frontend production build passes
+  with only the existing PDF-worker bundle-size warning
+
+Do not implement:
+- extracted widget geometry, automatic field navigation or highlighting, PDF
+  overlays, clicking a visible PDF field to edit it, or the dedicated final
+  review workspace planned for Milestone 8
+- any new Form Agent intent, prompt, response contract, model, Tavily policy,
+  state transition, or answer-normalization behavior
+- changes to microphone sensitivity, recognition, speech synthesis, hands-free
+  detection, audio transport, or voice confirmation policy
+- automatic or conversational confirmation, direct model-to-state writes, or
+  any weakening of proposal review
+- client-side PDF mutation, new extraction or filling semantics, OCR, XFA,
+  scanned-form support, online forms, or free-form annotation
+- authentication, persistence, analytics, a database, Docker, deployment, or
+  a frontend framework, state library, component system, or new dependency
+- broad rebranding, generated illustration assets, or decorative animation that
+  does not support the active task
 
 # Milestone 8 — Full workflow
 

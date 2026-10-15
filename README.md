@@ -60,6 +60,7 @@ python -m pytest -q
 python -m evaluations.form_agent_transcript_evaluation
 
 cd ../frontend
+npm run test:workspace-layout
 npm run test:voice-interruption
 npm run build
 ```
