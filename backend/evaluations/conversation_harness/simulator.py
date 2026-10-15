@@ -14,10 +14,13 @@ from app.services.pdf_service import extract_acroform
 from evaluations.form_agent_evaluation import FIXTURES_PATH, agent_field_from_pdf
 
 from .models import (
+    BehaviorExpectation,
+    BranchCondition,
     ConversationScenario,
     Persona,
     RecordedTurn,
     ScenarioReport,
+    TurnBranch,
 )
 from .scoring import score_scenario
 from .targets import ConversationTarget
@@ -40,8 +43,13 @@ class ConversationSimulator:
         transcript: list[RecordedTurn] = []
 
         for index, turn in enumerate(scenario.turns, start=1):
-            event = dict(turn.event)
-            visible_user_message = turn.visible_user_message
+            selected_branch = _select_branch(turn.branches, transcript)
+            event = dict(selected_branch.event if selected_branch else turn.event)
+            visible_user_message = (
+                selected_branch.visible_user_message
+                if selected_branch is not None
+                else turn.visible_user_message
+            )
             if visible_user_message is None and event.get("type") == "message":
                 content = event.get("content")
                 visible_user_message = content if isinstance(content, str) else None
@@ -80,6 +88,9 @@ class ConversationSimulator:
                         expectation_failures=[
                             "The application interface did not return a response"
                         ],
+                        selected_branch_id=(
+                            selected_branch.id if selected_branch else None
+                        ),
                         error=f"{error.__class__.__name__}: {error}",
                     )
                 )
@@ -88,6 +99,13 @@ class ConversationSimulator:
             latency_ms = round((perf_counter() - started_at) * 1000, 3)
             expectation_failures = _check_turn_expectation(
                 turn.expect,
+                request.conversation_state,
+                response.effect.model_dump(mode="json"),
+                response.conversation_state.model_dump(mode="json"),
+                response.assistant_message,
+            )
+            behavior_results, behavior_failures = _check_behavior_expectation(
+                turn.behavior,
                 request.conversation_state,
                 response.effect.model_dump(mode="json"),
                 response.conversation_state.model_dump(mode="json"),
@@ -114,6 +132,11 @@ class ConversationSimulator:
                     fields_after=fields_after,
                     latency_ms=latency_ms,
                     expectation_failures=expectation_failures,
+                    behavior_results=behavior_results,
+                    behavior_failures=behavior_failures,
+                    selected_branch_id=(
+                        selected_branch.id if selected_branch else None
+                    ),
                 )
             )
 
@@ -323,3 +346,133 @@ def _check_turn_expectation(
                 f"{max_words}"
             )
     return failures
+
+
+def _select_branch(
+    branches: list[TurnBranch],
+    transcript: list[RecordedTurn],
+) -> TurnBranch | None:
+    if not branches or not transcript:
+        return None
+    previous = transcript[-1]
+    for branch in branches:
+        condition: BranchCondition = getattr(branch, "when")
+        if _branch_matches(condition, previous):
+            return branch
+    return None
+
+
+def _branch_matches(
+    condition: BranchCondition,
+    previous: RecordedTurn,
+) -> bool:
+    effect_name = (previous.response_effect or {}).get("effect")
+    if condition.previous_effects and effect_name not in condition.previous_effects:
+        return False
+    normalized = (previous.assistant_message or "").casefold()
+    if condition.previous_message_includes_any and not any(
+        term.casefold() in normalized
+        for term in condition.previous_message_includes_any
+    ):
+        return False
+    if any(
+        term.casefold() in normalized
+        for term in condition.previous_message_excludes_all
+    ):
+        return False
+    if condition.previous_expectation_failed is not None:
+        failed = bool(
+            previous.expectation_failures
+            or previous.behavior_failures
+            or previous.error
+        )
+        if failed != condition.previous_expectation_failed:
+            return False
+    return True
+
+
+def _check_behavior_expectation(
+    expectation: BehaviorExpectation,
+    request_state: ConversationState,
+    effect: dict[str, object],
+    response_state: dict[str, object],
+    assistant_message: str,
+) -> tuple[dict[str, bool], list[str]]:
+    normalized = assistant_message.casefold()
+    results: dict[str, bool] = {}
+    failures: list[str] = []
+
+    def record(name: str, passed: bool, failure: str) -> None:
+        results[name] = passed
+        if not passed:
+            failures.append(failure)
+
+    if expectation.answers_latest_request_with_any:
+        record(
+            "answers_latest_request",
+            _includes_any(normalized, expectation.answers_latest_request_with_any),
+            "behavior: did not answer the latest request with relevant evidence",
+        )
+    if expectation.acknowledges_with_any:
+        record(
+            "acknowledges_user_input",
+            _includes_any(normalized, expectation.acknowledges_with_any),
+            "behavior: did not acknowledge the user's supplied information",
+        )
+    if expectation.returns_to_form_with_any:
+        record(
+            "returns_to_active_field",
+            _includes_any(normalized, expectation.returns_to_form_with_any),
+            "behavior: did not return naturally to the active form question",
+        )
+    if expectation.clarifies_with_any:
+        record(
+            "specific_clarification",
+            _includes_any(normalized, expectation.clarifies_with_any),
+            "behavior: clarification did not identify the useful missing detail",
+        )
+    if expectation.forbidden_reask_terms:
+        record(
+            "avoids_reasking_known_information",
+            not _includes_any(normalized, expectation.forbidden_reask_terms),
+            "behavior: asked again for information already supplied",
+        )
+    if expectation.must_not_advance:
+        record(
+            "avoids_unnecessary_advance",
+            effect.get("effect") == "none"
+            and response_state.get("active_field_id")
+            == request_state.active_field_id,
+            "behavior: advanced instead of handling the user's current need",
+        )
+    if expectation.max_questions is not None:
+        record(
+            "question_burden",
+            assistant_message.count("?") <= expectation.max_questions,
+            "behavior: asked too many questions in one response",
+        )
+    if expectation.speech_suitable:
+        record(
+            "speech_suitable",
+            _is_speech_suitable(assistant_message),
+            "behavior: response is not suitable for concise spoken delivery",
+        )
+    return results, failures
+
+
+def _includes_any(message: str, terms: list[str]) -> bool:
+    return any(term.casefold() in message for term in terms)
+
+
+def _is_speech_suitable(message: str) -> bool:
+    normalized = message.casefold()
+    if len(message.split()) > 70 or message.count("?") > 2:
+        return False
+    if "http://" in normalized or "https://" in normalized or "```" in message:
+        return False
+    if any(term in normalized for term in ("field_id", "conversation_state")):
+        return False
+    return not any(
+        line.lstrip().startswith(("- ", "* ", "1. ", "2. "))
+        for line in message.splitlines()
+    )

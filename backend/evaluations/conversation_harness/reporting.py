@@ -5,7 +5,12 @@ from pathlib import Path
 import re
 from typing import Iterable
 
-from .models import ComparisonReport, MetricDelta, SuiteReport
+from .models import (
+    ComparisonReport,
+    MetricDelta,
+    PairwiseComparisonReport,
+    SuiteReport,
+)
 
 
 _METRIC_DIRECTIONS = {
@@ -14,6 +19,18 @@ _METRIC_DIRECTIONS = {
     "context_retention_rate": "higher_is_better",
     "latest_answer_adherence_rate": "higher_is_better",
     "contradiction_failure_count": "lower_is_better",
+    "volunteered_fact_recall_rate": "higher_is_better",
+    "redundant_question_rate": "lower_is_better",
+    "side_question_recovery_rate": "higher_is_better",
+    "unnecessary_push_rate": "lower_is_better",
+    "speech_suitability_rate": "higher_is_better",
+    "acknowledgement_rate": "higher_is_better",
+    "interruption_recovery_rate": "higher_is_better",
+    "clarification_success_rate": "higher_is_better",
+    "human_helper_behavior_rate": "higher_is_better",
+    "behavior_check_coverage_rate": "higher_is_better",
+    "turns_per_confirmed_field": "lower_is_better",
+    "confirmation_boundary_failure_count": "lower_is_better",
     "unnecessary_repetition_rate": "lower_is_better",
     "clarification_quality": "higher_is_better",
     "recovery_success_rate": "higher_is_better",
@@ -88,6 +105,19 @@ def save_comparison(report: ComparisonReport, output_path: Path) -> Path:
     return output_path
 
 
+def save_pairwise_comparison(
+    report: PairwiseComparisonReport,
+    output_path: Path,
+) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(report.model_dump(mode="json"), indent=2, ensure_ascii=False)
+        + "\n",
+        encoding="utf-8",
+    )
+    return output_path
+
+
 def _failure_keys(report: SuiteReport) -> Iterable[str]:
     for scenario in report.scenarios:
         for failure in scenario.deterministic_failures:
@@ -112,6 +142,7 @@ def _stable_failure_key(failure: str) -> str:
             "assistant message did not include",
             "assistant message included forbidden terms",
             "assistant message used",
+            "behavior:",
             "The application interface did not return",
             "proposal",
             "assistant introduced",
@@ -144,8 +175,16 @@ def _suite_markdown(report: SuiteReport) -> str:
         "",
         "## Metrics",
         "",
+        "### Safety and correctness gate",
+        "",
+        f"- Passed: **{'yes' if metrics.correctness_gate_passed else 'no'}**",
+        *(
+            [f"- {failure}" for failure in report.correctness_gate_failures]
+            or ["- No gate failures"]
+        ),
+        "",
         f"- Form-state accuracy: {metrics.form_state_accuracy:.3f}",
-        f"- Context retention: {metrics.context_retention_rate:.3f}",
+        f"- Context retention: {_optional_ratio(metrics.context_retention_rate)}",
         "- Latest-answer adherence: "
         f"{_optional_ratio(metrics.latest_answer_adherence_rate)}",
         f"- Contradiction failures: {metrics.contradiction_failure_count}",
@@ -157,6 +196,42 @@ def _suite_markdown(report: SuiteReport) -> str:
         f"- Invention failures: {metrics.invention_failures}",
         f"- Deterministic failures: {metrics.deterministic_failure_count}",
         f"- Average turn latency: {metrics.average_turn_latency_ms:.3f} ms",
+        "",
+        "### Human-helper gate",
+        "",
+        f"- Passed: **{'yes' if metrics.human_helper_gate_passed else 'no'}**",
+        *(
+            [f"- {failure}" for failure in report.human_helper_gate_failures]
+            or ["- No gate failures"]
+        ),
+        "",
+        "### Human-helper measurements",
+        "",
+        "- Volunteered-fact recall: "
+        f"{_optional_ratio(metrics.volunteered_fact_recall_rate)}",
+        "- Redundant-question rate: "
+        f"{_optional_ratio(metrics.redundant_question_rate)}",
+        "- Side-question recovery: "
+        f"{_optional_ratio(metrics.side_question_recovery_rate)}",
+        "- Unnecessary-push rate: "
+        f"{_optional_ratio(metrics.unnecessary_push_rate)}",
+        "- Speech suitability: "
+        f"{_optional_ratio(metrics.speech_suitability_rate)}",
+        f"- Acknowledgement: {_optional_ratio(metrics.acknowledgement_rate)}",
+        "- Interruption recovery: "
+        f"{_optional_ratio(metrics.interruption_recovery_rate)}",
+        "- Clarification success: "
+        f"{_optional_ratio(metrics.clarification_success_rate)}",
+        "- Overall observed behaviour: "
+        f"{_optional_ratio(metrics.human_helper_behavior_rate)}",
+        "- Scheduled behaviour-check coverage: "
+        f"{metrics.behavior_check_coverage_rate:.3f}",
+        "- Turns per confirmed field: "
+        f"{_optional_number(metrics.turns_per_confirmed_field)}",
+        "- Judged human-helper resemblance: "
+        f"{_optional_metric(metrics.judged_human_helper_resemblance)}",
+        "- Confirmation-boundary failures: "
+        f"{metrics.confirmation_boundary_failure_count}",
         "",
     ]
     for scenario in report.scenarios:
@@ -212,6 +287,25 @@ def _suite_markdown(report: SuiteReport) -> str:
                     "",
                 ]
             )
+            if turn.selected_branch_id is not None:
+                lines.extend(
+                    [f"Script branch: `{turn.selected_branch_id}`", ""]
+                )
+            if turn.behavior_results:
+                lines.extend(
+                    [
+                        "Behaviour checks: `"
+                        + json.dumps(turn.behavior_results, ensure_ascii=False)
+                        + "`",
+                        "",
+                    ]
+                )
+            lines.extend(
+                f"- Behaviour failure: {failure}"
+                for failure in turn.behavior_failures
+            )
+            if turn.behavior_failures:
+                lines.append("")
         lines.extend(
             [
                 "### Expected and actual form state",
@@ -243,4 +337,8 @@ def _optional_metric(value: float | None) -> str:
 
 
 def _optional_ratio(value: float | None) -> str:
+    return "not scored" if value is None else f"{value:.3f}"
+
+
+def _optional_number(value: float | None) -> str:
     return "not scored" if value is None else f"{value:.3f}"

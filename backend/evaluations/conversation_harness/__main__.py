@@ -12,14 +12,15 @@ from app.services.nemotron_service import (
 )
 from app.services.tavily_service import TavilyService
 
-from .judge import NemotronQualitativeJudge
+from .judge import NemotronPairwiseJudge, NemotronQualitativeJudge
 from .reporting import (
     compare_suite_reports,
     load_report,
     save_comparison,
+    save_pairwise_comparison,
     save_suite_report,
 )
-from .runner import run_suite
+from .runner import run_pairwise_comparison, run_suite
 from .scenarios import (
     DEFAULT_SCENARIO_PATH,
     load_scenario_suite,
@@ -38,6 +39,8 @@ def main() -> None:
         raise SystemExit(asyncio.run(_run(args)))
     if args.command == "compare":
         raise SystemExit(_compare(args))
+    if args.command == "pairwise":
+        raise SystemExit(asyncio.run(_pairwise(args)))
     parser.error("A command is required")
 
 
@@ -90,6 +93,31 @@ def _compare(args: argparse.Namespace) -> int:
     return 0 if comparison.comparable_suite else 2
 
 
+async def _pairwise(args: argparse.Namespace) -> int:
+    baseline = load_report(args.baseline)
+    candidate = load_report(args.candidate)
+    if baseline.suite_digest != candidate.suite_digest:
+        print("Reports use different scenario-suite digests")
+        return 2
+    try:
+        service = NemotronService.from_environment()
+    except NemotronConfigurationError as error:
+        print(f"Configuration error: {error}")
+        return 2
+    report = await run_pairwise_comparison(
+        baseline,
+        candidate,
+        NemotronPairwiseJudge(service),
+    )
+    print(json.dumps(report.model_dump(mode="json"), indent=2))
+    if args.output is not None:
+        print(
+            "Pairwise report: "
+            f"{save_pairwise_comparison(report, args.output)}"
+        )
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run and compare complete Form Agent conversation evaluations"
@@ -130,6 +158,14 @@ def _parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("baseline", type=Path)
     compare_parser.add_argument("candidate", type=Path)
     compare_parser.add_argument("--output", type=Path)
+
+    pairwise_parser = subparsers.add_parser(
+        "pairwise",
+        help="blindly compare matching baseline and candidate transcripts",
+    )
+    pairwise_parser.add_argument("baseline", type=Path)
+    pairwise_parser.add_argument("candidate", type=Path)
+    pairwise_parser.add_argument("--output", type=Path)
     return parser
 
 

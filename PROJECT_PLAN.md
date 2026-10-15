@@ -75,7 +75,7 @@ Required technology:
   Milestone 7.6
 - the automated conversation evaluation harness, live baseline, and targeted
   evidence-gated voice-like reliability passes are complete through Milestone
-  7.4
+  7.4; human-helper experience measurement is complete through Milestone 7.7
 - Milestone 8 full workflow is the next planned milestone
 - deployment has not started; persistence remains outside the current plan
 
@@ -3498,6 +3498,149 @@ Do not implement:
   a frontend framework, state library, component system, or new dependency
 - broad rebranding, generated illustration assets, or decorative animation that
   does not support the active task
+
+# Milestone 7.7 — Human-helper experience evaluation
+
+Status: COMPLETE
+
+Problem to solve:
+The existing conversation harness is a strong form-state and regression tool,
+but its naturalness heuristic can award a high score to short, non-repetitive,
+jargon-free responses that still feel like a rigid form wizard. The current
+fixed scenarios also concentrate on individual failure modes more than complete
+interviews, and do not explicitly measure acknowledgement, conversational
+burden, volunteered-fact retention, side-question recovery, unnecessary
+workflow pressure, or suitability for spoken delivery. A fluent qualitative
+judge must not be allowed to hide an incorrect form effect or unsafe state.
+
+Goal:
+Extend the test-only conversation harness with a separate human-helper
+experience suite and two visible gates. The correctness gate remains
+authoritative over form state, grounding, and confirmation. The human-helper
+gate measures whether the same safe workflow behaves like a patient person
+completing the form beside the user. Establish the current-agent baseline
+before making any new production conversation changes.
+
+Evaluation architecture:
+- retain every existing Milestone 7.2 and 7.4 scenario unchanged
+- keep all new code, scenarios, scoring, judging, and reports under
+  `backend/evaluations`; production code must never import evaluation code
+- drive the unchanged public `FormAgentService.respond` or `POST
+  /agent/respond` boundary over schemas extracted from checked-in PDF fixtures
+- add observable per-turn behavioural checks instead of matching one exact
+  assistant sentence
+- record each behavioural result and failure beside the existing event,
+  request state, typed effect, response state, field state, latency, and error
+- allow deterministic scripted branches based on the previous visible message,
+  typed effect, or expectation outcome so a synthetic user can challenge an
+  unhelpful response while runs remain reproducible
+- retain suite digests and compare only identical versioned suites
+- add an optional blinded pairwise judge that sees transcript A and transcript
+  B without baseline/candidate labels; qualitative preference cannot override
+  an incorrect deterministic result
+- do not add an autonomous model-generated user because changing user output
+  would weaken before/after reproducibility
+
+Human-helper measurements:
+- volunteered-fact recall rate
+- redundant-question rate
+- side-question recovery rate
+- unnecessary workflow-push rate
+- acknowledgement rate
+- clarification-success rate
+- interruption-recovery rate
+- speech-suitability rate
+- overall observed human-helper behaviour rate
+- turns per confirmed field
+- optional judged human-helper resemblance
+
+Gate policy:
+- correctness requires every scheduled turn to complete, exact expected
+  canonical form state, zero ungrounded proposals or claims, zero confirmation-
+  boundary failures, and zero transcript/state contradictions
+- human-helper behaviour is reported separately and cannot compensate for a
+  failed correctness gate
+- the human-helper gate requires at least 80% success on each scored positive
+  behaviour, at most 10% redundant questions and unnecessary workflow pushes,
+  and at least 4/5 judged human-helper resemblance when the optional judge is
+  enabled
+- the older heuristic naturalness metric remains visible for compatibility but
+  no longer treats surface fluency as sufficient for a perfect score
+
+Required scenario coverage:
+- complete multi-field conversations rather than isolated responses
+- multiple volunteered facts and explicit objections to being asked twice
+- explanations that become progressively simpler
+- ambiguous and incomplete values followed by focused clarification
+- side questions answered before returning to the form
+- interruptions, pauses, progress questions, and resumption
+- frustration and requests to slow down
+- skipping, reopening, corrections, rejection, and post-completion review
+- concise voice-style exchanges and response-length pressure
+- synthetic personal information only
+
+Acceptance criteria:
+- the versioned suite contains at least 10 synthetic personas, 12 long-form
+  scenarios, 150 scheduled turns, and four real checked-in PDF fixtures
+- scenario fields are resolved from actual extraction results rather than a
+  duplicate hand-written production schema
+- behavioural expectations cover acknowledgement, relevant answers, returning
+  to the active field, focused clarification, known-information re-asks,
+  unnecessary advancement, question burden, and spoken-response suitability
+- deterministic branching is covered by tests and the selected branch is saved
+  in the transcript artifact
+- reports expose both gates, every new aggregate metric, per-turn behavioural
+  results, and stable failure reasons
+- turns-per-confirmed-field is calculated from actual confirmed effects rather
+  than scenario declarations
+- qualitative judging scores attentiveness, helpfulness, conversational flow,
+  adaptability, user effort, and human-helper resemblance
+- one command can make a blinded pairwise qualitative comparison of matching
+  baseline and candidate reports
+- old report files remain loadable and the old suites remain valid
+- normal tests use deterministic doubles and make no network requests
+- a baseline of the unchanged current Form Agent is saved before any production
+  behaviour is modified
+- focused harness tests and the complete existing backend checks pass
+
+Verified implementation outcome recorded 15 October 2026:
+- the new `human-helper-experience-v1` suite contains 12 synthetic personas,
+  14 long-form scenarios, and 182 scheduled turns over the sample,
+  household-support, USCIS I-9, SBA startup-cost, and State Department DS-11
+  fixtures
+- scenarios exercise multi-fact retention, repeated-question resistance,
+  progressive explanation, ambiguity, side questions, interruption, emotion,
+  skipping, reopening, correction, rejection, review, and spoken brevity
+- per-turn observable behaviour results and deterministic branch selection are
+  retained in JSON and Markdown artifacts alongside existing state evidence
+- reports separate a hard correctness gate from the human-helper gate and
+  expose conversational burden and all named human-helper rates
+- optional qualitative scoring now includes the human-helper dimensions, and
+  the `pairwise` command performs label-blinded comparison with deterministic
+  scenario ordering
+- the unchanged live current-agent baseline recorded 144 of 182 scheduled turns,
+  0.572 exact form-state accuracy, 0.433 side-question recovery, 0.442
+  unnecessary-push rate, 0.708 acknowledgement, 0.500 clarification success,
+  1.000 speech suitability, 0.812 observed behaviour, and 0.730 scheduled-check
+  coverage; both gates failed while invention and confirmation-boundary
+  failures remained zero
+- the checked-in baseline summary records the largest weaknesses while full
+  synthetic transcript artifacts remain ignored locally
+- production Form Agent, PDF, frontend, voice, dependency, and API behaviour
+  remain unchanged
+- all 334 backend tests pass; the existing five-fixture/47-turn transcript and
+  14-scenario safety evaluations report no failures
+
+Do not implement:
+- production prompt, conversation-policy, field-adapter, state-machine,
+  frontend, voice, PDF extraction, or PDF filling changes
+- exact-string requirements for otherwise valid conversational prose
+- model-generated personas or real personal information
+- production analytics, transcript persistence, browser storage, a database,
+  authentication, or deployment infrastructure
+- a second production agent, model cascade, agent framework, or automatic
+  confirmation
+- Milestone 8 direct PDF interaction or final-review work
 
 # Milestone 8 — Full workflow
 

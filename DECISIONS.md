@@ -363,3 +363,24 @@ a separate voice agent would add privacy, cost, and state risks. A bounded
 local gate enables natural barge-in without interpreting words, sending audio
 to Formless, or bypassing the existing transcript, proposal, and explicit
 confirmation path.
+
+---
+
+## 2026-10-15 — Human-helper quality is a separate evaluation gate
+
+Decision:
+The conversation harness retains exact form state, grounding, and explicit
+confirmation as a hard correctness gate, and adds a separate human-helper gate
+for acknowledgement, context retention, side-question recovery, clarification,
+workflow pressure, conversational burden, and speech suitability. Longer
+synthetic interviews may use reproducible scripted branches. Optional model
+judging can score human-helper qualities or compare matching reports blindly,
+but cannot override deterministic correctness.
+
+Reason:
+The earlier surface-level naturalness heuristic could score concise,
+non-repetitive replies highly even when a manual session still felt robotic.
+Separating observable conversational behaviour from form correctness makes that
+gap visible without weakening the safety boundary or making model taste the
+source of truth. Fixed synthetic scenarios and suite digests preserve useful
+before/after evidence; an autonomous generated user would not.

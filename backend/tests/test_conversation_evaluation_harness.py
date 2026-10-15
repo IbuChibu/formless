@@ -8,14 +8,20 @@ from typing import Any
 import httpx
 
 from app.services.form_agent import FormAgentRequest, FormAgentService
-from evaluations.conversation_harness.judge import NemotronQualitativeJudge
+from evaluations.conversation_harness.judge import (
+    NemotronPairwiseJudge,
+    NemotronQualitativeJudge,
+)
 from evaluations.conversation_harness.models import (
+    BehaviorExpectation,
+    BranchCondition,
     ConversationScenario,
     ExpectedFinalState,
     Persona,
     ScenarioSuite,
     ScenarioTurn,
     TurnExpectation,
+    TurnBranch,
 )
 from evaluations.conversation_harness.reporting import (
     compare_suite_reports,
@@ -36,6 +42,12 @@ VOICE_RELIABILITY_SCENARIOS = (
     / "evaluations"
     / "scenarios"
     / "voice_interview_reliability.json"
+)
+HUMAN_HELPER_SCENARIOS = (
+    Path(__file__).parents[1]
+    / "evaluations"
+    / "scenarios"
+    / "human_helper_experience.json"
 )
 
 
@@ -72,6 +84,23 @@ class RetryJudgeService(StubJudgeService):
         if self.calls == 1:
             return '{"naturalness": 0}'
         return await super().complete(**kwargs)
+
+
+class StubPairwiseJudgeService:
+    model = "test-pairwise-judge"
+
+    async def complete(self, **kwargs: Any) -> str:
+        return json.dumps(
+            {
+                "preferred": "A",
+                "attentiveness_winner": "A",
+                "helpfulness_winner": "A",
+                "conversational_flow_winner": "A",
+                "user_effort_winner": "A",
+                "safety_concern": False,
+                "reason": "A responds more directly with less user effort.",
+            }
+        )
 
 
 def _persona() -> Persona:
@@ -116,6 +145,11 @@ def _scenario() -> ConversationScenario:
                     message_excludes_all=["zero"],
                     max_assistant_words=100,
                 ),
+                behavior=BehaviorExpectation(
+                    acknowledges_with_any=["Ada Example"],
+                    max_questions=1,
+                    speech_suitable=True,
+                ),
             ),
             ScenarioTurn(
                 id="confirm",
@@ -127,6 +161,17 @@ def _scenario() -> ConversationScenario:
                     field_id="full_name",
                     prepared_value="Ada Example",
                 ),
+                branches=[
+                    TurnBranch(
+                        id="proposal-was-clear",
+                        when=BranchCondition(
+                            previous_message_includes_any=["Ada Example"],
+                            previous_expectation_failed=False,
+                        ),
+                        event={"type": "confirm"},
+                        visible_user_message="Branched confirmation.",
+                    )
+                ],
             ),
         ],
         expected_final=ExpectedFinalState(
@@ -178,6 +223,39 @@ def test_voice_reliability_suite_covers_observed_failures() -> None:
     )
 
 
+def test_human_helper_suite_is_long_form_synthetic_and_multi_fixture() -> None:
+    suite = load_scenario_suite(HUMAN_HELPER_SCENARIOS)
+    tags = {tag for scenario in suite.scenarios for tag in scenario.tags}
+    turn_tags = {
+        tag
+        for scenario in suite.scenarios
+        for turn in scenario.turns
+        for tag in turn.tags
+    }
+
+    assert suite.schema_version == 2
+    assert len(suite.personas) >= 10
+    assert len(suite.scenarios) >= 12
+    assert sum(len(scenario.turns) for scenario in suite.scenarios) >= 150
+    assert len({scenario.fixture for scenario in suite.scenarios}) >= 4
+    assert {"human_helper", "long_form"} <= tags
+    assert {
+        "acknowledgement",
+        "side_question_recovery",
+        "volunteered_fact_recall",
+        "redundant_question_check",
+        "unnecessary_push_check",
+        "speech_suitability",
+        "interruption_recovery",
+        "clarification_success",
+        "confirmation_boundary",
+    } <= turn_tags
+    assert any(turn.branches for scenario in suite.scenarios for turn in scenario.turns)
+    assert all(
+        "synthetic" in persona.summary.casefold() for persona in suite.personas
+    )
+
+
 def test_simulator_drives_real_service_and_records_canonical_state() -> None:
     report = asyncio.run(
         ConversationSimulator(_target()).run(_scenario(), _persona())
@@ -204,6 +282,11 @@ def test_simulator_drives_real_service_and_records_canonical_state() -> None:
     assert report.scores.invention_failures == 0
     assert report.scores.latest_answer_adherence == 1.0
     assert report.scores.contradiction_failures == 0
+    assert report.scores.acknowledgement_rate == 1.0
+    assert report.scores.speech_suitability == 1.0
+    assert report.scores.human_helper_behavior_rate == 1.0
+    assert report.scores.turns_per_confirmed_field == 3.0
+    assert report.transcript[2].selected_branch_id == "proposal-was-clear"
 
 
 def test_suite_report_saves_full_transcript_and_qualitative_scores(
@@ -231,6 +314,9 @@ def test_suite_report_saves_full_transcript_and_qualitative_scores(
     assert restored.metrics.judged_naturalness == 4.0
     assert restored.metrics.latest_answer_adherence_rate == 1.0
     assert restored.metrics.contradiction_failure_count == 0
+    assert restored.metrics.correctness_gate_passed is True
+    assert restored.metrics.human_helper_gate_passed is True
+    assert restored.metrics.human_helper_behavior_rate == 1.0
     assert restored.scenarios[0].transcript[0].request_state["phase"] == "asking"
     assert restored.scenarios[0].expected_final_state.confirmed_values == {
         "full_name": "Ada Example"
@@ -304,6 +390,24 @@ def test_qualitative_judge_retries_one_invalid_rubric() -> None:
 
     assert service.calls == 2
     assert assessment.naturalness == 4
+
+
+def test_pairwise_judge_blinds_labels_and_normalizes_winner() -> None:
+    scenario_report = asyncio.run(
+        ConversationSimulator(_target()).run(_scenario(), _persona())
+    )
+
+    assessment = asyncio.run(
+        NemotronPairwiseJudge(StubPairwiseJudgeService()).assess(
+            scenario_report,
+            scenario_report,
+            candidate_first=True,
+        )
+    )
+
+    assert assessment.preferred == "candidate"
+    assert assessment.attentiveness_winner == "candidate"
+    assert assessment.safety_concern is False
 
 
 def test_http_payload_shape_matches_existing_agent_interface() -> None:

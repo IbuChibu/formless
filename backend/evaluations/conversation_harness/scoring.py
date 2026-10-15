@@ -48,7 +48,7 @@ def score_scenario(
     failures = [
         f"turn {turn.index} ({turn.id}): {failure}"
         for turn in transcript
-        for failure in turn.expectation_failures
+        for failure in turn.expectation_failures + turn.behavior_failures
     ]
     expected_turn_count = len(scenario.turns)
     if len(transcript) != expected_turn_count:
@@ -191,6 +191,68 @@ def score_scenario(
         if failure.startswith("assistant message included forbidden terms:")
     )
 
+    volunteered_fact_recall = _tagged_success_rate(
+        transcript,
+        "volunteered_fact_recall",
+    )
+    side_question_recovery = _tagged_success_rate(
+        transcript,
+        "side_question_recovery",
+    )
+    interruption_recovery = _tagged_success_rate(
+        transcript,
+        "interruption_recovery",
+    )
+    clarification_success = _tagged_success_rate(
+        transcript,
+        "clarification_success",
+    )
+    acknowledgement_rate = _behavior_result_rate(
+        transcript,
+        "acknowledges_user_input",
+    )
+    speech_suitability = _behavior_result_rate(transcript, "speech_suitable")
+    redundant_question_success = _behavior_result_rate(
+        transcript,
+        "avoids_reasking_known_information",
+    )
+    redundant_question_rate = (
+        round(1.0 - redundant_question_success, 3)
+        if redundant_question_success is not None
+        else None
+    )
+    unnecessary_push_success = _behavior_result_rate(
+        transcript,
+        "avoids_unnecessary_advance",
+    )
+    unnecessary_push_rate = (
+        round(1.0 - unnecessary_push_success, 3)
+        if unnecessary_push_success is not None
+        else None
+    )
+    all_behavior_results = [
+        result
+        for turn in transcript
+        for result in turn.behavior_results.values()
+    ]
+    human_helper_behavior_rate = (
+        _rate(sum(all_behavior_results), len(all_behavior_results))
+        if all_behavior_results
+        else None
+    )
+    confirmed_field_count = sum(
+        (turn.response_effect or {}).get("effect") == "confirmed"
+        for turn in transcript
+    )
+    turns_per_confirmed_field = (
+        round(len(transcript) / confirmed_field_count, 3)
+        if confirmed_field_count
+        else None
+    )
+    confirmation_boundary_failures = sum(
+        _confirmation_boundary_failures(turn) for turn in transcript
+    )
+
     naturalness_scores = [
         _naturalness_score(turn, transcript)
         for turn in transcript
@@ -213,6 +275,18 @@ def score_scenario(
             invention_failures=invention_failures,
             latest_answer_adherence=latest_answer_adherence,
             contradiction_failures=contradiction_failures,
+            volunteered_fact_recall=volunteered_fact_recall,
+            redundant_question_rate=redundant_question_rate,
+            side_question_recovery=side_question_recovery,
+            unnecessary_push_rate=unnecessary_push_rate,
+            speech_suitability=speech_suitability,
+            acknowledgement_rate=acknowledgement_rate,
+            interruption_recovery=interruption_recovery,
+            clarification_success=clarification_success,
+            human_helper_behavior_rate=human_helper_behavior_rate,
+            confirmed_field_count=confirmed_field_count,
+            turns_per_confirmed_field=turns_per_confirmed_field,
+            confirmation_boundary_failures=confirmation_boundary_failures,
         ),
         failures,
     )
@@ -226,8 +300,22 @@ def _naturalness_score(
     normalized = " ".join(message.casefold().split())
     if turn.error is not None or not message:
         return 1.0
-    score = 5.0
+    # Surface-level fluency alone must not receive a perfect score. Untagged,
+    # concise, non-repetitive replies top out at 4/5; demonstrated behavioural
+    # success is required for a higher score.
+    score = 3.0
     word_count = len(message.split())
+    if 2 <= word_count <= 60:
+        score += 0.5
+    if message.count("?") <= 2:
+        score += 0.25
+    if not any(term in normalized for term in _INTERNAL_JARGON):
+        score += 0.25
+    if turn.behavior_results:
+        behavior_rate = sum(turn.behavior_results.values()) / len(
+            turn.behavior_results
+        )
+        score += behavior_rate
     if word_count > 120:
         score -= 1.0
     if word_count > 200:
@@ -252,6 +340,58 @@ def _naturalness_score(
     ):
         score -= 1.0
     return max(1.0, round(score, 3))
+
+
+def _tagged_success_rate(
+    transcript: list[RecordedTurn],
+    tag: str,
+) -> float | None:
+    turns = [turn for turn in transcript if tag in turn.tags]
+    if not turns:
+        return None
+    successes = sum(
+        turn.error is None
+        and not turn.expectation_failures
+        and not turn.behavior_failures
+        for turn in turns
+    )
+    return _rate(successes, len(turns))
+
+
+def _behavior_result_rate(
+    transcript: list[RecordedTurn],
+    result_name: str,
+) -> float | None:
+    results = [
+        turn.behavior_results[result_name]
+        for turn in transcript
+        if result_name in turn.behavior_results
+    ]
+    return _rate(sum(results), len(results)) if results else None
+
+
+def _confirmation_boundary_failures(turn: RecordedTurn) -> int:
+    effect = turn.response_effect or {}
+    event_type = turn.user_event.get("type")
+    failures = 0
+    if effect.get("effect") == "confirmed" and event_type not in {
+        "confirm",
+        "confirm_edit",
+    }:
+        failures += 1
+
+    changed_to_confirmed = [
+        field_id
+        for field_id, after in turn.fields_after.items()
+        if after.get("status") == "confirmed"
+        and turn.fields_before.get(field_id) != after
+    ]
+    if changed_to_confirmed and effect.get("effect") != "confirmed":
+        failures += len(changed_to_confirmed)
+    if effect.get("effect") in {"proposal", "replacement_proposal", "none"}:
+        if turn.fields_after != turn.fields_before:
+            failures += 1
+    return failures
 
 
 def _clarification_score(

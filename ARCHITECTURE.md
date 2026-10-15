@@ -406,13 +406,15 @@ events, but the normal proposal-decision path progresses in one response.
 
 ## Agent evaluation
 
-Agent evaluation is separate from runtime orchestration and has three layers.
+Agent evaluation is separate from runtime orchestration and has four layers.
 The single-turn evaluation checks focused actions. The curated transcript
 evaluation runs known complete state-machine paths over bounded representative
 fields extracted from the sample, household-support, USCIS I-9, SBA, and DS-11
 fixtures. The conversation harness runs deliberately messy, persona-led
 interviews through the public Form Agent application boundary and retains a
-complete version-comparable artifact.
+complete version-comparable artifact. Its human-helper suite runs longer
+interviews and measures whether the same safe workflow is attentive, adaptive,
+low-effort, and suitable for spoken delivery.
 
 The conversation harness remains under `backend/evaluations` and imports the
 public Form Agent package; production code never imports evaluation code. Its
@@ -434,6 +436,26 @@ a bounded qualitative rubric for naturalness, context awareness,
 clarification, recovery, and invention, but cannot turn an incorrect form state
 into a pass. Latest-answer metrics are reported only for suites with explicitly
 tagged turns.
+
+Human-helper scenarios add observable behavioural expectations without
+requiring one exact sentence. They can check whether a response addresses the
+latest request, acknowledges supplied information, returns to the active form
+question, identifies a missing detail, avoids re-asking known information,
+avoids unnecessary advancement, limits question burden, and remains concise
+enough for speech. Each configured check records a named pass or failure.
+Versioned deterministic branches may select the next scripted user utterance
+from the previous visible response, typed effect, or check outcome; the chosen
+branch is retained in the report.
+
+Suite reports expose two separate gates. The correctness gate covers completed
+turns, exact canonical form state, grounding, explicit confirmation, and
+transcript/state contradictions. The human-helper gate covers volunteered-fact
+recall, redundant questions, side-question and interruption recovery,
+unnecessary workflow pressure, acknowledgement, clarification, conversational
+burden, and speech suitability. Human-helper fluency never compensates for a
+correctness failure. An optional pairwise command compares matching baseline
+and candidate transcripts as label-blinded A/B examples, while deterministic
+suite identity and state evidence remain authoritative.
 
 Each JSON and Markdown report includes the fixed scenario-suite digest, target,
 model, optional judge model, Git revision, label, timestamp, expected result,
