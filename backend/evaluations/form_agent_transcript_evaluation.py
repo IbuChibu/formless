@@ -332,7 +332,7 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                 _turn(
                     "post-completion-summary",
                     _message("What did we complete?"),
-                    "next",
+                    "conversation",
                     "form_complete",
                     None,
                     state_active_field_id=None,

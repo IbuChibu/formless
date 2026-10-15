@@ -54,7 +54,7 @@ _SPOKEN_NUMBER_PATTERN = re.compile(
     r"^(?:(?:the\s+answer\s+is|it\s+is|it's|there\s+(?:is|are)|just|only)\s+)?"
     r"(?P<number>zero|one|two|three|four|five|six|seven|eight|nine|ten|"
     r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
-    r"nineteen|twenty)[.!]?$",
+    r"nineteen|twenty)(?:,?\s+(?:including|counting)\s+(?:me|myself))?[.!]?$",
     re.IGNORECASE,
 )
 _SPOKEN_NUMBER_VALUES = {

@@ -159,10 +159,17 @@ type PendingProposal =
       value: FieldValue;
     };
 
+type RememberedCandidate = {
+  field_id: string;
+  original_value: FieldValue;
+  value: FieldValue;
+};
+
 type ConversationState = {
   phase: ConversationPhase;
   active_field_id: string | null;
   pending_proposal: PendingProposal | null;
+  remembered_candidates: RememberedCandidate[];
 };
 
 type AgentEvent =
@@ -549,6 +556,10 @@ function App() {
         phase: isConfirmed ? "field_confirmed" : "awaiting_answer",
         active_field_id: fieldId,
         pending_proposal: null,
+        remembered_candidates:
+          agentConversationState.remembered_candidates.filter(
+            (candidate) => candidate.field_id !== fieldId,
+          ),
       });
       resetProposalEditor();
     }
@@ -2734,10 +2745,46 @@ function parseConversationState(
     }
   }
 
+  const rememberedPayload = payload.remembered_candidates ?? [];
+  if (!Array.isArray(rememberedPayload) || rememberedPayload.length > 5) {
+    throw new Error("The API returned invalid remembered answers.");
+  }
+  const rememberedFieldIds = new Set<string>();
+  const rememberedCandidates = rememberedPayload.map((candidate) => {
+    if (!isRecord(candidate)) {
+      throw new Error("The API returned an invalid remembered answer.");
+    }
+    const fieldId = candidate.field_id;
+    const originalValue = candidate.original_value;
+    const value = candidate.value;
+    const field =
+      typeof fieldId === "string"
+        ? findAgentField(requestFields, fieldId)
+        : undefined;
+    if (
+      !field ||
+      field.status !== "unanswered" ||
+      rememberedFieldIds.has(field.id) ||
+      (typeof originalValue !== "string" &&
+        typeof originalValue !== "boolean") ||
+      (typeof value !== "string" && typeof value !== "boolean") ||
+      !isAgentValueCompatible(field, value)
+    ) {
+      throw new Error("The API returned an invalid remembered answer.");
+    }
+    rememberedFieldIds.add(field.id);
+    return {
+      field_id: field.id,
+      original_value: originalValue,
+      value,
+    };
+  });
+
   const state: ConversationState = {
     phase: payload.phase,
     active_field_id: activeFieldId,
     pending_proposal: pendingProposal,
+    remembered_candidates: rememberedCandidates,
   };
   const phaseNeedsActiveField = [
     "awaiting_answer",
@@ -2822,11 +2869,22 @@ function validateAgentResponseState(
       (expectedNextField === undefined &&
         state.phase === "form_complete" &&
         state.active_field_id === null));
+  const replacementRejected =
+    effect.effect === "rejected" &&
+    requestState.phase === "awaiting_replacement_confirmation" &&
+    effectField?.status === "confirmed" &&
+    ((expectedNextField !== undefined &&
+      state.phase === "awaiting_answer" &&
+      state.active_field_id === expectedNextField.id) ||
+      (expectedNextField === undefined &&
+        state.phase === "form_complete" &&
+        state.active_field_id === null));
 
   if (
     !isResolutionEffect &&
     effect.effect !== "completed" &&
     effect.effect !== "correction_cancelled" &&
+    !replacementRejected &&
     effectFieldId !== state.active_field_id
   ) {
     throw new Error("The assistant response and conversation state disagree.");
@@ -2849,7 +2907,8 @@ function validateAgentResponseState(
       state.pending_proposal.value === effect.prepared_value) ||
     (effect.effect === "confirmed" &&
       (progressedToNextField || completedForm)) ||
-    (effect.effect === "rejected" && state.phase === "awaiting_answer") ||
+    (effect.effect === "rejected" &&
+      (state.phase === "awaiting_answer" || replacementRejected)) ||
     (effect.effect === "replacement_rejected" &&
       effectField?.status === "confirmed" &&
       state.phase === "awaiting_replacement") ||
@@ -3023,6 +3082,7 @@ function createInitialConversationState(): ConversationState {
     phase: "asking",
     active_field_id: null,
     pending_proposal: null,
+    remembered_candidates: [],
   };
 }
 

@@ -76,9 +76,10 @@ Required technology:
 - the automated conversation evaluation harness, live baseline, and targeted
   evidence-gated voice-like reliability passes are complete through Milestone
   7.4; human-helper experience measurement is complete through Milestone 7.7
-- Milestone 7.8 targeted human-helper conversation repairs is the next planned
-  milestone; Milestone 8 follows only after those repairs pass the fixed
-  evaluation gates
+- Milestone 7.8 targeted human-helper conversation repairs is complete; the
+  unchanged fixed human-helper suite passes both its correctness and
+  human-helper gates
+- Milestone 8 is the next planned milestone and has not started
 - deployment has not started; persistence remains outside the current plan
 
 ---
@@ -3646,7 +3647,7 @@ Do not implement:
 
 # Milestone 7.8 — Targeted human-helper conversation repairs
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Problem to solve:
 The fixed Milestone 7.7 baseline shows that the assistant remains safe but does
@@ -3773,6 +3774,34 @@ Acceptance criteria:
 - the existing five-fixture transcript evaluation, 14-scenario safety
   evaluation, backend test suite, voice and interruption checks, and frontend
   production build pass without regression
+
+Verified implementation outcome (16 October 2026):
+- request-carried conversation state can retain at most five unique,
+  schema-valid, adapter-compatible, unconfirmed candidates for later fields;
+  an explicit reference to an earlier answer offers the candidate through the
+  normal proposal and confirmation path
+- deterministic adapters now isolate the covered volunteered names, dates,
+  dropdown choices, spoken counts, and conversational wrappers while retaining
+  original wording and a visible transformation when preparation changes the
+  proposed value
+- active-field informational questions, requests for simpler wording, and
+  frustration are handled before navigation or answer interpretation and do
+  not mutate canonical form values
+- completion-time summaries, specific stored-value questions, field reopening,
+  correction, replacement rejection, and cancellation are resolved from
+  canonical state through closed effects; a rejected replacement leaves the
+  existing confirmed value unchanged
+- the unchanged `human-helper-experience-v1` suite digest
+  `2529802e73125ede` completed all 182 turns across 14 scenarios with 1.000
+  form-state accuracy, volunteered-answer recall, side-question recovery,
+  acknowledgement, clarification success, and interruption recovery; invention,
+  contradiction, deterministic, and confirmation-boundary failures remained
+  zero, and both gates passed
+- all 352 backend tests pass; the five-fixture/47-turn transcript evaluation
+  and 14-scenario safety evaluation report no failures; the frontend production
+  build, workspace-layout check, and voice-interruption check pass
+- PDF extraction/filling, voice capture, model selection, persistence, and the
+  Milestone 8 workflow were not changed
 
 Expected implementation files:
 - `backend/app/services/form_agent/models.py`

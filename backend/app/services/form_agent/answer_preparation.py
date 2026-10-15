@@ -207,6 +207,11 @@ def prepare_answer(
             transformation = (
                 "Capitalization suggested; spelling and letter order preserved."
             )
+        elif original_value != prepared_value:
+            transformation = (
+                "Conversational framing and sentence punctuation removed; "
+                "name spelling preserved."
+            )
     elif field.type == "textarea" and not _ADDRESS_HINT.search(metadata):
         polished = _polish_prose_presentation(prepared_value)
         if polished != prepared_value:
@@ -229,7 +234,14 @@ def prepare_answer(
         ).isdigit():
             transformation = "Converted your spoken number to digits."
         else:
-            transformation = "Normalized spacing for the form."
+            transformation = (
+                "Conversational framing and sentence punctuation removed."
+                if _looks_like_framing_cleanup(
+                    original_value,
+                    prepared_value,
+                )
+                else "Normalized spacing for the form."
+            )
 
     return PreparedAnswer(
         original_value=original_value,
@@ -374,6 +386,23 @@ def _polish_prose_presentation(value: str) -> str:
 
 def _meaning_tokens(value: str) -> list[str]:
     return re.findall(r"[\w]+", value.casefold(), re.UNICODE)
+
+
+def _looks_like_framing_cleanup(
+    original_value: AgentFieldValue,
+    prepared_value: str,
+) -> bool:
+    if not isinstance(original_value, str):
+        return False
+    original_tokens = _meaning_tokens(original_value)
+    prepared_tokens = _meaning_tokens(prepared_value)
+    if not prepared_tokens or len(prepared_tokens) >= len(original_tokens):
+        return original_value.rstrip(".!?") != prepared_value
+    return any(
+        original_tokens[index : index + len(prepared_tokens)]
+        == prepared_tokens
+        for index in range(len(original_tokens) - len(prepared_tokens) + 1)
+    )
 
 
 def _protected_matches(

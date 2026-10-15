@@ -382,7 +382,10 @@ def test_repeated_explanation_gets_one_targeted_correction() -> None:
     response = _respond(request, nemotron, tavily)
 
     assert response.action.action == "explain"
-    assert response.action.message == "When did you move into the home you live in now?"
+    assert response.action.message == (
+        "When did you move into the home you live in now? We’re still on the "
+        "address question."
+    )
     assert response.conversation_state == request.conversation_state
     assert len(nemotron.calls) == 2
     assert "repeated the previous explanation" in nemotron.calls[1][

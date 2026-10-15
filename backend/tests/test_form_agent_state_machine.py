@@ -131,15 +131,15 @@ def test_form_complete_accepts_read_only_summary_message() -> None:
         )
     )
 
-    assert response.action.action == "next"
-    assert response.effect.effect == "completed"
+    assert response.action.action == "conversation"
+    assert response.effect.effect == "none"
     assert response.conversation_state.model_dump() == {
         "phase": "form_complete",
         "active_field_id": None,
         "pending_proposal": None,
     }
-    assert "All 2 supported questions" in response.assistant_message
     assert "2 confirmed" in response.assistant_message
+    assert "0 unanswered" in response.assistant_message
     assert nemotron.calls == []
 
 

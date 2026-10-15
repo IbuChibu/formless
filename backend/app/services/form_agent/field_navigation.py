@@ -29,7 +29,9 @@ _CANCEL_CORRECTION_PATTERN = re.compile(
     r"(?:was|is)\s+(?:right|correct)[,!]?\s+)?"
     r"(?:please\s+)?(?:cancel|stop|abandon|forget)"
     r"(?:\s+(?:this|that|the))?\s+(?:correction|change|replacement)"
-    r"(?:\s+for\s+now)?[.!]?$",
+    r"(?:\s+for\s+now)?[.!]?$|"
+    r"^(?:actually[,!]?\s+)?(?:leave|keep)\s+(?:it|that|the\s+answer)\s+"
+    r"unchanged\s+and\s+cancel[.!]?$",
     re.IGNORECASE,
 )
 _STATUS_REVIEW_PATTERN = re.compile(
@@ -39,7 +41,10 @@ _STATUS_REVIEW_PATTERN = re.compile(
     r"\b(?:confirmed|completed|answered|skipped|unanswered|remaining|left)\b|"
     r"\b(?:which|what)\b.*"
     r"\b(?:confirmed|completed|answered|skipped|unanswered|remaining|left)\b"
-    r".*\b(?:fields?|questions?)\b",
+    r".*\b(?:fields?|questions?)\b|"
+    r"\b(?:did|have)\s+i\s+(?:skip|skipped)\s+anything\b|"
+    r"\bis\s+anything\s+(?:still\s+)?(?:skipped|unanswered|left)\b|"
+    r"\bwhat\s+have\s+we\s+(?:completed|confirmed|answered)\b",
     re.IGNORECASE,
 )
 _VALUE_REVIEW_PATTERNS = (
@@ -55,8 +60,20 @@ _VALUE_REVIEW_PATTERNS = (
         r"(?P<reference>.+?)[?!.]?$",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"^(?:please\s+)?what\s+(?P<reference>.+?)\s+"
+        r"(?:did\s+(?:i|we)\s+(?:put|write|enter)(?:\s+down)?|"
+        r"is\s+(?:still\s+)?stored)[?!.]?$",
+        re.IGNORECASE,
+    ),
 )
 _CORRECTION_PATTERNS = (
+    re.compile(
+        r"^(?:i\s+(?:might|may|could)\s+|.*?[.!]\s*)?"
+        r"(?:change|correct|update|replace|edit)\s+"
+        r"(?P<reference>.+?)[?!.]?$",
+        re.IGNORECASE,
+    ),
     re.compile(
         r"^(?:please\s+)?(?:i\s+(?:want|need|would\s+like)\s+to\s+)?"
         r"(?:change|correct|update|replace|edit)\s+"
@@ -78,12 +95,14 @@ _CORRECTION_PATTERNS = (
 )
 _REOPEN_PATTERNS = (
     re.compile(
-        r"^(?:please\s+)?(?:reopen|unskip)\s+"
+        r"^(?:please\s+)?(?:i\s+(?:am|'m)\s+ready\s+to\s+)?"
+        r"(?:reopen|unskip)\s+"
         r"(?P<reference>.+?)[?!.]?$",
         re.IGNORECASE,
     ),
     re.compile(
-        r"^(?:please\s+)?(?:go|come|return)\s+back\s+to\s+"
+        r"^(?:please\s+)?(?:let(?:'s|\s+us)\s+)?"
+        r"(?:go|come|return)\s+back\s+to\s+"
         r"(?P<reference>.+?)[?!.]?$",
         re.IGNORECASE,
     ),
@@ -196,7 +215,7 @@ def _requested_statuses(message: str) -> tuple[FieldStatus, ...]:
     statuses: list[FieldStatus] = []
     if re.search(r"\b(?:confirmed|completed|answered)\b", message, re.I):
         statuses.append("confirmed")
-    if re.search(r"\bskipped\b", message, re.I):
+    if re.search(r"\b(?:skip|skipped)\b", message, re.I):
         statuses.append("skipped")
     if re.search(r"\b(?:unanswered|remaining|left)\b", message, re.I):
         statuses.append("unanswered")
@@ -222,17 +241,42 @@ def _match_fields(
         return tuple(exact_matches)
 
     reference_tokens = set(normalized_reference.split())
-    matches: list[FormAgentField] = []
+    ranked: list[tuple[tuple[float, ...], FormAgentField]] = []
     for field in candidates:
         aliases = _field_aliases(field)
-        if any(
-            reference_tokens <= set(alias.split())
-            or set(alias.split()) <= reference_tokens
+        scores = [
+            _reference_match_score(reference_tokens, set(alias.split()))
             for alias in aliases
             if alias
-        ):
-            matches.append(field)
-    return tuple(matches)
+        ]
+        usable_scores = [score for score in scores if score is not None]
+        if usable_scores:
+            ranked.append((max(usable_scores), field))
+    if not ranked:
+        return ()
+    best_score = max(score for score, _field in ranked)
+    return tuple(field for score, field in ranked if score == best_score)
+
+
+def _reference_match_score(
+    reference_tokens: set[str],
+    alias_tokens: set[str],
+) -> tuple[float, ...] | None:
+    if not reference_tokens or not alias_tokens:
+        return None
+    shared = reference_tokens & alias_tokens
+    coverage = len(shared) / len(reference_tokens)
+    if coverage < 0.5:
+        return None
+    non_mismatch = float("non" in alias_tokens and "non" not in reference_tokens)
+    exact_reference = float(reference_tokens <= alias_tokens)
+    return (
+        exact_reference,
+        coverage,
+        float(len(shared)),
+        -non_mismatch,
+        -float(len(alias_tokens - reference_tokens)),
+    )
 
 
 def _field_aliases(field: FormAgentField) -> set[str]:
@@ -264,4 +308,12 @@ def _normalize_reference(value: str) -> str:
 
 
 def _normalize_text(value: str) -> str:
-    return " ".join(re.findall(r"[a-z0-9]+", value.casefold()))
+    tokens = re.findall(r"[a-z0-9]+", value.casefold())
+    normalized: list[str] = []
+    replacements = {
+        "surname": ("family", "name"),
+        "income": ("resources",),
+    }
+    for token in tokens:
+        normalized.extend(replacements.get(token, (token,)))
+    return " ".join(normalized)

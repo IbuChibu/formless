@@ -384,3 +384,38 @@ Separating observable conversational behaviour from form correctness makes that
 gap visible without weakening the safety boundary or making model taste the
 source of truth. Fixed synthetic scenarios and suite digests preserve useful
 before/after evidence; an autonomous generated user would not.
+
+---
+
+## 2026-10-16 — Volunteered facts remain bounded, unconfirmed conversation state
+
+Decision:
+When one message explicitly supplies answers for several real fields, the Form
+Agent may retain at most five uniquely mapped, field-adapter-valid later
+candidates in request-carried conversation state. Each candidate keeps the
+user's original wording and prepared value. It can be offered only as a normal
+reviewable proposal when the user explicitly refers back to it, and it is
+removed after the relevant confirm, reject, skip, manual change, or replacement
+transition. It is never canonical field data, model memory, persistence, or an
+implicit confirmation.
+
+Specific side questions and post-completion review requests are handled before
+generic progression. Their answers come from bounded field metadata, reviewed
+guidance, or canonical field state and return a `none` effect. Wording
+explanations receive a deterministic field-subject anchor when needed so a
+model's phrasing cannot lose conversational continuity.
+
+Reason:
+People often answer related questions together and expect a helper to remember
+them, but treating a transcript as an unbounded fact store would create hidden
+state and weaken the explicit-confirmation boundary. Bounded typed candidates
+preserve useful context without applying facts. Deterministic side-question and
+review routing prevents fluent model wording from overriding navigation,
+confirmed values, or the user's latest request.
+
+Outcome:
+The unchanged `human-helper-experience-v1` suite completed 182 of 182 turns
+with exact form-state accuracy and 1.000 volunteered-fact recall, side-question
+recovery, acknowledgement, clarification success, interruption recovery, and
+overall observed behaviour. Both evaluation gates passed with zero invention,
+contradiction, deterministic, and confirmation-boundary failures.

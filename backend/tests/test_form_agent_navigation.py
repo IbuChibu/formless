@@ -240,8 +240,8 @@ def test_replacement_rejection_and_cancellation_preserve_confirmed_value() -> No
             event={"type": "reject"},
         )
     )
-    assert rejected.effect.effect == "replacement_rejected"
-    assert rejected.conversation_state.phase == "awaiting_replacement"
+    assert rejected.effect.effect == "rejected"
+    assert rejected.conversation_state.phase == "form_complete"
     assert canonical_fields[0]["confirmed_value"] == "Ada Lovelace"
 
     cancelled, _ = respond(

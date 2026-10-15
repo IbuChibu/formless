@@ -19,6 +19,7 @@ from .answer_preparation import (
 from .answer_adapters import (
     AnswerAdapterResult,
     interpret_answer,
+    merge_volunteered_candidates,
 )
 from .conversation_policy import (
     conflicting_guidance_action,
@@ -39,6 +40,7 @@ from .models import (
     FormAgentField,
     FormAgentRequest,
     FormAgentResponse,
+    MAX_REMEMBERED_CANDIDATES,
     ProposeAction,
     ReplacementProposeAction,
     request_active_field_id,
@@ -85,6 +87,33 @@ class FormAgentService:
 
     async def respond(self, request: FormAgentRequest) -> FormAgentResponse:
         validate_event_transition(request)
+
+        if request.conversation_state.phase in {
+            "awaiting_answer",
+            "awaiting_clarification",
+        }:
+            message = request_message(request)
+            if message:
+                remembered = merge_volunteered_candidates(
+                    request.conversation_state.remembered_candidates,
+                    request.fields,
+                    request_active_field_id(request),
+                    message,
+                    self._answer_interpreter,
+                    max_candidates=MAX_REMEMBERED_CANDIDATES,
+                )
+                if remembered != request.conversation_state.remembered_candidates:
+                    request = request.model_copy(
+                        update={
+                            "conversation_state": (
+                                request.conversation_state.model_copy(
+                                    update={
+                                        "remembered_candidates": remembered,
+                                    }
+                                )
+                            )
+                        }
+                    )
 
         active_field_id = request_active_field_id(request)
         active_field = next(

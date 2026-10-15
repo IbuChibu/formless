@@ -10,6 +10,7 @@ from pydantic import (
     PrivateAttr,
     StrictBool,
     StrictStr,
+    model_serializer,
     model_validator,
 )
 
@@ -45,6 +46,7 @@ ConversationPhase = Literal[
 MAX_AGENT_FIELDS = 250
 MAX_HISTORY_MESSAGES = 8
 MAX_FORM_INSTRUCTIONS = 8
+MAX_REMEMBERED_CANDIDATES = 5
 
 _PLACEHOLDER_OPTION_PATTERN = re.compile(
     r"^(?:please\s+)?(?:select|choose)(?:\s+(?:one|an?\s+option))?$",
@@ -154,12 +156,29 @@ class PendingReplacementProposal(_AgentModel):
     value: AgentFieldValue
 
 
+class RememberedCandidate(_AgentModel):
+    field_id: str = Field(min_length=1, max_length=500)
+    original_value: AgentFieldValue
+    value: AgentFieldValue
+
+
 class ConversationState(_AgentModel):
     phase: ConversationPhase
     active_field_id: Optional[str] = Field(default=None, max_length=500)
     pending_proposal: Optional[
         Union[PendingReplacementProposal, PendingProposal]
     ] = None
+    remembered_candidates: list[RememberedCandidate] = Field(
+        default_factory=list,
+        max_length=MAX_REMEMBERED_CANDIDATES,
+    )
+
+    @model_serializer(mode="wrap")
+    def serialize_state(self, handler):
+        data = handler(self)
+        if not self.remembered_candidates:
+            data.pop("remembered_candidates", None)
+        return data
 
     @model_validator(mode="after")
     def validate_phase_shape(self) -> ConversationState:
@@ -332,6 +351,33 @@ class FormAgentRequest(_AgentModel):
             raise ValueError(
                 "Pending proposal field ID must reference a supplied field"
             )
+        remembered_field_ids = [
+            candidate.field_id
+            for candidate in self.conversation_state.remembered_candidates
+        ]
+        if len(remembered_field_ids) != len(set(remembered_field_ids)):
+            raise ValueError("Remembered candidate field IDs must be unique")
+        fields_by_id = {field.id: field for field in self.fields}
+        for candidate in self.conversation_state.remembered_candidates:
+            field = fields_by_id.get(candidate.field_id)
+            if field is None:
+                raise ValueError(
+                    "Remembered candidate field ID must reference a supplied field"
+                )
+            if field.status != "unanswered":
+                raise ValueError(
+                    "Remembered candidates must reference unanswered fields"
+                )
+            try:
+                validate_field_value(
+                    field.type,
+                    field.options,
+                    candidate.value,
+                )
+            except ValueError as error:
+                raise ValueError(
+                    "Remembered candidate must be valid for its field"
+                ) from error
         if (
             isinstance(self.event, FocusFieldEvent)
             and self.event.field_id not in field_ids

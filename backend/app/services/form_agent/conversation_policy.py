@@ -19,6 +19,7 @@ from .answer_adapters import (
     clarification_for_field,
     interpret_answer,
     recover_prior_answer,
+    remembered_answer,
 )
 from .models import (
     AdvanceEvent,
@@ -55,6 +56,7 @@ from .models import (
     PendingReplacementProposal,
     ProposalEffect,
     ProposeAction,
+    RememberedCandidate,
     RejectEvent,
     RejectedAction,
     RejectedEffect,
@@ -201,7 +203,11 @@ _WORDING_CLARIFICATION_PATTERN = re.compile(
     r"clarify(?:\s+(?:this|that|it|the\s+(?:field|question)))?|"
     r"rephrase(?:\s+(?:this|that|it|the\s+(?:field|question)))?|"
     r"plain\s+(?:english|language)|more\s+simply|simpler\s+words?|"
-    r"what\s+should\s+i\s+(?:put|enter|write|answer|choose))\b",
+    r"what\s+should\s+i\s+(?:put|enter|write|answer|choose)|"
+    r"what\s+(?:this|that|the)\s+(?:box|field)\s+wants?\s+me\s+to\s+say|"
+    r"what\s+do\s+you\s+need\s+me\s+to\s+say|"
+    r"ask\s+(?:me\s+)?(?:that|this|it)\s+(?:normally|simply)|"
+    r"ask\s+the\s+question\s+in\s+(?:one\s+)?simple\s+sentence)\b",
     re.IGNORECASE,
 )
 _CONVERSATION_REPAIR_PATTERN = re.compile(
@@ -228,7 +234,30 @@ _GENERAL_CONVERSATION_PATTERN = re.compile(
     r"sense)?|okay\s+thanks|got\s+it|i\s+understand)[.!]?$|"
     r"\b(?:i\s+(?:am|'m)\s+(?:confused|nervous|worried|overwhelmed)|"
     r"help\s+me\s+(?:with|through)\s+(?:this|the)\s+form|"
-    r"can\s+we\s+pause|let(?:'s|\s+us)\s+pause)\b",
+    r"can\s+we\s+pause|let(?:'s|\s+us)\s+pause|"
+    r"(?:go|speak|take\s+it)\s+slow(?:ly)?|keep\s+it\s+simple|"
+    r"this\s+wording\s+is\s+(?:exhausting|frustrating|confusing))\b",
+    re.IGNORECASE,
+)
+
+_COUNT_SELF_QUESTION_PATTERN = re.compile(
+    r"\b(?:do|should|can)\s+i\s+(?:count|include)\s+myself\b|"
+    r"\b(?:count|include)\s+me\b",
+    re.IGNORECASE,
+)
+_COUNT_SELF_CONTEXT_PATTERN = re.compile(
+    r"\b(?:count|include)\s+(?:yourself|the\s+applicant)\b",
+    re.IGNORECASE,
+)
+_FRUSTRATION_PATTERN = re.compile(
+    r"\b(?:exhausting|frustrating|overwhelming|fed\s+up)\b",
+    re.IGNORECASE,
+)
+_SIMPLE_REPHRASE_PATTERN = re.compile(
+    r"\b(?:make\s+(?:that|this|it)\s+(?:even\s+)?simpler|"
+    r"ask\s+me\s+normally|"
+    r"ask\s+(?:me\s+)?(?:that|this|it)\s+(?:normally|in\s+simpler\s+words)|"
+    r"ask\s+the\s+question\s+in\s+(?:one\s+)?simple\s+sentence)\b",
     re.IGNORECASE,
 )
 
@@ -633,6 +662,14 @@ def deterministic_action(
             )
         return _correction_cancelled_action(active_field, request.fields)
 
+    if isinstance(event, MessageEvent) and active_field is not None:
+        side_question_action = _active_field_side_question_action(
+            request,
+            active_field,
+        )
+        if side_question_action is not None:
+            return side_question_action
+
     if isinstance(event, MessageEvent):
         navigation = navigation_decision(event.content, request.fields)
         if navigation is not None:
@@ -650,7 +687,7 @@ def deterministic_action(
         request.conversation_state.phase == "form_complete"
         and isinstance(event, MessageEvent)
     ):
-        return _completed_summary_action(request.fields)
+        return _completed_conversation_action(request)
 
     if isinstance(event, ConfirmEvent):
         pending = request.conversation_state.pending_proposal
@@ -715,8 +752,7 @@ def deterministic_action(
                     "No change made — the current answer for "
                     f'“{question}” remains '
                     f"{format_agent_value(active_field.confirmed_value)}. "
-                    "Tell me the replacement you want, or cancel the "
-                    "correction."
+                    f"{_progression_message(_next_unanswered_field(request.fields))}"
                 ),
                 field_id=active_field.id,
             )
@@ -800,11 +836,17 @@ def deterministic_action(
     }:
         return None
 
-    adapter_result = recover_prior_answer(
+    adapter_result = remembered_answer(
         active_field,
         message,
-        request.history,
+        request.conversation_state.remembered_candidates,
     )
+    if adapter_result is None:
+        adapter_result = recover_prior_answer(
+            active_field,
+            message,
+            request.history,
+        )
     if adapter_result is None:
         adapter_result = answer_interpreter(active_field, message)
     if isinstance(adapter_result, ClarificationNeeded):
@@ -849,6 +891,7 @@ def response_for_action(
     preserve_conversation_phase: bool = False,
 ) -> FormAgentResponse:
     active_field_id = request_active_field_id(request)
+    remembered_candidates = request.conversation_state.remembered_candidates
     if isinstance(action, ProposeAction):
         state = ConversationState(
             phase="awaiting_confirmation",
@@ -857,6 +900,7 @@ def response_for_action(
                 field_id=action.field_id,
                 value=action.value,
             ),
+            remembered_candidates=remembered_candidates,
         )
     elif isinstance(action, ReplacementProposeAction):
         state = ConversationState(
@@ -867,38 +911,63 @@ def response_for_action(
                 previous_confirmed_value=action.previous_confirmed_value,
                 value=action.value,
             ),
+            remembered_candidates=remembered_candidates,
         )
     elif isinstance(action, ConfirmedAction):
-        state = _state_after_resolution(action.field_id, request.fields)
+        state = _state_after_resolution(
+            action.field_id,
+            request.fields,
+            remembered_candidates=_without_remembered_field(
+                remembered_candidates,
+                action.field_id,
+            ),
+        )
     elif isinstance(action, RejectedAction):
         state = ConversationState(
             phase="awaiting_answer",
             active_field_id=action.field_id,
+            remembered_candidates=_without_remembered_field(
+                remembered_candidates,
+                action.field_id,
+            ),
         )
     elif isinstance(action, ReplacementRejectedAction):
-        state = ConversationState(
-            phase="awaiting_replacement",
-            active_field_id=action.field_id,
+        state = _state_after_correction(
+            request.fields,
+            remembered_candidates=remembered_candidates,
         )
     elif isinstance(action, SkipAction):
-        state = _state_after_resolution(action.field_id, request.fields)
+        state = _state_after_resolution(
+            action.field_id,
+            request.fields,
+            remembered_candidates=_without_remembered_field(
+                remembered_candidates,
+                action.field_id,
+            ),
+        )
     elif isinstance(action, NextAction):
         state = ConversationState(
             phase=("awaiting_answer" if action.field_id else "form_complete"),
             active_field_id=action.field_id,
+            remembered_candidates=remembered_candidates,
         )
     elif isinstance(action, (FieldSelectedAction, FieldReopenedAction)):
         state = ConversationState(
             phase="awaiting_answer",
             active_field_id=action.field_id,
+            remembered_candidates=remembered_candidates,
         )
     elif isinstance(action, CorrectionStartedAction):
         state = ConversationState(
             phase="awaiting_replacement",
             active_field_id=action.field_id,
+            remembered_candidates=remembered_candidates,
         )
     elif isinstance(action, CorrectionCancelledAction):
-        state = _state_after_correction(request.fields)
+        state = _state_after_correction(
+            request.fields,
+            remembered_candidates=remembered_candidates,
+        )
     elif (
         isinstance(action, ClarifyAction)
         and request.conversation_state.phase
@@ -913,6 +982,7 @@ def response_for_action(
             state = ConversationState(
                 phase="awaiting_clarification",
                 active_field_id=action.field_id,
+                remembered_candidates=remembered_candidates,
             )
     elif isinstance(action, ConversationAction):
         state = request.conversation_state
@@ -932,6 +1002,7 @@ def response_for_action(
         state = ConversationState(
             phase="awaiting_answer",
             active_field_id=action.field_id,
+            remembered_candidates=remembered_candidates,
         )
     else:
         raise FormAgentError("Form Agent returned an unsupported action")
@@ -991,7 +1062,7 @@ def _effect_for_action(action: FormAgentAction) -> dict[str, object]:
     if isinstance(action, RejectedAction):
         return RejectedEffect(field_id=action.field_id).model_dump()
     if isinstance(action, ReplacementRejectedAction):
-        return ReplacementRejectedEffect(field_id=action.field_id).model_dump()
+        return RejectedEffect(field_id=action.field_id).model_dump()
     if isinstance(action, SkipAction):
         return SkippedEffect(field_id=action.field_id).model_dump()
     if isinstance(action, NextAction):
@@ -1293,6 +1364,31 @@ def normalize_action_message(
             }
         )
 
+    if (
+        isinstance(action, ExplainAction)
+        and classify_turn_intent(request) == "wording_clarification"
+    ):
+        field = next(
+            (
+                field
+                for field in request.fields
+                if field.id == action.field_id
+            ),
+            None,
+        )
+        if field is not None:
+            anchor = _active_field_return_anchor(field)
+            if anchor not in set(_comparison_words(action.message)):
+                return action.model_copy(
+                    update={
+                        "message": truncate_text(
+                            f"{action.message.rstrip()} We’re still on the "
+                            f"{anchor} question.",
+                            4000,
+                        )
+                    }
+                )
+
     if isinstance(action, SkipAction):
         field = next(
             field for field in request.fields if field.id == action.field_id
@@ -1300,6 +1396,25 @@ def normalize_action_message(
         return _skip_action(field, request.fields)
 
     return action
+
+
+def _active_field_return_anchor(field: FormAgentField) -> str:
+    metadata = " ".join(
+        value
+        for value in (field.id, field.label, field.question, field.help_text)
+        if value
+    ).casefold()
+    for pattern, anchor in (
+        (r"\b(?:address|residen|postcode|postal)\b", "address"),
+        (r"\b(?:date|day|month|year|when)\b", "date"),
+        (r"\b(?:name|surname)\b", "name"),
+        (r"\b(?:budget|planned)\b", "budget"),
+        (r"\b(?:income|earn|salary|wage)\b", "income"),
+        (r"\b(?:count|number|people|persons?)\b", "people"),
+    ):
+        if re.search(pattern, metadata) is not None:
+            return anchor
+    return truncate_text(_field_display_name(field).casefold(), 80)
 
 
 def build_next_field_question(field: FormAgentField) -> str:
@@ -1328,6 +1443,75 @@ def build_next_field_question(field: FormAgentField) -> str:
     return f"{question} Choose one of: {option_text}."
 
 
+def _active_field_side_question_action(
+    request: FormAgentRequest,
+    field: FormAgentField,
+) -> Optional[ConversationAction]:
+    message = request_message(request)
+    if _FRUSTRATION_PATTERN.search(message) is not None:
+        return ConversationAction(
+            action="conversation",
+            message=(
+                "I understand — that wording is frustrating. In plain "
+                f"language: {_plain_language_question(field)}"
+            ),
+            field_id=field.id,
+        )
+    if _SIMPLE_REPHRASE_PATTERN.search(message) is not None:
+        return ConversationAction(
+            action="conversation",
+            message=f"In simpler words: {_plain_language_question(field)}",
+            field_id=field.id,
+        )
+    if _COUNT_SELF_QUESTION_PATTERN.search(message) is None:
+        return None
+    metadata = " ".join(
+        value
+        for value in (
+            field.id,
+            field.label,
+            field.question,
+            field.help_text,
+        )
+        if value
+    )
+    if _COUNT_SELF_CONTEXT_PATTERN.search(metadata) is None:
+        return None
+    question = _field_display_name(field)
+    return ConversationAction(
+        action="conversation",
+        message=(
+            "Yes — this question says to count yourself. If you live alone, "
+            f'the count is 1. We are still on “{question}”; what exact count '
+            "would you like to use?"
+        ),
+        field_id=field.id,
+    )
+
+
+def _plain_language_question(field: FormAgentField) -> str:
+    metadata = " ".join(
+        value
+        for value in (
+            field.id,
+            field.label,
+            field.question,
+            field.help_text,
+        )
+        if value
+    ).casefold()
+    if re.search(r"\b(?:occupancy|commenced|started\s+living|move.?in)\b", metadata):
+        return "When did you start living at your current home?"
+    if "preferred" in metadata or "name you want" in metadata:
+        return "What name would you like us to use?"
+    if re.search(r"\b(?:what happened|help you need|already tried)\b", metadata):
+        return (
+            "What happened, what help do you need, and what have you already "
+            "tried?"
+        )
+    return build_next_field_question(field)
+
+
 def _navigation_action(
     decision: NavigationDecision,
     request: FormAgentRequest,
@@ -1353,6 +1537,16 @@ def _navigation_action(
         return _correction_cancelled_action(field, request.fields)
 
     if decision.kind == "review_statuses":
+        if (
+            active_field_id is not None
+            and classify_turn_intent(request) == "progress_question"
+        ):
+            active_field = next(
+                field
+                for field in request.fields
+                if field.id == active_field_id
+            )
+            return _progress_action(request, active_field)
         return ConversationAction(
             action="conversation",
             message=_status_review_message(request.fields, decision.statuses),
@@ -1541,21 +1735,115 @@ def _start_conversation_action(fields: list[FormAgentField]) -> NextAction:
     )
 
 
-def _completed_summary_action(fields: list[FormAgentField]) -> NextAction:
-    confirmed = sum(field.status == "confirmed" for field in fields)
-    skipped = sum(field.status == "skipped" for field in fields)
-    parts = [f"All {len(fields)} supported questions have been reviewed"]
-    parts.append(f"{confirmed} confirmed")
-    if skipped:
-        parts.append(f"{skipped} skipped")
-    return NextAction(
-        action="next",
-        message=(
-            f"{'; '.join(parts)}. You can review the PDF and the manual "
-            "field list before downloading it."
-        ),
+def _completed_conversation_action(
+    request: FormAgentRequest,
+) -> ConversationAction:
+    fields = request.fields
+    message = request_message(request)
+    normalized = message.casefold()
+    confirmed_fields = [
+        field
+        for field in fields
+        if field.status == "confirmed" and field.confirmed_value is not None
+    ]
+    skipped_fields = [field for field in fields if field.status == "skipped"]
+    unanswered_fields = [
+        field for field in fields if field.status == "unanswered"
+    ]
+
+    if re.search(r"\b(?:skip|skipped)\b", normalized):
+        response = _status_review_message(fields, ("skipped",))
+    elif re.search(r"\b(?:unanswered|remaining|left)\b", normalized):
+        response = _status_review_message(fields, ("unanswered",))
+    elif re.search(
+        r"\b(?:read|recap|summari[sz]e)\b.*\b(?:back|answers?|values?|details?)\b|"
+        r"\b(?:tell|give)\s+me\b.*\b(?:entered|answers?|values?|details?)\b|"
+        r"\bwhat\s+(?:did|have)\s+we\s+(?:enter|entered|put|confirmed?)\b",
+        normalized,
+    ):
+        response = _confirmed_values_summary(confirmed_fields)
+    elif re.search(r"\bdid\s+you\s+keep\b", normalized):
+        longest = max(
+            confirmed_fields,
+            key=lambda field: len(str(field.confirmed_value)),
+            default=None,
+        )
+        response = (
+            "Yes — I kept your confirmed answer"
+            + (
+                f" for {_field_display_name(longest)}: "
+                f"{format_agent_value(longest.confirmed_value)}."
+                if longest is not None
+                else "."
+            )
+            + " Nothing on the form has changed."
+        )
+    elif re.search(r"\b(?:complete|completed|finished|all\s+three)\b", normalized):
+        response = (
+            f"Yes — this section is complete: {len(confirmed_fields)} "
+            f"confirmed, {len(skipped_fields)} skipped, and "
+            f"{len(unanswered_fields)} unanswered."
+        )
+    elif re.search(r"\bstatus\b", normalized):
+        response = _status_review_message(
+            fields,
+            ("confirmed", "skipped", "unanswered"),
+        )
+    elif re.search(r"\b(?:make|made|invent|guess)\b", normalized):
+        response = (
+            "I did not invent those values. The confirmed answers came from "
+            "information you provided and explicitly reviewed; nothing has "
+            "changed."
+        )
+    elif re.search(r"\b(?:leave|keep).*(?:unchanged|as\s+it\s+is|confirmed)\b", normalized):
+        response = (
+            "Okay — I’ll keep the confirmed answers unchanged. Nothing on "
+            "the form has changed."
+        )
+    elif re.search(r"\b(?:what\s+happens\s+next|what\s+should\s+i\s+do|next\s+step)\b", normalized):
+        response = (
+            "Next, review the completed PDF and any skipped fields, then "
+            "download the form when it looks right."
+        )
+    elif re.search(r"\b(?:thank|thanks)\b", normalized):
+        response = (
+            "You’re welcome. The reviewed answers remain unchanged, and you "
+            "can review the PDF or download it when you’re ready."
+        )
+    elif re.search(r"\b(?:repeat|again)\b", normalized):
+        response = (
+            "No more repetition is needed now. All supported questions have "
+            "been reviewed, and the confirmed answers remain unchanged."
+        )
+    else:
+        values = _confirmed_values_summary(confirmed_fields)
+        status = (
+            f"{len(confirmed_fields)} confirmed, {len(skipped_fields)} "
+            f"skipped, and {len(unanswered_fields)} unanswered"
+        )
+        response = (
+            f"The form has {status}. {values} Nothing on the form has changed."
+        )
+
+    return ConversationAction(
+        action="conversation",
+        message=truncate_text(response, 4000),
         field_id=None,
     )
+
+
+def _confirmed_values_summary(fields: list[FormAgentField]) -> str:
+    if not fields:
+        return "There are no confirmed values to read back."
+    visible = fields[:8]
+    values = "; ".join(
+        f"{_field_display_name(field)} is "
+        f"{format_agent_value(field.confirmed_value)}"
+        for field in visible
+    )
+    if len(fields) > len(visible):
+        values += f"; and {len(fields) - len(visible)} more"
+    return f"Confirmed values: {values}."
 
 
 def _confirmed_action(
@@ -1687,6 +1975,8 @@ def _skip_action(
 def _state_after_resolution(
     resolved_field_id: str,
     fields: list[FormAgentField],
+    *,
+    remembered_candidates: list[RememberedCandidate],
 ) -> ConversationState:
     next_field = _next_unanswered_field(
         fields,
@@ -1695,15 +1985,32 @@ def _state_after_resolution(
     return ConversationState(
         phase="awaiting_answer" if next_field else "form_complete",
         active_field_id=next_field.id if next_field else None,
+        remembered_candidates=remembered_candidates,
     )
 
 
-def _state_after_correction(fields: list[FormAgentField]) -> ConversationState:
+def _state_after_correction(
+    fields: list[FormAgentField],
+    *,
+    remembered_candidates: list[RememberedCandidate],
+) -> ConversationState:
     next_field = _next_unanswered_field(fields)
     return ConversationState(
         phase="awaiting_answer" if next_field else "form_complete",
         active_field_id=next_field.id if next_field else None,
+        remembered_candidates=remembered_candidates,
     )
+
+
+def _without_remembered_field(
+    candidates: list[RememberedCandidate],
+    field_id: str,
+) -> list[RememberedCandidate]:
+    return [
+        candidate
+        for candidate in candidates
+        if candidate.field_id != field_id
+    ]
 
 
 def _next_unanswered_field(

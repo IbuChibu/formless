@@ -17,6 +17,7 @@ from .text import (
     adapt_phone,
     adapt_postcode,
 )
+from .volunteered import references_prior_answer
 
 
 AnswerAdapter = Callable[[FormAgentField, str], AnswerAdapterResult]
@@ -61,13 +62,6 @@ _NAME_HINT = re.compile(
     r"\b(?:name|surname|forename)\b",
     re.IGNORECASE,
 )
-_PRIOR_ANSWER_REFERENCE = re.compile(
-    r"\b(?:already|earlier|before|previously)\b.{0,80}"
-    r"\b(?:gave|give|provided|provide|said|shared|told)\b|"
-    r"\b(?:gave|provided|said|shared|told)\b.{0,80}"
-    r"\b(?:already|earlier|before|previously)\b",
-    re.IGNORECASE,
-)
 _VOLUNTEERED_DATE_PATTERNS = (
     re.compile(
         r"\bi\s+was\s+born(?:\s+on)?\s+(?P<value>[^,;]+)",
@@ -98,7 +92,7 @@ def recover_prior_answer(
     Recovery is deliberately limited to unambiguous, field-specific cues in
     the bounded request history. It never asks the model to infer a value.
     """
-    if not _PRIOR_ANSWER_REFERENCE.search(message):
+    if not references_prior_answer(message):
         return None
 
     metadata = semantic_text(field.id, field.label, field.question)

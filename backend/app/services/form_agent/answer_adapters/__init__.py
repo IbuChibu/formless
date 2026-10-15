@@ -11,6 +11,11 @@ from .selector import (
     select_answer_adapter,
 )
 from .text import adapt_email, adapt_identifier
+from .volunteered import (
+    merge_volunteered_candidates,
+    references_prior_answer,
+    remembered_answer,
+)
 
 __all__ = [
     "AnswerAdapterResult",
@@ -23,4 +28,7 @@ __all__ = [
     "select_answer_adapter",
     "adapt_email",
     "adapt_identifier",
+    "merge_volunteered_candidates",
+    "references_prior_answer",
+    "remembered_answer",
 ]

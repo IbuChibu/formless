@@ -164,9 +164,12 @@ Responsible for:
 - processing model actions
 - preparing user-supplied candidate values through deterministic field-aware
   formatting before they become reviewable proposals
+- retaining at most five uniquely mapped, adapter-valid later-field candidates
+  in request-carried conversation state when a user explicitly volunteers
+  several answers together
 - recovering a previously volunteered candidate only when the user explicitly
-  points back to it and one field-specific value can be validated from the
-  bounded request history
+  points back to it and one field-specific value can be validated from bounded
+  conversation state or request history
 - returning a natural assistant message separately from a closed validated
   effect describing any workflow or form-state consequence
 - deciding when clarification is needed
@@ -186,11 +189,11 @@ The Form Agent is one service boundary with small internal modules:
 - `answer_adapters` selects focused field-type interpreters from deterministic
   field metadata and returns a matched value, a specific clarification, or a
   signal that model interpretation is still needed; it also owns bounded,
-  field-specific recovery of explicitly referenced prior answers. Numeric
-  adapters recognize bounded whole-number words, and finite-choice adapters
-  accept a near-match only when one option clears a strict unique similarity
-  threshold. A count-yourself question treats `nobody` as ambiguous rather
-  than silently storing zero
+  field-specific extraction and recovery of explicitly volunteered prior
+  answers. Numeric adapters recognize bounded whole-number words, and finite-
+  choice adapters accept a near-match only when one option clears a strict
+  unique similarity threshold. A count-yourself question treats `nobody` as
+  ambiguous rather than silently storing zero
 - `answer_preparation` preserves the original candidate, applies conservative
   field-aware presentation changes, records the transformation, and verifies
   that factual meaning was not changed
@@ -367,9 +370,12 @@ field ID and proposed value. An `awaiting_replacement_confirmation` state also
 retains the previous confirmed value and marks the pending operation as a
 replacement, allowing stale corrections to be rejected before any effect is
 returned. The existing confirmed value remains canonical while the assistant
-is in either replacement phase. Confirmation, edited confirmation, rejection,
-skip, and correction cancellation are explicit events; ordinary message events
-cannot confirm a proposal.
+is in either replacement phase. Conversation state may also contain at most
+five uniquely keyed remembered candidates for real unanswered fields. Each
+candidate retains the user's original wording and one adapter-valid prepared
+value, but it is neither confirmed nor canonical form data. Confirmation,
+edited confirmation, rejection, skip, and correction cancellation are explicit
+events; ordinary message events cannot confirm a proposal.
 Every Form Agent response contains a primary `assistant_message`, one closed
 typed `effect`, and the resulting state, so the frontend does not infer
 progression from assistant wording. A `none` effect represents successful
@@ -387,11 +393,23 @@ confirmed values come directly from canonical field state and use a `none`
 effect.
 
 When a user explicitly says that an answer was supplied earlier, deterministic
-recovery may inspect only the bounded history already present in the request.
-It accepts a value only when a field-specific cue yields one adapter-validated
-candidate; zero candidates fall back to normal interpretation and multiple
-candidates require clarification. Recovered values still become proposals and
-cross the same explicit confirmation boundary as current-message answers.
+recovery checks request-carried remembered candidates before the bounded
+history already present in the request. It accepts a value only when a field-
+specific cue yields one adapter-validated candidate; zero candidates fall back
+to normal interpretation and multiple candidates require clarification.
+Recovered values still become proposals and cross the same explicit
+confirmation boundary as current-message answers. A remembered candidate is
+removed when its field is confirmed, rejected, skipped, manually changed, or
+otherwise leaves the relevant unanswered state.
+
+Active-field informational and wording questions are resolved before global
+navigation or value interpretation. They preserve the active field, use a
+`none` effect, and include a deterministic field-subject anchor when model
+wording would otherwise make the return to the current question ambiguous.
+Form-complete summaries, read-backs, and specific value questions are generated
+from canonical field state. Correction and cancellation continue through the
+existing typed replacement transitions; rejecting a replacement preserves the
+old confirmed value and exits that correction attempt.
 
 After an explicit confirmation, edited confirmation, or skip, the backend
 deterministically selects the next unanswered field. The response action still

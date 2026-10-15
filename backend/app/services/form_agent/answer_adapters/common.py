@@ -7,7 +7,7 @@ from .models import ClarificationNeeded, NotApplicable
 
 _QUESTION_PATTERN = re.compile(
     r"(?:\?|\b(?:what|why|how|which|where|when|who|whose|explain|meaning|"
-    r"mean|help|clarify)\b|^\s*(?:can|could|would|should|do|does|is|are)\b)",
+    r"mean|clarify)\b|^\s*(?:help\s+me|can|could|would|should|do|does|is|are)\b)",
     re.IGNORECASE,
 )
 _ADVERSARIAL_PATTERN = re.compile(

@@ -26,7 +26,21 @@ _NAME_FRAMES = (
     re.compile(
         r"^(?:(?:okay|ok|sure|well)[,!.]?\s+)?"
         r"(?:my\s+)?(?:full\s+legal|full|legal|family|first|last|middle)?"
-        r"\s*name\s+is\s+(?P<value>.+?),\s+and\s+i\s+was\s+born\b.*$",
+        r"\s*name\s+is\s+(?P<value>.+?),\s+(?:and\s+)?"
+        r"(?:i\s+was\s+born|call\s+me|my\s+(?:date\s+of\s+birth|"
+        r"birth\s+date)\s+is)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:(?:okay|ok|sure|well)[,!.]?\s+)?"
+        r"(?:my\s+)?(?:full\s+legal|full|legal|family|first|last|middle)?"
+        r"\s*name\s+is\s+(?P<value>.+?),\s+(?:and\s+)?"
+        r"(?:please\s+)?call\s+me\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:i\s+am|i'm)\s+back[.!]?\s+"
+        r"(?:it|the\s+answer|my\s+answer)\s+is\s+(?P<value>.+)$",
         re.IGNORECASE,
     ),
     re.compile(
@@ -47,6 +61,19 @@ _NAME_FRAMES = (
     re.compile(r"^i\s+am\s+(?P<value>.+)$", re.IGNORECASE),
 ) + _GENERAL_FRAMES
 _FREE_TEXT_FRAMES = (
+    re.compile(
+        r"^(?:i\s+am|i'm)\s+back[.!]?\s+"
+        r"(?:it|the\s+answer|my\s+answer)\s+is\s+(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:the\s+)?(?:city|town)\s+is\s+(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:apartment|apt\.?|unit)\s+(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
     re.compile(
         r"^(?:please\s+)?use\s+(?P<value>.+?)\s+instead[.!]?$",
         re.IGNORECASE,
@@ -178,7 +205,9 @@ def adapt_name(field: FormAgentField, message: str) -> AnswerAdapterResult:
             reason="Your answer does not identify one definite name.",
             accepted_shape=accepted_shape,
         )
+    original_candidate = _framed_original(candidate, _NAME_FRAMES)
     candidate = strip_framing(candidate, _NAME_FRAMES)
+    candidate = _strip_name_sentence_punctuation(field, candidate)
     if (
         not candidate
         or candidate.casefold() in {"same", "same as above", "unknown"}
@@ -189,7 +218,7 @@ def adapt_name(field: FormAgentField, message: str) -> AnswerAdapterResult:
             reason="I could not identify one exact name to enter.",
             accepted_shape=accepted_shape,
         )
-    return MatchedAnswer(candidate)
+    return MatchedAnswer(candidate, original_value=original_candidate)
 
 
 def adapt_free_text(field: FormAgentField, message: str) -> AnswerAdapterResult:
@@ -202,16 +231,21 @@ def adapt_free_text(field: FormAgentField, message: str) -> AnswerAdapterResult:
             reason="Your answer does not identify one definite value.",
             accepted_shape=accepted_shape,
         )
+    original_candidate = _framed_original(candidate, _FREE_TEXT_FRAMES)
     candidate = strip_framing(candidate, _FREE_TEXT_FRAMES)
     if not candidate:
         return ClarificationNeeded(
             reason="I could not identify exact text to enter.",
             accepted_shape=accepted_shape,
         )
-    return MatchedAnswer(candidate)
+    return MatchedAnswer(candidate, original_value=original_candidate)
 
 
 def adapt_date(field: FormAgentField, message: str) -> AnswerAdapterResult:
+    split_component = _split_date_component(field)
+    if split_component is not None:
+        return _adapt_split_date_component(field, message, split_component)
+
     date_format = _expected_date_format(field)
     accepted_shape = _date_answer_shape(date_format)
     candidate = preflight_message(message, accepted_shape=accepted_shape)
@@ -458,6 +492,91 @@ def _expected_date_format(field: FormAgentField) -> str | None:
     if "mm/yyyy" in compact or "mm/yyyy" in metadata:
         return "month_year"
     return None
+
+
+def _split_date_component(field: FormAgentField) -> str | None:
+    metadata = semantic_text(field.id, field.label, field.question)
+    compact = re.sub(r"\s+", "", metadata)
+    if not re.search(r"\b(?:date|dob|birth)\b", metadata):
+        return None
+    if any(
+        marker in compact
+        for marker in ("dd/mm/yyyy", "mm/dd/yyyy", "mm/yyyy")
+    ):
+        return None
+    if re.search(r"\bmonth\b|\(mm\)", metadata):
+        return "month"
+    if re.search(r"\bday\b|\(dd\)", metadata):
+        return "day"
+    if re.search(r"\byear\b|\(yyyy\)", metadata):
+        return "year"
+    return None
+
+
+def _adapt_split_date_component(
+    field: FormAgentField,
+    message: str,
+    component: str,
+) -> AnswerAdapterResult:
+    accepted_shape = {
+        "month": "Provide the two-digit month, such as 03 for March.",
+        "day": "Provide the two-digit day, such as 04.",
+        "year": "Provide the four-digit year, such as 1990.",
+    }[component]
+    candidate = preflight_message(message, accepted_shape=accepted_shape)
+    if not isinstance(candidate, str):
+        return candidate
+    candidate = strip_framing(candidate, _GENERAL_FRAMES).rstrip(".!?")
+    if not re.fullmatch(r"\d{1,4}", candidate):
+        return ClarificationNeeded(
+            reason=f"I could not identify one exact {component} value.",
+            accepted_shape=accepted_shape,
+        )
+    number = int(candidate)
+    if component == "month" and not 1 <= number <= 12:
+        return ClarificationNeeded(
+            reason="That is not a valid calendar month.",
+            accepted_shape=accepted_shape,
+        )
+    if component == "day" and not 1 <= number <= 31:
+        return ClarificationNeeded(
+            reason="That is not a valid calendar day.",
+            accepted_shape=accepted_shape,
+        )
+    if component == "year" and len(candidate) != 4:
+        return ClarificationNeeded(
+            reason="The year needs four digits.",
+            accepted_shape=accepted_shape,
+        )
+    prepared = f"{number:02d}" if component != "year" else candidate
+    return MatchedAnswer(prepared, original_value=candidate)
+
+
+def _strip_name_sentence_punctuation(
+    field: FormAgentField,
+    value: str,
+) -> str:
+    if not value.endswith((".", "!", "?")):
+        return value
+    metadata = semantic_text(field.id, field.label, field.question)
+    last_token_match = re.search(r"([\w’'-]+)[.!?]$", value, re.UNICODE)
+    if last_token_match is None:
+        return value
+    last_token = last_token_match.group(1)
+    if len(last_token) == 1 and "initial" not in metadata:
+        return value
+    return value[:-1].rstrip()
+
+
+def _framed_original(
+    value: str,
+    patterns: tuple[re.Pattern[str], ...],
+) -> str:
+    for pattern in patterns:
+        match = pattern.fullmatch(value)
+        if match is not None:
+            return match.group("value").strip()
+    return value.strip()
 
 
 def _date_answer_shape(date_format: str | None) -> str:

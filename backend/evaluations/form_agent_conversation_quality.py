@@ -261,11 +261,11 @@ def conversation_quality_scenarios() -> tuple[ConversationQualityScenario, ...]:
             question="Full name",
             user_message="What did we complete?",
             expected_objective=None,
-            expected_action="next",
+            expected_action="conversation",
             expected_model_calls=0,
             field_status="confirmed",
             context_terms=("reviewed", "confirmed", "complete"),
-            next_step_terms=("review", "pdf", "download"),
+            next_step_terms=("confirmed", "unchanged", "nothing"),
             phase="form_complete",
         ),
     )
