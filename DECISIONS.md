@@ -419,3 +419,27 @@ with exact form-state accuracy and 1.000 volunteered-fact recall, side-question
 recovery, acknowledgement, clarification success, interruption recovery, and
 overall observed behaviour. Both evaluation gates passed with zero invention,
 contradiction, deterministic, and confirmation-boundary failures.
+
+---
+
+## 2026-10-16 — Direct PDF editing uses normalized widget overlays
+
+Decision:
+The PDF Service returns each AcroForm widget rectangle as a one-based page and
+normalized top-left coordinates tied to the existing stable field ID. The
+frontend places accessible interaction targets over the PDF.js canvas and uses
+field clicks only to open the shared canonical field editor. It does not write
+or annotate PDF bytes in the browser.
+
+Final review is also a view over canonical frontend state. A proposed value is
+shown as proposed but remains outside the fill payload. Direct and manual values
+enter that payload only when they satisfy the field's validation, and skipping
+or clearing a changed answer removes it. The existing backend `/pdf/fill`
+endpoint remains the only path that produces a changed preview or download.
+
+Reason:
+Normalized coordinates are independent of screen size and keep visual field
+selection separate from PDF mutation. Reusing one field state prevents values
+from diverging as the user moves between conversation, document interaction,
+manual fallback, and final review, while preserving the explicit-confirmation
+boundary for AI proposals.

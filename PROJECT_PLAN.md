@@ -79,7 +79,10 @@ Required technology:
 - Milestone 7.8 targeted human-helper conversation repairs is complete; the
   unchanged fixed human-helper suite passes both its correctness and
   human-helper gates
-- Milestone 8 is the next planned milestone and has not started
+- Milestone 8 full workflow is complete: normalized widget geometry, active
+  field navigation, direct PDF editing, canonical cross-mode state, final
+  review, confirmed-only filling, and download are connected
+- Milestone 9 polish and reliability is the next planned milestone
 - deployment has not started; persistence remains outside the current plan
 
 ---
@@ -3830,7 +3833,7 @@ Do not implement:
 
 # Milestone 8 — Full workflow
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Goal:
 Connect conversation, direct PDF interaction, review, filling, and download into
@@ -3853,6 +3856,38 @@ Do not implement:
 - support for non-AcroForm PDFs, XFA, OCR, or online forms
 - autonomous form submission
 - authentication, persistence, or a database
+
+Verified implementation outcome recorded 16 October 2026:
+- AcroForm extraction now returns every discovered widget as a one-based page
+  number plus normalized top-left `x`, `y`, `width`, and `height` coordinates,
+  tied to the existing stable field ID; repeated widgets remain associated with
+  the same field
+- the custom PDF viewer renders a coordinate overlay without mutating the PDF
+  in the browser, follows the active assistant field to its page, and visibly
+  distinguishes active, selected, proposed, completed, skipped, and unanswered
+  fields
+- selecting a supported widget opens an in-context editor; direct edits, the
+  existing manual drawer, and confirmed Form Agent effects all write through
+  the same `formValues`, confirmation, skip, and preview state
+- the manual drawer remains closed by default, while switching among the
+  assistant, PDF editor, review panel, and manual drawer preserves current
+  values by stable field ID
+- final review lists completed, proposed, skipped, and unanswered fields and
+  lets the user return directly to a field on the document
+- unconfirmed drafts and agent proposals never enter the `/pdf/fill` payload;
+  clearing or skipping a changed value removes it from that payload, and a
+  confirmed direct or manual change uses the existing debounced backend fill
+  and download flow
+- normalized geometry is asserted against the small PDF fixture and checked on
+  the SBA fixture; all 352 backend tests, the five-fixture/47-turn transcript
+  evaluation, the 14-scenario safety evaluation, the frontend production build,
+  PDF-workflow check, workspace-layout check, and voice-interruption check pass
+- the app was smoke-tested in the browser at desktop size with a healthy
+  backend connection; automated local-file attachment was unavailable in that
+  browser surface, so loaded-document positioning remains covered by fixture
+  coordinate assertions and the focused frontend workflow check
+- no AI, voice, guidance, authentication, persistence, database, OCR, XFA,
+  online-form, PDF-filling-semantic, or dependency changes were introduced
 
 # Milestone 9 — Polish and reliability
 

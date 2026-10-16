@@ -26,6 +26,9 @@ Voice / Text / PDF field click / Manual drawer
 
 Responsible for:
 - displaying PDF
+- rendering normalized AcroForm widget coordinates as a browser overlay tied to
+  stable field IDs, navigating to the active field, and opening a focused field
+  editor when a supported widget is selected
 - displaying questions
 - starting a turn-based browser voice interview only after an explicit user
   action
@@ -62,6 +65,8 @@ Responsible for:
 - presenting confirmation, correction, rejection, and skip controls
 - keeping the manual field drawer, quick answers, conversation, and proposal
   review on the same ephemeral canonical field state
+- presenting a final review of completed, proposed, skipped, and unanswered
+  supported fields from that same state
 - sending only confirmed values to the PDF filling endpoint
 
 Must not:
@@ -127,7 +132,8 @@ Responsible for:
 - identifying explicitly supported form editions from exact local signatures
 - applying reviewed display metadata and visible-option mappings only for an
   exact recognized form edition
-- returning widget geometry when direct-on-form editing is implemented
+- returning every available widget rectangle as normalized top-left page
+  coordinates tied to its stable field ID, including repeated widgets
 - filling PDF fields
 - validating submitted choice values against the same capability rules used
   during extraction
@@ -135,6 +141,12 @@ Responsible for:
 
 Must not:
 - call an LLM
+
+The frontend overlay is interaction metadata, not a second PDF editor. It is
+positioned over the PDF.js-rendered page using the normalized coordinates from
+extraction. A click updates the same React field state used by conversation and
+the manual drawer. Only confirmed changed values are sent back to `/pdf/fill`,
+and the PDF Service produces the refreshed preview and downloadable file.
 
 ## Nemotron Service
 

@@ -24,6 +24,9 @@ def test_extract_pdf_returns_acroform_fields() -> None:
         "instructions": [],
     }
     fields = {field["id"]: field for field in extraction["fields"]}
+    widgets = {
+        field_id: field.pop("widgets") for field_id, field in fields.items()
+    }
     assert fields == {
         "accept_terms": {
             "id": "accept_terms",
@@ -62,6 +65,35 @@ def test_extract_pdf_returns_acroform_fields() -> None:
             "section": "Sample application",
             "page_context": "Sample application",
         },
+    }
+    assert widgets == {
+        "accept_terms": [
+            {
+                "page": 1,
+                "x": 0.120952,
+                "y": 0.323083,
+                "width": 0.023519,
+                "height": 0.016629,
+            }
+        ],
+        "country": [
+            {
+                "page": 1,
+                "x": 0.120952,
+                "y": 0.256566,
+                "width": 0.419974,
+                "height": 0.026132,
+            }
+        ],
+        "full_name": [
+            {
+                "page": 1,
+                "x": 0.120952,
+                "y": 0.169856,
+                "width": 0.419974,
+                "height": 0.026132,
+            }
+        ],
     }
 
 

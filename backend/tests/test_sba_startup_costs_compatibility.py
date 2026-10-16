@@ -55,7 +55,9 @@ def test_extract_sba_worksheet_returns_editable_fields_with_values() -> None:
     assert fields_by_id["One-time rent expense 1"]["value"] == (
         "Security deposit"
     )
-    assert fields_by_id["One-time budget cost 1"] == {
+    one_time_budget = fields_by_id["One-time budget cost 1"]
+    one_time_budget_widgets = one_time_budget.pop("widgets")
+    assert one_time_budget == {
         "id": "One-time budget cost 1",
         "label": "Rent Budget amount 1, edit to change amount",
         "type": "number",
@@ -67,7 +69,9 @@ def test_extract_sba_worksheet_returns_editable_fields_with_values() -> None:
         "section": "Rent",
         "page_context": "Startup costs — Joe’s Pizza Place — Rent",
     }
-    assert fields_by_id["One-time actual cost 1"] == {
+    one_time_actual = fields_by_id["One-time actual cost 1"]
+    one_time_actual_widgets = one_time_actual.pop("widgets")
+    assert one_time_actual == {
         "id": "One-time actual cost 1",
         "label": "Rent Actual amount 1, edit to change amount",
         "type": "number",
@@ -78,6 +82,21 @@ def test_extract_sba_worksheet_returns_editable_fields_with_values() -> None:
         "section": "Rent",
         "page_context": "Startup costs — Joe’s Pizza Place — Rent",
     }
+    assert one_time_budget_widgets == [
+        {
+            "page": 1,
+            "x": 0.341888,
+            "y": 0.29919,
+            "width": 0.066143,
+            "height": 0.023505,
+        }
+    ]
+    assert len(one_time_actual_widgets) == 1
+    assert one_time_actual_widgets[0]["page"] == 1
+    assert all(
+        0 <= one_time_actual_widgets[0][coordinate] <= 1
+        for coordinate in ("x", "y", "width", "height")
+    )
 
 
 def test_fill_sba_worksheet_recalculates_and_formats_totals() -> None:

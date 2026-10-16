@@ -27,6 +27,11 @@ type AgentEffectKind =
   | "correction_cancelled"
   | "completed";
 type AgentFieldStatus = "unanswered" | "confirmed" | "skipped";
+type ReviewFieldStatus =
+  | "unanswered"
+  | "confirmed"
+  | "skipped"
+  | "proposed";
 type ConversationPhase =
   | "asking"
   | "awaiting_answer"
@@ -63,6 +68,15 @@ type PdfField = {
   help_text?: string;
   section?: string;
   page_context?: string;
+  widgets?: PdfWidgetGeometry[];
+};
+
+type PdfWidgetGeometry = {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 type PageFieldGroup = {
@@ -293,6 +307,11 @@ function App() {
   const [pendingProposalDetails, setPendingProposalDetails] =
     useState<ProposalAgentEffect | null>(null);
   const [manualDrawerOpen, setManualDrawerOpen] = useState(false);
+  const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
+  const [directEditFieldId, setDirectEditFieldId] = useState<string | null>(
+    null,
+  );
+  const [directEditValue, setDirectEditValue] = useState<FieldValue>("");
   const [showFullTranscript, setShowFullTranscript] = useState(false);
   const [mobileWorkspaceView, setMobileWorkspaceView] =
     useState<MobileWorkspaceView>("assistant");
@@ -336,11 +355,19 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (
-      !selectedFile ||
-      extractionStatus !== "ready" ||
-      Object.keys(changedValues).length === 0
-    ) {
+    if (!selectedFile || extractionStatus !== "ready") {
+      return;
+    }
+
+    if (Object.keys(changedValues).length === 0) {
+      if (filledUrlRef.current) {
+        URL.revokeObjectURL(filledUrlRef.current);
+        filledUrlRef.current = null;
+      }
+      setPreviewUrl(originalUrlRef.current);
+      setDownloadUrl(null);
+      setPreviewError(null);
+      setPreviewStatus("idle");
       return;
     }
 
@@ -481,6 +508,9 @@ function App() {
     setProposalEditValue("");
     setPendingProposalDetails(null);
     setManualDrawerOpen(false);
+    setReviewPanelOpen(false);
+    setDirectEditFieldId(null);
+    setDirectEditValue("");
     setShowFullTranscript(false);
     setMobileWorkspaceView("assistant");
     voiceInterview.resetInterview();
@@ -548,21 +578,82 @@ function App() {
 
     writeFieldValue(fieldId, value, isConfirmed);
 
-    if (
+    const replacesActiveAgentValue =
       agentConversationState.active_field_id === fieldId ||
-      agentConversationState.pending_proposal?.field_id === fieldId
-    ) {
-      setAgentConversationState({
-        phase: isConfirmed ? "field_confirmed" : "awaiting_answer",
-        active_field_id: fieldId,
-        pending_proposal: null,
-        remembered_candidates:
-          agentConversationState.remembered_candidates.filter(
-            (candidate) => candidate.field_id !== fieldId,
-          ),
-      });
+      agentConversationState.pending_proposal?.field_id === fieldId;
+    setAgentConversationState((current) => {
+      const rememberedCandidates = current.remembered_candidates.filter(
+        (candidate) => candidate.field_id !== fieldId,
+      );
+      if (
+        current.active_field_id === fieldId ||
+        current.pending_proposal?.field_id === fieldId
+      ) {
+        return {
+          phase: isConfirmed ? "field_confirmed" : "awaiting_answer",
+          active_field_id: fieldId,
+          pending_proposal: null,
+          remembered_candidates: rememberedCandidates,
+        };
+      }
+      return rememberedCandidates.length ===
+        current.remembered_candidates.length
+        ? current
+        : { ...current, remembered_candidates: rememberedCandidates };
+    });
+    if (replacesActiveAgentValue) {
       resetProposalEditor();
     }
+  }
+
+  function openDirectEditor(fieldId: string) {
+    const field = fields.find((candidate) => candidate.id === fieldId);
+    if (!field || !isDirectlyEditableField(field)) {
+      return;
+    }
+
+    setDirectEditFieldId(fieldId);
+    setDirectEditValue(
+      formValues[fieldId] ?? getInitialFieldValue(field),
+    );
+    setMobileWorkspaceView("form");
+  }
+
+  function closeDirectEditor() {
+    setDirectEditFieldId(null);
+    setDirectEditValue("");
+  }
+
+  function saveDirectEdit() {
+    if (!directEditFieldId) {
+      return;
+    }
+
+    const field = fields.find(
+      (candidate) => candidate.id === directEditFieldId,
+    );
+    if (!field || !isManuallyConfirmedValue(field, directEditValue)) {
+      return;
+    }
+
+    updateField(field.id, directEditValue);
+    closeDirectEditor();
+  }
+
+  function clearDirectEdit() {
+    if (!directEditFieldId) {
+      return;
+    }
+
+    const field = fields.find(
+      (candidate) => candidate.id === directEditFieldId,
+    );
+    if (!field || !isDirectlyEditableField(field)) {
+      return;
+    }
+
+    updateField(field.id, field.type === "checkbox" ? false : "");
+    closeDirectEditor();
   }
 
   function writeFieldValue(
@@ -571,7 +662,18 @@ function App() {
     isConfirmed: boolean,
   ) {
     setFormValues((current) => ({ ...current, [fieldId]: value }));
-    setChangedValues((current) => ({ ...current, [fieldId]: value }));
+    setChangedValues((current) => {
+      const next = { ...current };
+      if (isConfirmed) {
+        next[fieldId] = value;
+      } else {
+        delete next[fieldId];
+      }
+      return next;
+    });
+    if (directEditFieldId === fieldId) {
+      setDirectEditValue(value);
+    }
     setConfirmedFieldIds((current) => {
       const next = new Set(current);
       if (isConfirmed) {
@@ -735,6 +837,11 @@ function App() {
           next.delete(effect.field_id);
           return next;
         });
+        setChangedValues((current) => {
+          const next = { ...current };
+          delete next[effect.field_id];
+          return next;
+        });
         resetProposalEditor();
       } else if (effect.effect === "field_reopened") {
         setSkippedFieldIds((current) => {
@@ -848,6 +955,35 @@ function App() {
   const activeAgentField = fields.find(
     (field) => field.id === agentActiveFieldId,
   );
+  const reviewItems = fields.filter(isDirectlyEditableField).map((field) => ({
+    field,
+    status: getReviewFieldStatus(
+      field.id,
+      pendingProposal?.field_id ?? null,
+      confirmedFieldIds,
+      skippedFieldIds,
+    ),
+  }));
+  const reviewCounts = countReviewStatuses(reviewItems);
+  const directEditField = fields.find(
+    (field) => field.id === directEditFieldId,
+  );
+  const canSaveDirectEdit = Boolean(
+    directEditField &&
+      isManuallyConfirmedValue(directEditField, directEditValue),
+  );
+  const pdfNavigationFieldId =
+    directEditFieldId ?? pendingProposal?.field_id ?? agentActiveFieldId;
+  const pdfViewerFields = reviewItems.map(({ field, status }) => ({
+    id: field.id,
+    label: field.label || humanizeFieldId(field.id),
+    question: field.question,
+    supported: field.supported,
+    editable: field.editable,
+    page: field.page,
+    widgets: field.widgets,
+    status,
+  }));
   const currentAgentFields = buildAgentRequestFields(
     fields,
     formValues,
@@ -1011,6 +1147,19 @@ function App() {
                   onChange={handleFileSelection}
                 />
               </label>
+              <button
+                className="header-review-button"
+                type="button"
+                disabled={
+                  extractionStatus !== "ready" || reviewItems.length === 0
+                }
+                onClick={() => {
+                  setReviewPanelOpen(true);
+                  setMobileWorkspaceView("assistant");
+                }}
+              >
+                Review
+              </button>
               {downloadUrl ? (
                 <a
                   className="header-download-button"
@@ -1173,10 +1322,73 @@ function App() {
               {previewUrl ? (
                 <PdfViewer
                   key={originalUrlRef.current ?? selectedFile.name}
+                  activeFieldId={pdfNavigationFieldId}
+                  fields={pdfViewerFields}
                   fileName={selectedFile.name}
                   isUpdating={previewStatus === "updating"}
+                  onSelectField={openDirectEditor}
+                  selectedFieldId={directEditFieldId}
                   url={previewUrl}
                 />
+              ) : null}
+
+              {directEditField && isDirectlyEditableField(directEditField) ? (
+                <form
+                  className="pdf-direct-editor"
+                  aria-labelledby="pdf-direct-editor-heading"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    saveDirectEdit();
+                  }}
+                >
+                  <div className="pdf-direct-editor-heading">
+                    <div>
+                      <span>
+                        Edit field on page {directEditField.page ?? "—"}
+                      </span>
+                      <strong id="pdf-direct-editor-heading">
+                        {directEditField.question ||
+                          directEditField.label ||
+                          humanizeFieldId(directEditField.id)}
+                      </strong>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Close field editor"
+                      onClick={closeDirectEditor}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <FieldControl
+                    autoFocus
+                    field={directEditField}
+                    inputId="pdf-direct-field-input"
+                    value={directEditValue}
+                    onChange={setDirectEditValue}
+                  />
+                  <div className="pdf-direct-editor-actions">
+                    <button
+                      className="primary"
+                      type="submit"
+                      disabled={!canSaveDirectEdit}
+                    >
+                      Save to form
+                    </button>
+                    <button type="button" onClick={clearDirectEdit}>
+                      {directEditField.type === "checkbox"
+                        ? "Set to no"
+                        : "Clear answer"}
+                    </button>
+                    <button type="button" onClick={closeDirectEditor}>
+                      Cancel
+                    </button>
+                  </div>
+                  <small>
+                    Saving uses the same reviewed form state as the assistant
+                    and manual editor.
+                  </small>
+                </form>
               ) : null}
 
               {previewError ? (
@@ -1246,6 +1458,86 @@ function App() {
                       unanswered
                     </span>
                   </div>
+                </section>
+              ) : null}
+
+              {reviewPanelOpen ? (
+                <section
+                  className="form-review-panel"
+                  aria-labelledby="form-review-heading"
+                >
+                  <div className="form-review-heading">
+                    <div>
+                      <span>Final review</span>
+                      <h3 id="form-review-heading">Check every form field</h3>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Close final review"
+                      onClick={() => setReviewPanelOpen(false)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div
+                    className="form-review-summary"
+                    aria-label="Field status summary"
+                  >
+                    <span>
+                      <strong>{reviewCounts.confirmed}</strong> completed
+                    </span>
+                    <span>
+                      <strong>{reviewCounts.proposed}</strong> proposed
+                    </span>
+                    <span>
+                      <strong>{reviewCounts.skipped}</strong> skipped
+                    </span>
+                    <span>
+                      <strong>{reviewCounts.unanswered}</strong> unanswered
+                    </span>
+                  </div>
+                  <div className="form-review-list">
+                    {reviewItems.map(({ field, status }) => {
+                      const displayedValue =
+                        status === "proposed"
+                          ? pendingProposal?.value
+                          : formValues[field.id];
+                      return (
+                        <button
+                          key={field.id}
+                          type="button"
+                          className={`form-review-item ${status}`}
+                          onClick={() => {
+                            setReviewPanelOpen(false);
+                            openDirectEditor(field.id);
+                          }}
+                        >
+                          <span className="form-review-item-copy">
+                            <strong>
+                              {field.question ||
+                                field.label ||
+                                humanizeFieldId(field.id)}
+                            </strong>
+                            <small>
+                              {status === "unanswered"
+                                ? "No reviewed answer"
+                                : status === "skipped"
+                                  ? "Skipped for now"
+                                  : formatReviewValue(displayedValue)}
+                            </small>
+                          </span>
+                          <span className={`form-review-status ${status}`}>
+                            {getReviewStatusLabel(status)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p>
+                    Proposed answers are not written to the PDF until you
+                    confirm them. Select any field to review or edit it on the
+                    document.
+                  </p>
                 </section>
               ) : null}
 
@@ -1817,11 +2109,7 @@ function App() {
                       <button
                         type="button"
                         disabled={agentStatus === "loading"}
-                        onClick={() =>
-                          sendAgentMessage(
-                            "Show confirmed, skipped, and unanswered fields.",
-                          )
-                        }
+                        onClick={() => setReviewPanelOpen(true)}
                       >
                         Review answers
                       </button>
@@ -2027,13 +2315,20 @@ function App() {
 }
 
 type FieldControlProps = {
+  autoFocus?: boolean;
   field: PdfField;
   inputId: string;
   value: FieldValue | undefined;
   onChange: (value: FieldValue) => void;
 };
 
-function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
+function FieldControl({
+  autoFocus = false,
+  field,
+  inputId,
+  value,
+  onChange,
+}: FieldControlProps) {
   const label = field.label || humanizeFieldId(field.id);
 
   if (!field.supported || !field.editable) {
@@ -2056,6 +2351,7 @@ function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
       <label className="field-control" htmlFor={inputId}>
         <span className="field-label">{label}</span>
         <input
+          autoFocus={autoFocus}
           id={inputId}
           type="text"
           value={typeof value === "string" ? value : ""}
@@ -2072,6 +2368,7 @@ function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
       <label className="field-control" htmlFor={inputId}>
         <span className="field-label">{label}</span>
         <textarea
+          autoFocus={autoFocus}
           id={inputId}
           value={typeof value === "string" ? value : ""}
           onChange={(event) => onChange(event.target.value)}
@@ -2086,6 +2383,7 @@ function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
       <label className="field-control" htmlFor={inputId}>
         <span className="field-label">{label}</span>
         <input
+          autoFocus={autoFocus}
           id={inputId}
           type="number"
           inputMode="decimal"
@@ -2104,6 +2402,7 @@ function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
       <label className="field-control" htmlFor={inputId}>
         <span className="field-label">{label}</span>
         <select
+          autoFocus={autoFocus}
           id={inputId}
           value={typeof value === "string" ? value : ""}
           onChange={(event) => onChange(event.target.value)}
@@ -2126,6 +2425,7 @@ function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
     return (
       <label className="checkbox-control" htmlFor={inputId}>
         <input
+          autoFocus={autoFocus}
           id={inputId}
           type="checkbox"
           checked={typeof value === "boolean" ? value : false}
@@ -2144,6 +2444,7 @@ function FieldControl({ field, inputId, value, onChange }: FieldControlProps) {
       <label className="field-control" htmlFor={inputId}>
         <span className="field-label">{label}</span>
         <select
+          autoFocus={autoFocus}
           id={inputId}
           value={typeof value === "string" ? value : ""}
           onChange={(event) => onChange(event.target.value)}
@@ -2297,6 +2598,23 @@ function isExplainableField(
   );
 }
 
+function isDirectlyEditableField(
+  field: PdfField,
+): field is PdfField & { type: AgentFieldType | "radio" } {
+  return (
+    field.supported &&
+    field.editable &&
+    [
+      "text",
+      "textarea",
+      "number",
+      "dropdown",
+      "checkbox",
+      "radio",
+    ].includes(field.type)
+  );
+}
+
 function getInitialFieldValue(field: PdfField): FieldValue {
   const fallbackValue = field.type === "checkbox" ? false : "";
   const value = field.value ?? fallbackValue;
@@ -2311,7 +2629,7 @@ function getInitialFieldValue(field: PdfField): FieldValue {
 }
 
 function hasInitialConfirmedValue(field: PdfField): boolean {
-  if (!isExplainableField(field) || field.value === undefined) {
+  if (!isDirectlyEditableField(field) || field.value === undefined) {
     return false;
   }
 
@@ -2319,14 +2637,84 @@ function hasInitialConfirmedValue(field: PdfField): boolean {
     return field.value === true;
   }
 
-  return isAgentValueCompatible(field, field.value);
+  return isEditableValueCompatible(field, field.value);
 }
 
 function isManuallyConfirmedValue(
   field: PdfField,
   value: FieldValue,
 ): boolean {
-  return isExplainableField(field) && isAgentValueCompatible(field, value);
+  return (
+    isDirectlyEditableField(field) &&
+    isEditableValueCompatible(field, value)
+  );
+}
+
+function isEditableValueCompatible(
+  field: PdfField & { type: AgentFieldType | "radio" },
+  value: FieldValue,
+): boolean {
+  if (field.type === "radio") {
+    return (
+      typeof value === "string" &&
+      Boolean(value.trim()) &&
+      (field.options ?? []).includes(value)
+    );
+  }
+
+  return isAgentValueCompatible(
+    { type: field.type as AgentFieldType, options: field.options },
+    value,
+  );
+}
+
+function getReviewFieldStatus(
+  fieldId: string,
+  proposedFieldId: string | null,
+  confirmedFieldIds: Set<string>,
+  skippedFieldIds: Set<string>,
+): ReviewFieldStatus {
+  if (fieldId === proposedFieldId) {
+    return "proposed";
+  }
+  if (confirmedFieldIds.has(fieldId)) {
+    return "confirmed";
+  }
+  if (skippedFieldIds.has(fieldId)) {
+    return "skipped";
+  }
+  return "unanswered";
+}
+
+function countReviewStatuses(
+  items: Array<{ status: ReviewFieldStatus }>,
+): Record<ReviewFieldStatus, number> {
+  const counts: Record<ReviewFieldStatus, number> = {
+    confirmed: 0,
+    proposed: 0,
+    skipped: 0,
+    unanswered: 0,
+  };
+  for (const item of items) {
+    counts[item.status] += 1;
+  }
+  return counts;
+}
+
+function getReviewStatusLabel(status: ReviewFieldStatus): string {
+  return status === "confirmed"
+    ? "Completed"
+    : status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function formatReviewValue(value: FieldValue | undefined): string {
+  if (value === true) {
+    return "Yes";
+  }
+  if (value === false) {
+    return "No";
+  }
+  return value?.trim() || "No reviewed answer";
 }
 
 function buildAgentRequestFields(

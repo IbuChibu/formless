@@ -42,6 +42,14 @@ class HealthResponse(BaseModel):
     service: str
 
 
+class PdfWidgetGeometryResponse(BaseModel):
+    page: int = Field(ge=1)
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+
 class PdfFieldResponse(BaseModel):
     id: str
     label: str
@@ -56,6 +64,7 @@ class PdfFieldResponse(BaseModel):
     help_text: Optional[str] = None
     section: Optional[str] = None
     page_context: Optional[str] = None
+    widgets: list[PdfWidgetGeometryResponse] = Field(default_factory=list)
 
 
 class PdfFormContextResponse(BaseModel):
@@ -193,6 +202,16 @@ async def extract_pdf_fields(file: UploadFile = File(...)) -> PdfExtractionRespo
                 help_text=field.help_text,
                 section=field.section,
                 page_context=field.page_context,
+                widgets=[
+                    PdfWidgetGeometryResponse(
+                        page=widget.page,
+                        x=widget.x,
+                        y=widget.y,
+                        width=widget.width,
+                        height=widget.height,
+                    )
+                    for widget in field.widgets
+                ],
             )
             for field in extraction.fields
         ],

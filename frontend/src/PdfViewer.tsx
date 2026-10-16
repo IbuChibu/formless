@@ -13,20 +13,56 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 type ViewerStatus = "loading" | "rendering" | "ready" | "error";
+type PdfFieldStatus = "confirmed" | "proposed" | "skipped" | "unanswered";
+
+type PdfWidgetGeometry = {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type PdfViewerField = {
+  id: string;
+  label: string;
+  question?: string;
+  supported: boolean;
+  editable: boolean;
+  page?: number;
+  widgets?: PdfWidgetGeometry[];
+  status: PdfFieldStatus;
+};
 
 type PdfViewerProps = {
+  activeFieldId: string | null;
+  fields: PdfViewerField[];
   fileName: string;
   isUpdating: boolean;
+  onSelectField: (fieldId: string) => void;
+  selectedFieldId: string | null;
   url: string;
 };
 
-function PdfViewer({ fileName, isUpdating, url }: PdfViewerProps) {
+function PdfViewer({
+  activeFieldId,
+  fields,
+  fileName,
+  isUpdating,
+  onSelectField,
+  selectedFieldId,
+  url,
+}: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pageSlotRef = useRef<HTMLDivElement | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageCount, setPageCount] = useState(0);
   const [pageWidth, setPageWidth] = useState(0);
+  const [renderedPageSize, setRenderedPageSize] = useState({
+    width: 0,
+    height: 0,
+  });
   const [viewerStatus, setViewerStatus] =
     useState<ViewerStatus>("loading");
   const [viewerError, setViewerError] = useState<string | null>(null);
@@ -83,6 +119,19 @@ function PdfViewer({ fileName, isUpdating, url }: PdfViewerProps) {
     };
   }, [url]);
 
+  const activeField = fields.find((field) => field.id === activeFieldId);
+  const activeFieldPage =
+    activeField?.widgets?.[0]?.page ?? activeField?.page ?? null;
+
+  useEffect(() => {
+    const destinationPage = activeFieldPage;
+    if (destinationPage && destinationPage >= 1) {
+      setPageNumber((current) =>
+        current === destinationPage ? current : destinationPage,
+      );
+    }
+  }, [activeFieldId, activeFieldPage]);
+
   useEffect(() => {
     if (!pdfDocument || pageWidth <= 0) {
       return;
@@ -118,6 +167,10 @@ function PdfViewer({ fileName, isUpdating, url }: PdfViewerProps) {
         canvas.height = Math.floor(renderViewport.height);
         canvas.style.width = `${Math.floor(renderViewport.width / outputScale)}px`;
         canvas.style.height = `${Math.floor(renderViewport.height / outputScale)}px`;
+        setRenderedPageSize({
+          width: Math.floor(renderViewport.width / outputScale),
+          height: Math.floor(renderViewport.height / outputScale),
+        });
 
         renderTask = page.render({
           annotationMode: AnnotationMode.ENABLE,
@@ -150,6 +203,11 @@ function PdfViewer({ fileName, isUpdating, url }: PdfViewerProps) {
   const canGoPrevious = pageNumber > 1 && viewerStatus !== "loading";
   const canGoNext =
     pageCount > 0 && pageNumber < pageCount && viewerStatus !== "loading";
+  const pageWidgets = fields.flatMap((field) =>
+    (field.widgets ?? [])
+      .filter((widget) => widget.page === pageNumber)
+      .map((widget, index) => ({ field, index, widget })),
+  );
 
   return (
     <div className="custom-pdf-viewer">
@@ -189,12 +247,64 @@ function PdfViewer({ fileName, isUpdating, url }: PdfViewerProps) {
 
       <div className="pdf-page-stage">
         <div className="pdf-page-slot" ref={pageSlotRef}>
-          <canvas
-            ref={canvasRef}
-            className="pdf-page-canvas"
-            role="img"
-            aria-label={`Page ${pageNumber} of ${fileName}`}
-          />
+          <div
+            className="pdf-page-surface"
+            style={{
+              width: renderedPageSize.width || undefined,
+              height: renderedPageSize.height || undefined,
+            }}
+          >
+            <canvas
+              ref={canvasRef}
+              className="pdf-page-canvas"
+              role="img"
+              aria-label={`Page ${pageNumber} of ${fileName}`}
+            />
+
+            {viewerStatus === "ready" ? (
+              <div className="pdf-field-layer" aria-label="Fillable PDF fields">
+                {pageWidgets.map(({ field, index, widget }) => {
+                  const isActive = field.id === activeFieldId;
+                  const isSelected = field.id === selectedFieldId;
+                  const fieldName =
+                    field.question || field.label || "PDF form field";
+
+                  return (
+                    <button
+                      key={`${field.id}-${widget.page}-${index}`}
+                      type="button"
+                      className={[
+                        "pdf-field-target",
+                        field.status,
+                        isActive ? "active" : "",
+                        isSelected ? "selected" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      style={{
+                        left: `${widget.x * 100}%`,
+                        top: `${widget.y * 100}%`,
+                        width: `${widget.width * 100}%`,
+                        height: `${widget.height * 100}%`,
+                      }}
+                      aria-label={`Edit ${fieldName}. ${field.status}.`}
+                      title={`Edit ${fieldName}`}
+                      onClick={() => onSelectField(field.id)}
+                    >
+                      <span className="pdf-field-target-label">{fieldName}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {isUpdating && viewerStatus === "ready" ? (
+              <div className="pdf-update-overlay" aria-live="polite">
+                <span className="spinner" aria-hidden="true" />
+                <span>Updating preview</span>
+              </div>
+            ) : null}
+          </div>
 
           {viewerStatus === "loading" || viewerStatus === "rendering" ? (
             <div className="pdf-viewer-state" aria-live="polite">
@@ -214,13 +324,6 @@ function PdfViewer({ fileName, isUpdating, url }: PdfViewerProps) {
               <a href={url} target="_blank" rel="noreferrer">
                 Open the PDF in a new tab
               </a>
-            </div>
-          ) : null}
-
-          {isUpdating && viewerStatus === "ready" ? (
-            <div className="pdf-update-overlay" aria-live="polite">
-              <span className="spinner" aria-hidden="true" />
-              <span>Updating preview</span>
             </div>
           ) : null}
         </div>

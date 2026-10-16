@@ -32,6 +32,15 @@ class PdfFillingError(ValueError):
 
 
 @dataclass(frozen=True)
+class PdfWidgetGeometry:
+    page: int
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+@dataclass(frozen=True)
 class PdfField:
     id: str
     label: str
@@ -46,6 +55,7 @@ class PdfField:
     help_text: Optional[str] = None
     section: Optional[str] = None
     page_context: Optional[str] = None
+    widgets: tuple[PdfWidgetGeometry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -123,6 +133,7 @@ class _NativeFieldContext:
 @dataclass(frozen=True)
 class _NativePdfContext:
     fields: dict[str, _NativeFieldContext]
+    widgets: dict[str, tuple[PdfWidgetGeometry, ...]]
     form_context: PdfFormContext
     identity_text: str
 
@@ -215,6 +226,7 @@ def extract_acroform(pdf_data: bytes) -> PdfExtraction:
                     help_text=context.help_text,
                     section=context.section,
                     page_context=context.page_context,
+                    widgets=native_context.widgets.get(field_id, ()),
                 ),
             )
         )
@@ -778,6 +790,7 @@ def _extract_native_pdf_context(
         raise PdfExtractionError("Uploaded file is not a valid PDF") from error
 
     field_contexts: dict[str, _NativeFieldContext] = {}
+    field_widgets: dict[str, list[PdfWidgetGeometry]] = {}
     form_title: Optional[str] = None
     form_instructions: list[str] = []
     identity_text_parts: list[str] = []
@@ -814,10 +827,20 @@ def _extract_native_pdf_context(
 
             for widget in widgets:
                 field_id = widget.field_name
-                if not field_id or field_id in field_contexts:
+                if not field_id:
                     continue
 
                 rectangle = _pymupdf_rectangle(widget.rect)
+                geometry = _normalized_widget_geometry(
+                    page.number + 1,
+                    rectangle,
+                    _pymupdf_rectangle(page.rect),
+                )
+                if geometry is not None:
+                    field_widgets.setdefault(field_id, []).append(geometry)
+                if field_id in field_contexts:
+                    continue
+
                 question_group = _question_group(rectangle, groups)
                 question = (
                     _clean_context_text(question_group.text)
@@ -840,11 +863,39 @@ def _extract_native_pdf_context(
 
     return _NativePdfContext(
         fields=field_contexts,
+        widgets={
+            field_id: tuple(widgets)
+            for field_id, widgets in field_widgets.items()
+        },
         form_context=PdfFormContext(
             title=form_title,
             instructions=tuple(form_instructions),
         ),
         identity_text="\n".join(identity_text_parts),
+    )
+
+
+def _normalized_widget_geometry(
+    page_number: int,
+    rectangle: _Rectangle,
+    page_rectangle: _Rectangle,
+) -> Optional[PdfWidgetGeometry]:
+    if page_rectangle.width <= 0 or page_rectangle.height <= 0:
+        return None
+
+    left = min(max(rectangle.left, page_rectangle.left), page_rectangle.right)
+    top = min(max(rectangle.top, page_rectangle.top), page_rectangle.bottom)
+    right = min(max(rectangle.right, page_rectangle.left), page_rectangle.right)
+    bottom = min(max(rectangle.bottom, page_rectangle.top), page_rectangle.bottom)
+    if right <= left or bottom <= top:
+        return None
+
+    return PdfWidgetGeometry(
+        page=page_number,
+        x=round((left - page_rectangle.left) / page_rectangle.width, 6),
+        y=round((top - page_rectangle.top) / page_rectangle.height, 6),
+        width=round((right - left) / page_rectangle.width, 6),
+        height=round((bottom - top) / page_rectangle.height, 6),
     )
 
 
