@@ -443,3 +443,23 @@ selection separate from PDF mutation. Reusing one field state prevents values
 from diverging as the user moves between conversation, document interaction,
 manual fallback, and final review, while preserving the explicit-confirmation
 boundary for AI proposals.
+
+---
+
+## 2026-10-16 — Hands-free interruption favors avoiding self-interruption
+
+Decision:
+The local voice-activity gate calibrates against the assistant's audible
+speaker leakage before it arms. Automatic microphone gain is disabled, browser
+echo cancellation and noise suppression remain requested, and an interruption
+requires sustained, varying speech-like activity materially above the observed
+ambient and playback levels. A weak or ambiguous signal does not cancel the
+assistant; the user can always select `Answer now` or type instead.
+
+Reason:
+The Web Speech synthesis API does not expose its output waveform, so a browser
+cannot prove whether microphone speech came from the user or from its own
+speakers. Treating every sustained sound as an interruption caused the helper
+to cut off the ends of replies. A conservative gate makes false cancellation
+less likely while keeping a clear manual fallback for speech that the browser
+cannot distinguish safely.

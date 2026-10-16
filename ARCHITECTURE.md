@@ -108,8 +108,16 @@ the user-stated replacement through the ordinary answer path; the replacement
 creates a new proposal and still requires confirmation.
 
 The activity detector is not a recognizer: it observes no words, buffers no
-audio, and dispatches no form action. It stops on speech completion, manual
-interruption, recognition start, pause, end, error, form change, or unmount.
+audio, and dispatches no form action. At the start of each spoken response it
+briefly calibrates against ambient sound and speaker-to-microphone leakage. The
+browser is asked to apply echo cancellation and noise suppression without
+automatic gain control. The gate arms only after calibration and requires
+sustained, varying speech-like activity above both the ambient threshold and
+the calibrated playback ceiling. Conservative misses remain recoverable through
+the permanent `Answer now` and typed controls.
+
+The detector stops on speech completion, manual interruption, recognition
+start, pause, end, error, form change, or unmount.
 The interview loop stops on pause, end, microphone failure, provider failure,
 or form change. Audio is never uploaded or stored. Typed conversation,
 `Answer now`, proposal buttons, and the manual drawer remain available

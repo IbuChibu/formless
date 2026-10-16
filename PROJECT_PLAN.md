@@ -3891,7 +3891,7 @@ Verified implementation outcome recorded 16 October 2026:
 
 # Milestone 9 — Polish and reliability
 
-Status: NOT STARTED
+Status: IN PROGRESS
 
 Goal:
 Make the complete hackathon workflow reliable, accessible, understandable, and
@@ -3905,6 +3905,35 @@ Acceptance criteria:
 - unsupported fields and documents are explained without losing the uploaded PDF
 - the supported demo fixtures complete successfully from upload through download
 - frontend and backend automated checks pass
+
+Current reliability repair — self-interruption during spoken replies:
+- while the assistant begins speaking, calibrate the local activity gate
+  against speaker-to-microphone leakage before hands-free interruption arms
+- request browser echo cancellation and noise suppression while disabling
+  automatic gain control so quiet playback leakage is not amplified into a
+  false interruption
+- require sustained, varying speech-like activity above both the ambient-noise
+  threshold and calibrated playback-leakage ceiling before cancelling speech
+- keep `Answer now`, typed input, and the existing bounded listening turn as
+  permanent fallbacks when a quiet user interruption cannot be distinguished
+  safely from playback
+- deterministically test calibration, playback leakage, short spikes,
+  non-speech sound, genuine sustained voice activity, single dispatch, and
+  resource cleanup
+
+Verified partial outcome recorded 16 October 2026:
+- the interruption gate now calibrates for 900 ms, retains the observed
+  playback-leakage ceiling, and requires at least 420 ms, five active samples,
+  three speech-like samples, and meaningful level variation before dispatch
+- the microphone request keeps echo cancellation and noise suppression enabled
+  but turns automatic gain control off
+- the focused interruption policy check proves that changing playback leakage
+  does not interrupt, a short spike does not interrupt, sustained non-speech
+  activity does not interrupt, and sustained varying voice activity dispatches
+  exactly once and releases its resources
+- the frontend production build and existing frontend workflow checks pass;
+  Milestone 9 remains in progress because its other accessibility, responsive,
+  recovery, correction, and complete-fixture criteria have not yet been audited
 
 # Milestone 10 — Deployment
 
