@@ -3988,3 +3988,108 @@ a {
     font-size: 0.68rem;
   }
 }
+
+/* Milestone 9: accessible recovery and keyboard polish */
+
+.connection-status-group {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.connection-retry-button,
+.error-banner button,
+.preview-recovery button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid #c7867d;
+  border-radius: 8px;
+  color: #7f302b;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.connection-retry-button.compact {
+  min-height: 34px;
+  border-color: #d49b94;
+  font-size: 0.66rem;
+}
+
+.connection-retry-button:hover,
+.error-banner button:hover,
+.preview-recovery button:hover {
+  background: #fff5f2;
+}
+
+.connection-retry-button:focus-visible,
+.error-banner button:focus-visible,
+.preview-recovery button:focus-visible,
+.pdf-direct-editor-heading > button:focus-visible,
+.pdf-direct-editor-actions button:focus-visible,
+.form-review-heading > button:focus-visible {
+  outline: 3px solid rgb(160 66 53 / 24%);
+  outline-offset: 2px;
+}
+
+.error-banner {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.error-banner > div {
+  display: grid;
+  gap: 3px;
+}
+
+.preview-recovery {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.preview-recovery p {
+  margin: 0;
+}
+
+.form-review-panel:focus-visible,
+.preview-panel:focus-visible {
+  outline: 3px solid rgb(52 133 83 / 24%);
+  outline-offset: -3px;
+}
+
+@media (max-width: 640px) {
+  .workspace-header .brand-name {
+    display: none;
+  }
+
+  .workspace-header-actions {
+    gap: 4px;
+  }
+
+  .workspace-header-actions .connection-retry-button,
+  .workspace-header-actions .header-file-button,
+  .workspace-header-actions .header-review-button,
+  .workspace-header-actions .header-download-button {
+    padding-inline: 6px;
+    font-size: 0.62rem;
+  }
+
+  .connection-status-group,
+  .error-banner,
+  .preview-recovery {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .connection-status-group {
+    align-items: flex-end;
+  }
+
+  .connection-retry-button.compact {
+    padding-inline: 8px;
+  }
+}

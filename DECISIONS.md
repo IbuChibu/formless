@@ -502,3 +502,24 @@ validation, navigation, fallback, and effect concerns. Moving those concerns
 behind the existing import surface reduces change risk without changing
 prompts, provider calls, request or response contracts, explicit confirmation,
 canonical state, PDF separation, or the one-agent architecture.
+
+---
+
+## 2026-10-17 — Reliability recovery is explicit and non-destructive
+
+Decision:
+Frontend connection, extraction, and completed-preview failures expose focused
+retry actions. Extraction retry reuses the selected local file; fill retry
+reuses canonical confirmed values; and a failed refresh leaves the last usable
+PDF preview visible. Unsupported or unreadable form-field states explain the
+AcroForm boundary without discarding the uploaded document. Keyboard users can
+close the direct editor and final review with Escape and return to a stable
+focus target, while status and drawer state remain available to assistive
+technology.
+
+Reason:
+A demo-critical error should not make the user repeat an upload or lose already
+reviewed answers. Keeping retries inside the existing `App` orchestration
+boundary preserves one canonical workflow, avoids persistence or a second
+state store, and makes failure recovery testable without weakening the rule
+that only confirmed values reach PDF filling.

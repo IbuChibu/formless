@@ -37,7 +37,7 @@ export default function ManualFieldsDrawer({
   onToggle,
 }: ManualFieldsDrawerProps) {
   return (
-    <section className="manual-fields-drawer">
+    <section className="manual-fields-drawer" aria-label="Manual field editor">
       <button
         className="manual-drawer-toggle"
         type="button"

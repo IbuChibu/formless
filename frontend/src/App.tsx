@@ -61,6 +61,7 @@ const maxAgentHistoryMessages = 8;
 function App() {
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("checking");
+  const [connectionCheckNonce, setConnectionCheckNonce] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fields, setFields] = useState<PdfField[]>([]);
   const [formContext, setFormContext] = useState<FormContext>({
@@ -76,6 +77,7 @@ function App() {
     useState<ExtractionStatus>("idle");
   const [previewStatus, setPreviewStatus] =
     useState<PreviewStatus>("idle");
+  const [previewRetryNonce, setPreviewRetryNonce] = useState(0);
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [confirmedFieldIds, setConfirmedFieldIds] = useState<Set<string>>(
@@ -122,6 +124,7 @@ function App() {
     const controller = new AbortController();
 
     async function checkBackend() {
+      setConnectionStatus("checking");
       try {
         const response = await fetch(`${apiBaseUrl}/health`, {
           signal: controller.signal,
@@ -145,7 +148,7 @@ function App() {
     void checkBackend();
 
     return () => controller.abort();
-  }, []);
+  }, [connectionCheckNonce]);
 
   useEffect(() => {
     if (!selectedFile || extractionStatus !== "ready") {
@@ -217,7 +220,7 @@ function App() {
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [changedValues, extractionStatus, selectedFile]);
+  }, [changedValues, extractionStatus, previewRetryNonce, selectedFile]);
 
   useEffect(() => {
     return () => {
@@ -249,7 +252,7 @@ function App() {
     agentStatus,
   ]);
 
-  async function handleFileSelection(event: ChangeEvent<HTMLInputElement>) {
+  function handleFileSelection(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -261,6 +264,10 @@ function App() {
       return;
     }
 
+    void extractPdfFile(file);
+  }
+
+  async function extractPdfFile(file: File) {
     extractionControllerRef.current?.abort();
     agentControllerRef.current?.abort();
     agentControllerRef.current = null;
@@ -361,6 +368,12 @@ function App() {
     }
   }
 
+  function retryExtraction() {
+    if (selectedFile && extractionStatus !== "loading") {
+      void extractPdfFile(selectedFile);
+    }
+  }
+
   function updateField(fieldId: string, value: FieldValue) {
     const field = fields.find((candidate) => candidate.id === fieldId);
     if (!field || !field.supported || !field.editable) {
@@ -415,6 +428,16 @@ function App() {
   function closeDirectEditor() {
     setDirectEditFieldId(null);
     setDirectEditValue("");
+    window.requestAnimationFrame(() => {
+      document.getElementById("document-workspace")?.focus();
+    });
+  }
+
+  function closeReviewPanel() {
+    setReviewPanelOpen(false);
+    window.requestAnimationFrame(() => {
+      document.getElementById("open-form-review")?.focus();
+    });
   }
 
   function saveDirectEdit() {
@@ -907,6 +930,9 @@ function App() {
           setReviewPanelOpen(true);
           setMobileWorkspaceView("assistant");
         }}
+        onRetryConnection={() =>
+          setConnectionCheckNonce((current) => current + 1)
+        }
         reviewItemCount={reviewItems.length}
         reviewedFieldCount={reviewedAgentFieldCount}
         selectedFile={selectedFile}
@@ -917,8 +943,15 @@ function App() {
       >
         {extractionError ? (
           <div className="error-banner" role="alert">
-            <strong>Could not read this form.</strong>
-            <span>{extractionError}</span>
+            <div>
+              <strong>Could not read this form.</strong>
+              <span>{extractionError}</span>
+            </div>
+            {selectedFile && extractionStatus === "error" ? (
+              <button type="button" onClick={retryExtraction}>
+                Retry field extraction
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -968,6 +1001,9 @@ function App() {
               onChangeDirectEditValue={setDirectEditValue}
               onClearDirectEdit={clearDirectEdit}
               onCloseDirectEditor={closeDirectEditor}
+              onRetryPreview={() =>
+                setPreviewRetryNonce((current) => current + 1)
+              }
               onSaveDirectEdit={saveDirectEdit}
               onSelectField={openDirectEditor}
             />
@@ -1042,7 +1078,7 @@ function App() {
                   items={reviewItems}
                   proposedFieldId={pendingProposal?.field_id ?? null}
                   proposedValue={pendingProposal?.value}
-                  onClose={() => setReviewPanelOpen(false)}
+                  onClose={closeReviewPanel}
                   onSelectField={(fieldId) => {
                     setReviewPanelOpen(false);
                     openDirectEditor(fieldId);
@@ -1053,7 +1089,7 @@ function App() {
               {extractionStatus === "loading" ? (
                 <div className="workspace-status">
                   <div className="loading-state" aria-live="polite">
-                    <span className="spinner" />
+                    <span className="spinner" aria-hidden="true" />
                     <div>
                       <strong>Reading form fields</strong>
                       <p>This should only take a moment.</p>
@@ -1066,7 +1102,11 @@ function App() {
                 <div className="workspace-status">
                   <div className="message-state">
                     <strong>No fillable fields found</strong>
-                    <p>Try another PDF that contains AcroForm fields.</p>
+                    <p>
+                      This PDF remains available in the preview, but it does
+                      not expose AcroForm fields that Formless can edit. Use
+                      Change PDF to choose another fillable document.
+                    </p>
                   </div>
                 </div>
               ) : null}
@@ -1075,7 +1115,11 @@ function App() {
                 <div className="workspace-status">
                   <div className="message-state" role="alert">
                     <strong>Fields unavailable</strong>
-                    <p>The original PDF is still available in the preview.</p>
+                    <p>
+                      The original PDF is still available in the preview.
+                      Use Retry field extraction above or Change PDF without
+                      losing it.
+                    </p>
                   </div>
                 </div>
               ) : null}
@@ -1176,7 +1220,11 @@ function App() {
                 ) : null}
 
                 {agentStatus === "loading" ? (
-                  <div className="ai-explanation-state">
+                  <div
+                    className="ai-explanation-state"
+                    aria-live="polite"
+                    role="status"
+                  >
                     <span className="spinner" aria-hidden="true" />
                     <span>
                       {agentActivity === "guidance"

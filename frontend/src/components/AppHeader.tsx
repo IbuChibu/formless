@@ -15,6 +15,7 @@ type AppHeaderProps = {
   extractionStatus: ExtractionStatus;
   onFileSelection: ChangeEventHandler<HTMLInputElement>;
   onOpenReview: () => void;
+  onRetryConnection: () => void;
   reviewItemCount: number;
   reviewedFieldCount: number;
   selectedFile: File | null;
@@ -29,6 +30,7 @@ export default function AppHeader({
   extractionStatus,
   onFileSelection,
   onOpenReview,
+  onRetryConnection,
   reviewItemCount,
   reviewedFieldCount,
   selectedFile,
@@ -64,11 +66,23 @@ export default function AppHeader({
             <div
               className={`connection-status compact ${connectionStatus}`}
               aria-label={connectionCopy}
+              aria-live="polite"
+              role="status"
               title={connectionCopy}
             >
               <span className="status-dot" aria-hidden="true" />
               <span>API</span>
             </div>
+            {connectionStatus === "disconnected" ? (
+              <button
+                className="connection-retry-button compact"
+                type="button"
+                aria-label="Retry backend connection"
+                onClick={onRetryConnection}
+              >
+                Retry
+              </button>
+            ) : null}
             <label className="header-file-button">
               Change PDF
               <input
@@ -79,6 +93,7 @@ export default function AppHeader({
               />
             </label>
             <button
+              id="open-form-review"
               className="header-review-button"
               type="button"
               disabled={extractionStatus !== "ready" || reviewItemCount === 0}
@@ -95,20 +110,38 @@ export default function AppHeader({
                 Download
               </a>
             ) : (
-              <span
+              <button
                 className="header-download-button disabled"
+                type="button"
+                disabled
                 aria-disabled="true"
                 title="Confirm an answer to create a completed copy"
               >
                 Download
-              </span>
+              </button>
             )}
           </div>
         </>
       ) : (
-        <div className={`connection-status ${connectionStatus}`}>
-          <span className="status-dot" aria-hidden="true" />
-          <span>{connectionCopy}</span>
+        <div className="connection-status-group">
+          <div
+            className={`connection-status ${connectionStatus}`}
+            aria-label={connectionCopy}
+            aria-live="polite"
+            role="status"
+          >
+            <span className="status-dot" aria-hidden="true" />
+            <span>{connectionCopy}</span>
+          </div>
+          {connectionStatus === "disconnected" ? (
+            <button
+              className="connection-retry-button"
+              type="button"
+              onClick={onRetryConnection}
+            >
+              Retry connection
+            </button>
+          ) : null}
         </div>
       )}
     </header>

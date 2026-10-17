@@ -68,6 +68,12 @@ Responsible for:
 - presenting a final review of completed, proposed, skipped, and unanswered
   supported fields from that same state
 - sending only confirmed values to the PDF filling endpoint
+- exposing connection, extraction, and completed-preview retry controls that
+  reuse the retained upload and canonical state rather than creating a second
+  workflow or discarding the document
+- providing named live status regions, keyboard-operable PDF navigation and
+  field targets, explicit drawer state, Escape handling, and focus recovery for
+  the direct editor and final review
 
 Frontend internals preserve one orchestration boundary while separating stable
 responsibilities:
@@ -89,6 +95,10 @@ responsibilities:
 Extracted presentation components do not fetch, own a second field store,
 interpret free-form agent text, or apply PDF changes. Moving between components
 therefore does not change the canonical-state or explicit-confirmation rules.
+Recovery follows the same rule: `App` repeats the failed health, extraction, or
+fill request from retained local state. A failed extraction or fill never
+replaces or overwrites the user's uploaded PDF, and the last usable preview
+remains available whenever one exists.
 
 Must not:
 - call Nebius directly

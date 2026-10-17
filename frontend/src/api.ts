@@ -17,6 +17,15 @@ export async function readApiError(response: Response): Promise<string> {
 }
 
 export function getErrorMessage(error: unknown): string {
+  if (
+    error instanceof TypeError &&
+    /fetch|network|load/i.test(error.message)
+  ) {
+    return (
+      "Could not reach the backend. Check that it is running, then use the " +
+      "available retry control."
+    );
+  }
   return error instanceof Error ? error.message : "Something went wrong.";
 }
 

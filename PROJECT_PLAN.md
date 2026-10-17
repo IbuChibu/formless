@@ -82,9 +82,9 @@ Required technology:
 - Milestone 8 full workflow is complete: normalized widget geometry, active
   field navigation, direct PDF editing, canonical cross-mode state, final
   review, confirmed-only filling, and download are connected
-- Milestone 9 polish and reliability is in progress; the hands-free
-  self-interruption repair and behavior-preserving frontend and Form Agent
-  maintainability splits are complete
+- Milestone 9 polish and reliability is complete: accessibility, responsive
+  layout, non-destructive recovery, correction, and the supported-fixture
+  workflow are covered by focused checks and the full regression suite
 - deployment has not started; persistence remains outside the current plan
 
 ---
@@ -3893,7 +3893,7 @@ Verified implementation outcome recorded 16 October 2026:
 
 # Milestone 9 — Polish and reliability
 
-Status: IN PROGRESS
+Status: COMPLETE
 
 Goal:
 Make the complete hackathon workflow reliable, accessible, understandable, and
@@ -3908,7 +3908,7 @@ Acceptance criteria:
 - the supported demo fixtures complete successfully from upload through download
 - frontend and backend automated checks pass
 
-Current reliability repair — self-interruption during spoken replies:
+Completed reliability repair — self-interruption during spoken replies:
 - while the assistant begins speaking, calibrate the local activity gate
   against speaker-to-microphone leakage before hands-free interruption arms
 - request browser echo cancellation and noise suppression while disabling
@@ -3923,7 +3923,7 @@ Current reliability repair — self-interruption during spoken replies:
   non-speech sound, genuine sustained voice activity, single dispatch, and
   resource cleanup
 
-Current maintainability repair — behavior-preserving frontend split:
+Completed maintainability repair — behavior-preserving frontend split:
 - retain canonical form, confirmation, skip, proposal, conversation, and PDF
   preview state in the existing `App` orchestration boundary
 - move shared TypeScript contracts, API-response validation, field-state
@@ -3936,7 +3936,7 @@ Current maintainability repair — behavior-preserving frontend split:
 - update focused frontend checks to follow the new component ownership instead
   of requiring every workflow element to live physically in `App.tsx`
 
-Current maintainability repair — behavior-preserving Form Agent policy split:
+Completed maintainability repair — behavior-preserving Form Agent policy split:
 - retain `conversation_policy` as the stable import surface used by the
   orchestrator, prompt builder, guidance modules, and existing tests
 - move turn classification and explanation-repair context to `intent_policy`
@@ -3952,7 +3952,7 @@ Current maintainability repair — behavior-preserving Form Agent policy split:
 - make no PDF Service, frontend, provider, dependency, or evaluation-scenario
   changes as part of the split
 
-Verified partial outcomes recorded 16–17 October 2026:
+Verified outcomes recorded 16–17 October 2026:
 - the interruption gate now calibrates for 900 ms, retains the observed
   playback-leakage ceiling, and requires at least 420 ms, five active samples,
   three speech-like samples, and meaningful level variation before dispatch
@@ -3962,9 +3962,24 @@ Verified partial outcomes recorded 16–17 October 2026:
   does not interrupt, a short spike does not interrupt, sustained non-speech
   activity does not interrupt, and sustained varying voice activity dispatches
   exactly once and releases its resources
-- the frontend production build and existing frontend workflow checks pass;
-  Milestone 9 remains in progress because its other accessibility, responsive,
-  recovery, correction, and complete-fixture criteria have not yet been audited
+- connection, extraction, and completed-preview failures expose explicit retry
+  controls; retries reuse the retained PDF and canonical confirmed values
+  rather than asking the user to start over
+- the original PDF remains visible when extraction returns no supported fields
+  or fails, and the interface explains that only fillable AcroForm fields can
+  be edited while preserving the `Change PDF` path
+- connection and progress state use live regions, unavailable download state is
+  a real disabled control, the PDF overlay and page navigation remain named
+  buttons, and the manual drawer exposes its controlled region and open state
+- the direct PDF editor and final review support Escape, receive or restore
+  keyboard focus deliberately, and visible focus styling covers PDF targets,
+  review, recovery, and editor controls
+- direct or manual correction updates the one canonical value, confirmed-ID,
+  skipped-ID, preview, and confirmed-only fill-payload path; clearing a value
+  removes its previous confirmation before download
+- rendered checks at 1440 by 900 and 390 by 844 show no horizontal overflow;
+  the phone layout retains an explicitly named connection status even when its
+  visible label is compacted
 - `App.tsx` was reduced from 3,508 to 1,349 lines and now concentrates on
   ephemeral session state, cross-mode orchestration, and application assembly;
   shared contracts, strict agent-response parsing, field-state policy, field
@@ -3990,6 +4005,18 @@ Verified partial outcomes recorded 16–17 October 2026:
 - no Form Agent API, prompt, user-visible response, state transition, closed
   effect, model call path, PDF behavior, frontend behavior, or dependency was
   changed by the backend split
+- one API-level regression test now takes the sample, household-support, SBA,
+  DS-11, and I-9 fixtures through extraction and filling, reopens every result
+  with `pypdf`, checks the stored value, and proves the source bytes are
+  unchanged
+- the Milestone 9 frontend reliability check covers retry ownership, canonical
+  correction state, keyboard semantics, focus recovery, screen-reader labels,
+  responsive recovery controls, and reduced motion
+- the final verification passes all 358 backend tests, the PDF-workflow,
+  workspace-layout, voice-interruption, and Milestone 9 reliability checks,
+  and the frontend TypeScript/Vite production build; the only warnings are the
+  existing five PyMuPDF/SWIG deprecations and Vite's non-failing bundle-size
+  advisory
 
 # Milestone 10 — Deployment
 

@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import {
   formatReviewValue,
   getReviewStatusLabel,
@@ -28,10 +30,25 @@ export default function FormReviewPanel({
   onClose,
   onSelectField,
 }: FormReviewPanelProps) {
+  const panelRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, []);
+
   return (
     <section
+      ref={panelRef}
       className="form-review-panel"
       aria-labelledby="form-review-heading"
+      aria-describedby="form-review-description"
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onClose();
+        }
+      }}
     >
       <div className="form-review-heading">
         <div>
@@ -88,9 +105,10 @@ export default function FormReviewPanel({
           );
         })}
       </div>
-      <p>
+      <p id="form-review-description">
         Proposed answers are not written to the PDF until you confirm them.
-        Select any field to review or edit it on the document.
+        Select any field to review or edit it on the document. Press Escape to
+        close this review.
       </p>
     </section>
   );

@@ -25,6 +25,7 @@ type DocumentWorkspaceProps = {
   onChangeDirectEditValue: (value: FieldValue) => void;
   onClearDirectEdit: () => void;
   onCloseDirectEditor: () => void;
+  onRetryPreview: () => void;
   onSaveDirectEdit: () => void;
   onSelectField: (fieldId: string) => void;
 };
@@ -46,6 +47,7 @@ export default function DocumentWorkspace({
   onChangeDirectEditValue,
   onClearDirectEdit,
   onCloseDirectEditor,
+  onRetryPreview,
   onSaveDirectEdit,
   onSelectField,
 }: DocumentWorkspaceProps) {
@@ -55,6 +57,7 @@ export default function DocumentWorkspace({
         isMobileActive ? " mobile-view-active" : ""
       }`}
       id="document-workspace"
+      tabIndex={-1}
     >
       <div className="panel-header">
         <div>
@@ -84,9 +87,16 @@ export default function DocumentWorkspace({
         <form
           className="pdf-direct-editor"
           aria-labelledby="pdf-direct-editor-heading"
+          aria-describedby="pdf-direct-editor-help"
           onSubmit={(event) => {
             event.preventDefault();
             onSaveDirectEdit();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onCloseDirectEditor();
+            }
           }}
         >
           <div className="pdf-direct-editor-heading">
@@ -130,17 +140,20 @@ export default function DocumentWorkspace({
               Cancel
             </button>
           </div>
-          <small>
+          <small id="pdf-direct-editor-help">
             Saving uses the same reviewed form state as the assistant and manual
-            editor.
+            editor. Press Escape to close without saving.
           </small>
         </form>
       ) : null}
 
       {previewError ? (
-        <p className="inline-error" role="alert">
-          {previewError} Your last successful preview is still shown.
-        </p>
+        <div className="inline-error preview-recovery" role="alert">
+          <p>{previewError} Your last successful preview is still shown.</p>
+          <button type="button" onClick={onRetryPreview}>
+            Retry completed preview
+          </button>
+        </div>
       ) : null}
     </article>
   );
