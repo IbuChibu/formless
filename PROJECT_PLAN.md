@@ -82,7 +82,9 @@ Required technology:
 - Milestone 8 full workflow is complete: normalized widget geometry, active
   field navigation, direct PDF editing, canonical cross-mode state, final
   review, confirmed-only filling, and download are connected
-- Milestone 9 polish and reliability is the next planned milestone
+- Milestone 9 polish and reliability is in progress; the hands-free
+  self-interruption repair and behavior-preserving frontend maintainability
+  split are complete
 - deployment has not started; persistence remains outside the current plan
 
 ---
@@ -3921,7 +3923,20 @@ Current reliability repair — self-interruption during spoken replies:
   non-speech sound, genuine sustained voice activity, single dispatch, and
   resource cleanup
 
-Verified partial outcome recorded 16 October 2026:
+Current maintainability repair — behavior-preserving frontend split:
+- retain canonical form, confirmation, skip, proposal, conversation, and PDF
+  preview state in the existing `App` orchestration boundary
+- move shared TypeScript contracts, API-response validation, field-state
+  helpers, and reusable field controls into focused dependency-free modules
+- move the header, upload view, document workspace, active-question card,
+  transcript, proposal review, final review, and manual drawer into
+  presentational components that receive state and callbacks from `App`
+- keep fetch behavior, API payloads, PDF and voice behavior, visible copy,
+  DOM state landmarks, and all safety boundaries unchanged
+- update focused frontend checks to follow the new component ownership instead
+  of requiring every workflow element to live physically in `App.tsx`
+
+Verified partial outcomes recorded 16–17 October 2026:
 - the interruption gate now calibrates for 900 ms, retains the observed
   playback-leakage ceiling, and requires at least 420 ms, five active samples,
   three speech-like samples, and meaningful level variation before dispatch
@@ -3934,6 +3949,18 @@ Verified partial outcome recorded 16 October 2026:
 - the frontend production build and existing frontend workflow checks pass;
   Milestone 9 remains in progress because its other accessibility, responsive,
   recovery, correction, and complete-fixture criteria have not yet been audited
+- `App.tsx` was reduced from 3,508 to 1,349 lines and now concentrates on
+  ephemeral session state, cross-mode orchestration, and application assembly;
+  shared contracts, strict agent-response parsing, field-state policy, field
+  controls, and major presentation sections have focused owners
+- all extracted components remain controlled by `App`: they do not fetch,
+  duplicate canonical values, infer agent effects, fill PDFs, or create a
+  second voice or conversation path
+- no runtime dependency, backend contract, visible workflow, PDF behavior,
+  Form Agent behavior, voice policy, or styling changed during the split
+- the PDF-workflow, workspace-layout, and voice-interruption checks and the
+  frontend production build pass after the split; all 352 backend tests also
+  pass with only the existing five PyMuPDF/SWIG deprecation warnings
 
 # Milestone 10 — Deployment
 

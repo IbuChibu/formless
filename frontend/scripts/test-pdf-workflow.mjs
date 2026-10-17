@@ -9,6 +9,14 @@ const viewerSource = await readFile(
   new URL("../src/PdfViewer.tsx", import.meta.url),
   "utf8",
 );
+const documentWorkspaceSource = await readFile(
+  new URL("../src/components/DocumentWorkspace.tsx", import.meta.url),
+  "utf8",
+);
+const reviewSource = await readFile(
+  new URL("../src/components/FormReviewPanel.tsx", import.meta.url),
+  "utf8",
+);
 
 assert.match(
   appSource,
@@ -17,8 +25,13 @@ assert.match(
 );
 assert.match(
   appSource,
-  /<PdfViewer[\s\S]*activeFieldId=\{pdfNavigationFieldId\}[\s\S]*fields=\{pdfViewerFields\}[\s\S]*onSelectField=\{openDirectEditor\}/,
-  "the PDF viewer must receive field geometry, navigation, and selection controls",
+  /<DocumentWorkspace[\s\S]*activeFieldId=\{pdfNavigationFieldId\}[\s\S]*fields=\{pdfViewerFields\}[\s\S]*onSelectField=\{openDirectEditor\}/,
+  "App must give the document workspace canonical geometry, navigation, and selection state",
+);
+assert.match(
+  documentWorkspaceSource,
+  /<PdfViewer[\s\S]*activeFieldId=\{activeFieldId\}[\s\S]*fields=\{fields\}[\s\S]*onSelectField=\{onSelectField\}/,
+  "the document workspace must pass canonical geometry and selection callbacks to the PDF viewer",
 );
 assert.match(
   viewerSource,
@@ -31,7 +44,7 @@ assert.match(
   "extracted widgets must render as clickable field targets",
 );
 assert.match(
-  appSource,
+  documentWorkspaceSource,
   /className="pdf-direct-editor"[\s\S]*<FieldControl[\s\S]*value=\{directEditValue\}[\s\S]*Save to form/,
   "clicking a PDF field must expose a focused editor",
 );
@@ -41,8 +54,8 @@ assert.match(
   "only confirmed direct, manual, or agent values may enter the fill payload",
 );
 assert.match(
-  appSource,
-  /className="form-review-panel"[\s\S]*reviewCounts\.confirmed[\s\S]*reviewCounts\.proposed[\s\S]*reviewCounts\.skipped[\s\S]*reviewCounts\.unanswered/,
+  reviewSource,
+  /className="form-review-panel"[\s\S]*counts\.confirmed[\s\S]*counts\.proposed[\s\S]*counts\.skipped[\s\S]*counts\.unanswered/,
   "final review must expose every required field status",
 );
 

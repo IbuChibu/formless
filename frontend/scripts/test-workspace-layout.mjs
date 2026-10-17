@@ -9,6 +9,10 @@ const styles = await readFile(
   new URL("../src/index.css", import.meta.url),
   "utf8",
 );
+const documentWorkspaceSource = await readFile(
+  new URL("../src/components/DocumentWorkspace.tsx", import.meta.url),
+  "utf8",
+);
 
 assert.match(
   appSource,
@@ -21,7 +25,7 @@ assert.match(
   "the workspace must expose its selected mobile view",
 );
 assert.equal(
-  count(appSource, 'id="document-workspace"'),
+  count(documentWorkspaceSource, 'id="document-workspace"'),
   1,
   "the mounted PDF workspace must have one stable landmark",
 );
@@ -42,7 +46,7 @@ assert.equal(
 );
 assert.match(
   appSource,
-  /className="ai-question-form agent-message-form"[\s\S]*className="manual-fields-drawer"/,
+  /className="ai-question-form agent-message-form"[\s\S]*<ManualFieldsDrawer/,
   "the permanent typed composer must remain outside and above the manual fallback",
 );
 assert.match(

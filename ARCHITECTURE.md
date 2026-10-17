@@ -69,6 +69,27 @@ Responsible for:
   supported fields from that same state
 - sending only confirmed values to the PDF filling endpoint
 
+Frontend internals preserve one orchestration boundary while separating stable
+responsibilities:
+- `App` owns the current ephemeral session, canonical field values, confirmed
+  and skipped IDs, conversation state, PDF-preview coordination, and the
+  callbacks that connect input modes
+- `formTypes` owns the shared TypeScript contracts used by those boundaries
+- `api` owns the base URL and provider-independent HTTP/error validation helpers
+- `agentResponse` strictly parses and validates the Form Agent response,
+  effect, guidance, remembered-candidate, and state-transition contract before
+  `App` can apply it
+- `formFieldState` owns pure field compatibility, initial-value, request-field,
+  review-status, grouping, display, and bounded guidance-intent helpers
+- `FieldControls` owns the reusable manual, direct-edit, and proposal inputs
+- components under `components` render the header, upload surface, document
+  workspace, active question, transcript, proposal review, final review, and
+  manual drawer from explicit props and callbacks
+
+Extracted presentation components do not fetch, own a second field store,
+interpret free-form agent text, or apply PDF changes. Moving between components
+therefore does not change the canonical-state or explicit-confirmation rules.
+
 Must not:
 - call Nebius directly
 - manipulate PDF files

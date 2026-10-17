@@ -463,3 +463,23 @@ speakers. Treating every sustained sound as an interruption caused the helper
 to cut off the ends of replies. A conservative gate makes false cancellation
 less likely while keeping a clear manual fallback for speech that the browser
 cannot distinguish safely.
+
+---
+
+## 2026-10-17 — Frontend presentation is split without splitting canonical state
+
+Decision:
+The frontend separates shared contracts, strict response parsing, pure
+field-state helpers, reusable controls, and major presentation sections from
+`App.tsx`. `App` remains the single current-form orchestration boundary and
+continues to own canonical values, confirmation and skip state, proposals,
+conversation state, and PDF-preview coordination. Extracted components receive
+data and callbacks; they do not fetch, interpret agent prose, or create their
+own form stores.
+
+Reason:
+The complete workflow had accumulated in one large component, making
+accessibility, recovery, and responsive polish unnecessarily risky. Separating
+stable responsibilities makes those changes easier to review and test without
+introducing a state library, changing API contracts, or weakening the existing
+single-state and explicit-confirmation decisions.

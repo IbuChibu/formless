@@ -23,7 +23,7 @@ type PdfWidgetGeometry = {
   height: number;
 };
 
-type PdfViewerField = {
+export type PdfViewerField = {
   id: string;
   label: string;
   question?: string;
