@@ -483,3 +483,22 @@ accessibility, recovery, and responsive polish unnecessarily risky. Separating
 stable responsibilities makes those changes easier to review and test without
 introducing a state library, changing API contracts, or weakening the existing
 single-state and explicit-confirmation decisions.
+
+---
+
+## 2026-10-17 — Form Agent policy is split behind a stable compatibility surface
+
+Decision:
+`conversation_policy` remains the established import surface but no longer
+owns every conversation responsibility. Turn intent, model-action validation,
+state transitions and closed effects, navigation and progression, and
+deterministic action routing live in focused internal modules. The orchestrator
+continues to coordinate one turn, and the public Form Agent package remains the
+application boundary.
+
+Reason:
+The policy had grown to 2,103 lines and combined classification, transition,
+validation, navigation, fallback, and effect concerns. Moving those concerns
+behind the existing import surface reduces change risk without changing
+prompts, provider calls, request or response contracts, explicit confirmation,
+canonical state, PDF separation, or the one-agent architecture.

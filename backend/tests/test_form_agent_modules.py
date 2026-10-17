@@ -9,7 +9,11 @@ from app.services.form_agent import (
     NextAction,
     ProposeAction,
 )
-from app.services.form_agent.conversation_policy import deterministic_action
+from app.services.form_agent import conversation_policy
+from app.services.form_agent.action_validation import validate_action_for_turn
+from app.services.form_agent.conversation_actions import deterministic_action
+from app.services.form_agent.intent_policy import turn_objective
+from app.services.form_agent.state_machine import response_for_action
 from app.services.form_agent.prompt_builder import (
     MAX_AGENT_CONTEXT_CHARS,
     build_agent_context,
@@ -53,6 +57,16 @@ def test_conversation_policy_selects_the_first_unanswered_field() -> None:
     assert isinstance(action, NextAction)
     assert action.field_id == "full_name"
     assert action.message == "Full name. What should be entered here?"
+
+
+def test_conversation_policy_preserves_the_stable_module_surface() -> None:
+    assert conversation_policy.deterministic_action is deterministic_action
+    assert conversation_policy.turn_objective is turn_objective
+    assert (
+        conversation_policy.validate_action_for_turn
+        is validate_action_for_turn
+    )
+    assert conversation_policy.response_for_action is response_for_action
 
 
 def test_prompt_builder_returns_bounded_structured_untrusted_context() -> None:

@@ -225,8 +225,18 @@ Must not:
 The Form Agent is one service boundary with small internal modules:
 - `models` owns validated request, field, message, and action contracts
 - `orchestrator` coordinates one turn and is the package's public service
-- `conversation_policy` owns deterministic routing, allowed transitions, and
-  response wording
+- `conversation_policy` is the stable policy import surface and re-exports the
+  established non-private policy functions from their focused owners
+- `intent_policy` classifies bounded turn intent and tracks explanation-repair
+  depth without producing a form effect
+- `action_validation` checks model-authored actions and explanations against
+  the active turn, field context, and approved guidance before they can proceed
+- `state_machine` validates allowed events, owns conversation-phase changes,
+  and converts validated actions into closed typed effects
+- `navigation_policy` builds deterministic field-selection, correction,
+  progress, completion, clarification, and next-question actions
+- `conversation_actions` routes deterministic events and adapter results,
+  provides controlled fallbacks, and normalizes action messages
 - `answer_adapters` selects focused field-type interpreters from deterministic
   field metadata and returns a matched value, a specific clarification, or a
   signal that model interpretation is still needed; it also owns bounded,
@@ -245,7 +255,9 @@ The Form Agent is one service boundary with small internal modules:
 - `value_normalizer` validates and safely normalizes field values
 
 FastAPI and evaluation code import the public Form Agent package rather than
-depending on those internal modules. The internal split does not create
+depending on those internal modules. Existing policy callers use the
+`conversation_policy` compatibility surface, so module ownership can change
+without changing the service contract. The internal split does not create
 multiple agents or allow any module to bypass the Nemotron Service.
 
 The latest user message is authoritative for the current turn; bounded history

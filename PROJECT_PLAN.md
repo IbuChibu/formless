@@ -83,8 +83,8 @@ Required technology:
   field navigation, direct PDF editing, canonical cross-mode state, final
   review, confirmed-only filling, and download are connected
 - Milestone 9 polish and reliability is in progress; the hands-free
-  self-interruption repair and behavior-preserving frontend maintainability
-  split are complete
+  self-interruption repair and behavior-preserving frontend and Form Agent
+  maintainability splits are complete
 - deployment has not started; persistence remains outside the current plan
 
 ---
@@ -3936,6 +3936,22 @@ Current maintainability repair — behavior-preserving frontend split:
 - update focused frontend checks to follow the new component ownership instead
   of requiring every workflow element to live physically in `App.tsx`
 
+Current maintainability repair — behavior-preserving Form Agent policy split:
+- retain `conversation_policy` as the stable import surface used by the
+  orchestrator, prompt builder, guidance modules, and existing tests
+- move turn classification and explanation-repair context to `intent_policy`
+- move model-action safety checks to `action_validation`
+- move allowed event transitions, conversation-state changes, and closed typed
+  effect construction to `state_machine`
+- move field selection, correction, progress, completion, and clarification
+  responses to `navigation_policy`
+- keep deterministic per-turn routing, failure fallbacks, and message
+  normalization in `conversation_actions`
+- preserve every existing non-private `conversation_policy` import, request and
+  response contract, prompt, model call path, message, transition, and effect
+- make no PDF Service, frontend, provider, dependency, or evaluation-scenario
+  changes as part of the split
+
 Verified partial outcomes recorded 16–17 October 2026:
 - the interruption gate now calibrates for 900 ms, retains the observed
   playback-leakage ceiling, and requires at least 420 ms, five active samples,
@@ -3959,8 +3975,21 @@ Verified partial outcomes recorded 16–17 October 2026:
 - no runtime dependency, backend contract, visible workflow, PDF behavior,
   Form Agent behavior, voice policy, or styling changed during the split
 - the PDF-workflow, workspace-layout, and voice-interruption checks and the
-  frontend production build pass after the split; all 352 backend tests also
+  frontend production build pass after the split; all 353 backend tests also
   pass with only the existing five PyMuPDF/SWIG deprecation warnings
+- the previous 2,103-line `conversation_policy.py` is now a 55-line stable
+  compatibility surface; its implementation is separated into focused intent,
+  action-validation, state-machine, navigation, and deterministic-action
+  modules, with no policy implementation file over 716 lines
+- the compatibility test proves the established policy imports resolve to the
+  new focused owners, while callers continue to use the same module surface
+- the unchanged five-fixture, 47-turn transcript evaluation retains its exact
+  baseline metrics and zero failures, including zero invalid actions, invalid
+  proposals, confirmation-boundary failures, unsafe transformations, invented
+  facts, and invented purposes
+- no Form Agent API, prompt, user-visible response, state transition, closed
+  effect, model call path, PDF behavior, frontend behavior, or dependency was
+  changed by the backend split
 
 # Milestone 10 — Deployment
 
