@@ -4018,21 +4018,433 @@ Verified outcomes recorded 16–17 October 2026:
   existing five PyMuPDF/SWIG deprecations and Vite's non-failing bundle-size
   advisory
 
+# Future milestone sequence
+
+Milestones 1 through 9 are complete. The remaining hackathon work must follow
+this order so that product changes are validated before deployment and the
+deployed build is frozen before submission:
+
+1. Milestone 9.1 — Support-aware introduction
+2. Milestone 9.2 — One-language bilingual assistance pilot, only if its go/no-go
+   gate passes
+3. Milestone 9.3 — Hero workflow validation and release freeze
+4. Milestone 10 — Deployment
+5. Milestone 11 — Hackathon submission
+
+Recommended schedule for the 30 October 2026 deadline:
+- 18–19 October: Milestone 9.1
+- 20 October: Milestone 9.2 language/reviewer go/no-go decision
+- 20–22 October: Milestone 9.2 only if approved; otherwise defer it
+- 23–24 October: Milestone 9.3
+- 24–26 October: Milestone 10
+- 27–29 October: Milestone 11
+- 30 October: submission and contingency buffer, not new feature work
+
+Milestones 12 onward are a deferred post-hackathon roadmap. They are recorded
+so near-term architecture does not block the product direction, but they are
+not authorized by completing a current milestone.
+
+## Test policy for every remaining milestone
+
+A milestone is complete only when all of the following are true:
+- its focused automated tests pass
+- the unchanged backend, PDF, Form Agent, frontend, transcript, safety, and
+  human-helper checks relevant to its scope still pass
+- the named manual test has been performed with synthetic personal data
+- acceptance evidence and any known limitation are recorded in this plan
+- a failed safety, confirmation, canonical-state, or no-invention check blocks
+  completion even when the conversation sounds good
+- live provider evaluation is required only when the milestone changes or
+  deploys provider-dependent behaviour; ordinary automated tests must remain
+  deterministic and network-free
+
+The established local regression gate is:
+
+```bash
+cd backend
+.venv/bin/python -m pytest
+PYTHONPATH=. .venv/bin/python -m evaluations.form_agent_evaluation
+PYTHONPATH=. .venv/bin/python -m evaluations.form_agent_transcript_evaluation
+
+cd ../frontend
+npm run test:pdf-workflow
+npm run test:workspace-layout
+npm run test:voice-interruption
+npm run test:milestone9-reliability
+npm run build
+```
+
+Milestones may add one focused command to this gate. Do not remove or weaken an
+existing check simply to make a new milestone pass.
+
+# Milestone 9.1 — Support-aware introduction and adaptive assistance
+
+Status: NOT STARTED
+
+Why this is next:
+Formless currently starts with the form's first question. A person helping
+beside the user would first ask how to make the task easier. This milestone
+adds that small introduction without profiling the user, diagnosing a
+condition, or changing the form's factual and safety rules.
+
+Goal:
+After extraction and before the first field, offer an optional, brief
+introduction that lets the user choose how they want help. Use those choices to
+adapt wording, pacing, explanation depth, and the preferred interaction mode
+for the current form session only.
+
+Scope:
+- ask one plain question such as `How can I make this easier for you today?`
+- offer needs rather than identity or diagnosis labels, including:
+  - use simpler language
+  - go slowly and ask one thing at a time
+  - let me speak rather than type
+  - help me organise the details I already have
+  - reassure me before important changes
+  - explain unfamiliar form or bureaucracy language
+  - something else, using one short bounded note
+  - skip this and begin the form
+- optionally ask whether the user would rather speak or type; never start the
+  microphone as a consequence of selecting a preference
+- keep a small validated assistance-preference object in the current
+  request-carried session state
+- allow preferences to be reviewed or changed during the session
+- clear preferences when the user changes PDF or starts a new form
+- adapt only presentation: tone, response length, pacing, explanation depth,
+  and whether voice is visually emphasised
+- keep field selection, answer interpretation, validation, proposals,
+  confirmation, guidance eligibility, canonical values, and PDF filling
+  unchanged
+- use supportive language without claiming that the system has identified a
+  disability, language level, legal status, or personal category
+
+Architecture boundaries:
+- `App` remains the current-session owner and the Form Agent remains the single
+  conversation service
+- preferences are explicit bounded data, not a model-inferred profile, hidden
+  memory, analytics record, database record, or personal fact
+- the frontend may present the introduction, while backend models and prompt
+  construction validate and consume only the supported preference fields
+- no preference can cause a model response to write or confirm a form value
+- the architecture may reserve an explicit assistance-language value with
+  English as the only supported value, but must not expose unsupported language
+  choices before Milestone 9.2
+
+Acceptance criteria:
+- introduction is optional, skippable, keyboard accessible, and does not block
+  the existing typed, voice, PDF-click, or manual workflows
+- each supported choice produces a visible and relevant presentation change
+  without changing the expected form effect or canonical field state
+- the free-text support note has a strict length limit, is treated as untrusted
+  context, and cannot override system, safety, validation, or confirmation
+  policy
+- preferences are session-only, editable, and cleared on form replacement
+- selecting voice preference does not request microphone permission or begin a
+  voice session
+- direct PDF edits, manual edits, and confirmed agent effects still share one
+  canonical state
+- no diagnosis, protected characteristic, or unsupported personal fact is
+  inferred or stored
+- existing workflows still work when the introduction is skipped
+
+Required automated testing after implementation:
+- backend contract tests for every allowed preference, unsupported values,
+  duplicate values, overlong free text, and prompt-injection-shaped text
+- prompt tests proving preferences are bounded untrusted presentation context
+  and cannot alter available fields, options, effects, or confirmation rules
+- paired transcript tests that send the same factual answers with and without
+  each preference and assert identical typed effects and final canonical state
+- conversation tests for changing preferences mid-form, skipping the
+  introduction, frustration, explanation requests, and form replacement
+- frontend focused checks for optional/skip/edit/clear behaviour, keyboard and
+  screen-reader order, focus restoration, laptop/mobile layout, and the rule
+  that voice preference does not start microphone capture
+- the complete established local regression gate
+
+Required manual testing after implementation:
+1. Open the sample and household-support fixtures in separate fresh sessions.
+2. Complete one session with the introduction skipped.
+3. Complete one using simple language and slow pacing.
+4. Change the preferences halfway through and verify the next response adapts.
+5. Choose voice preference and verify no microphone prompt appears until
+   `Start conversation` is explicitly selected.
+6. Replace the PDF and verify the earlier preferences are gone.
+7. Confirm that identical user facts produce identical stored PDF values in all
+   runs.
+
+Completion evidence to record:
+- focused test names and results
+- full regression results
+- two short synthetic transcripts showing different presentation but the same
+  typed effects and canonical values
+- desktop and mobile introduction screenshots
+- any preference that could not be made reliably observable
+
+Do not implement:
+- diagnosis, demographic classification, automatic language detection, user
+  accounts, persistent profiles, analytics, a database, or server-side memory
+- a second agent, a new model, autonomous planning, or changes to PDF semantics
+- Milestone 9.2 language output, deployment, or submission work
+
+# Milestone 9.2 — One-language bilingual assistance pilot
+
+Status: NOT STARTED — CONDITIONAL
+
+Go/no-go gate before implementation:
+- choose exactly one target assistance language
+- arrange a fluent or native reviewer for that language
+- select one English AcroForm demo fixture whose important questions and
+  finite options the reviewer can validate
+- confirm that the browser used for the demo supports speech recognition and
+  speech synthesis for the selected language, or explicitly scope the pilot to
+  typed assistance
+- if these conditions are not met by 20 October 2026, defer this milestone to
+  Milestone 12 and proceed directly to Milestone 9.3
+
+Goal:
+Help a speaker of one selected non-English language complete an English
+fillable PDF while preserving the original form, exact field schema, user
+facts, confirmation boundary, and required answer format.
+
+Scope:
+- require an explicit language choice; do not automatically infer language
+- distinguish three separate concepts in state and UI:
+  - source-form language
+  - assistance/conversation language
+  - language or format required for the value written into the form
+- keep the original English question visible alongside the translated or
+  simplified assistance
+- allow the conversation, ordinary UI guidance, and supported browser voice
+  output/input to use the selected language
+- preserve stable field IDs, exact option values, stored names, identifiers,
+  dates, numbers, addresses, and checked states
+- do not translate names or identity data
+- do not silently translate user-authored free prose into an English legal or
+  official answer; explain the limitation and allow review/manual entry
+- label translations as assistance, not official translations, unless the
+  issuing organisation actually provides the reviewed translation
+- use the existing single Form Agent and closed effects; do not introduce a
+  translation agent or agent framework
+
+Acceptance criteria:
+- language choice is explicit, reversible, and session-only
+- the original source question remains available at every assisted field
+- the selected language improves explanation and interview wording without
+  changing the field chosen, typed effect, finite option, proposed factual
+  meaning, or canonical result
+- names, IDs, dates, numbers, addresses, and finite choices survive language
+  switching without semantic or character loss
+- code-switching and an English answer during a non-English conversation are
+  handled without losing the active field
+- unsupported speech capability falls back clearly to typed bilingual help
+- provider failure falls back to the existing English/manual workflow without
+  clearing the PDF or confirmed values
+- a fluent or native reviewer signs off the complete demo transcript and all
+  user-visible translation strings
+- the product claims support only for the one reviewed pilot language
+
+Required automated testing after implementation:
+- backend validation tests for supported, unsupported, missing, and malicious
+  language values
+- bilingual transcript fixtures covering explanation, answer, proposal,
+  confirmation, rejection, correction, skip, progress, and completion
+- parity tests asserting that equivalent English and pilot-language sessions
+  produce the same stable field IDs, typed effects, finite options, and final
+  canonical state
+- Unicode tests for diacritics, non-ASCII names, apostrophes, hyphens, and the
+  selected language's relevant script while preserving the user's spelling
+- date, number, currency, address, checkbox, and dropdown tests that separate
+  localized conversation wording from the value format required by the PDF
+- adversarial tests for code-switching, prompt injection, a request to invent
+  a missing fact, and an unsupported request to translate official free prose
+- frontend checks for language selection, original-question visibility,
+  switching language mid-session, accessible language labels, mobile layout,
+  and typed fallback when speech support is absent
+- the complete established local regression gate
+
+Required live and human testing after implementation:
+1. Have the fluent/native reviewer complete the chosen fixture using synthetic
+   facts without reading an English script.
+2. Repeat once with typing and once with voice if voice is in scope.
+3. Deliberately code-switch, correct a confirmed value, ask what a field means,
+   skip and reopen a field, then download and reopen the result.
+4. Compare the completed PDF with an equivalent English run field by field.
+5. Test denied microphone permission and a simulated Nebius failure.
+6. Record every misleading, unnatural, or culturally inappropriate phrase;
+   any meaning-changing issue blocks completion.
+
+Completion evidence to record:
+- selected language, fixture, reviewer role, and review date
+- reviewed bilingual transcript using synthetic facts
+- English-versus-bilingual canonical-state comparison
+- browser and operating-system voice capability tested
+- explicit list of unsupported translation cases
+
+Do not implement:
+- multiple languages, automatic language detection, foreign-language source
+  forms, general document translation, or claims of certified translation
+- silent translation of identity information or official free-text answers
+- a second agent, translation framework, persistence, accounts, or analytics
+- later deployment or submission work
+
+# Milestone 9.3 — Hero workflow validation and release freeze
+
+Status: NOT STARTED
+
+Goal:
+Choose the exact workflow judges will see, validate it with people who find
+forms difficult, repair only reproduced high-impact failures, and freeze the
+product before deployment.
+
+Scope:
+- select one primary hero fixture and one fallback fixture from the supported
+  set; use synthetic information in every test
+- document a short demo path that includes upload, a useful explanation,
+  several conversational answers, an explicit review, one correction, a live
+  PDF update, final review, and download
+- run observed usability sessions with three to five people representing
+  different support needs; ask what would help rather than diagnosing them
+- measure completion, user effort, repeated questions, misunderstanding,
+  confidence in what will be written, and recovery from one deliberate error
+- convert every reproducible severe failure into a fixed automated scenario
+  before making a targeted repair
+- after acceptance, freeze feature scope and permit only release-blocking bug,
+  security, accessibility, documentation, and deployment fixes
+
+Acceptance criteria:
+- at least three participants can complete the hero task with synthetic data
+  without the facilitator telling them which product control to use
+- every participant understands that an AI proposal is not written until it is
+  confirmed
+- no session invents a personal fact, silently changes a confirmed value,
+  loses canonical state, overwrites the source PDF, or exposes a secret
+- at least 80% of observed tasks complete successfully; any safety or data-loss
+  failure is a hard failure regardless of the percentage
+- the hero and fallback fixtures complete locally from upload through reopened
+  downloaded PDF
+- the fixed human-helper suite still passes both gates
+- a provider/microphone-independent fallback demo can be completed
+- open release-blocking findings have an owner or are resolved before freeze
+
+Required automated testing after implementation:
+- add fixed regression scenarios for every reproduced severe or repeated user
+  failure; do not add tests that merely match one preferred sentence
+- rerun the human-helper conversation harness on the unchanged suite digest
+  and compare the candidate with the last passing report
+- run the complete established local regression gate
+- run the five-fixture API extraction/filling regression and reopen every
+  generated PDF to check stored values and unchanged source bytes
+- run a secret scan over tracked files and confirm `.env` remains ignored
+
+Required manual testing after implementation:
+1. Run three to five moderated sessions with synthetic data and no coaching.
+2. Test the full hero route on a laptop at normal browser zoom.
+3. Test the complete typed route and the complete voice route.
+4. Test the 390-by-844 mobile layout, keyboard-only navigation, and a screen
+   reader smoke path.
+5. Deny microphone permission, disable the backend once, simulate one model
+   failure, and prove progress can be recovered.
+6. Run the fallback fixture and the offline/manual demo path.
+7. Reopen downloaded PDFs with a normal PDF viewer and visually inspect every
+   demonstrated value.
+
+Completion evidence to record:
+- hero and fallback fixtures
+- anonymized task results and observed failure list, with no personal data
+- before/after harness report comparison for any repair
+- frozen demo script and fallback script
+- final known-issues list and explicit feature-freeze date
+
+Do not implement:
+- new feature categories discovered during testing unless they block the hero
+  workflow's safety or completion
+- new PDF types, additional languages, authentication, persistence, a
+  database, analytics, online forms, or infrastructure beyond local testing
+- deployment or submission work before the release candidate passes
+
 # Milestone 10 — Deployment
 
 Status: NOT STARTED
 
 Goal:
-Deploy the frontend and backend with secure configuration suitable for the
-hackathon demonstration.
+Deploy the frozen frontend and backend with secure configuration suitable for
+the hackathon demonstration.
+
+Scope:
+- choose the smallest hosting arrangement that supports the existing React
+  build, FastAPI service, temporary PDF processing, HTTPS, health checks, and
+  server-side environment variables
+- record the hosting choice and any architecture-impacting operational
+  constraint before implementation
+- configure only the deployed frontend origin in production CORS
+- keep Nebius and Tavily credentials in backend host secrets; never expose them
+  through Vite variables, frontend bundles, logs, or repository files
+- define explicit upload-size, provider-timeout, application-timeout, and
+  user-facing failure behaviour
+- use temporary request processing only and do not introduce document or
+  transcript persistence
+- add only essential structured logs that exclude PDF bytes, field values,
+  conversation text, provider keys, and other user content
 
 Acceptance criteria:
 - frontend and backend are reachable over HTTPS
 - production CORS is restricted to the deployed frontend
-- Nebius credentials remain server-side
-- health checks and essential logs are available
-- file-size and request-time limits fail clearly
-- no user document persistence is introduced without an explicit decision
+- Nebius and Tavily credentials remain server-side
+- health checks and essential privacy-safe logs are available
+- invalid, non-PDF, oversized, timed-out, and provider-failed requests fail
+  clearly without losing the current browser session
+- one production request cannot overwrite the uploaded source PDF
+- deployed upload, extraction, conversation, confirmation, preview, review,
+  fill, and download work with the frozen hero fixture
+- microphone features run only in the secure browser context and retain typed
+  fallback
+- no user document or transcript persistence is introduced without a separate
+  explicit decision
+
+Required automated testing after implementation:
+- run the complete established local regression gate against the release
+  revision
+- build the exact frontend artifact used for deployment from a clean checkout
+- run backend configuration tests for the production CORS allowlist, missing
+  secrets, upload-size limits, non-PDF input, provider timeout, and controlled
+  service errors
+- run an HTTPS smoke script against the deployed API covering `/health`, PDF
+  extraction, at least one Form Agent turn, PDF fill, download, and reopening
+  the result to verify its value
+- verify an allowed CORS origin succeeds and an unlisted origin is rejected
+- scan the built frontend, source tree, tracked files, and deployment logs for
+  secret values and provider keys
+
+Required manual testing after implementation:
+1. Open the deployed URL in a private/incognito window on a second device or
+   clean browser profile.
+2. Run the frozen hero script from upload to reopened download.
+3. Repeat the critical path with typing, then test voice permission and speech
+   on the actual demo browser.
+4. Deny microphone permission and prove the typed fallback completes.
+5. Temporarily use a controlled invalid provider configuration or mock failure
+   and verify a recoverable message with no lost confirmed values.
+6. Upload an invalid file and an over-limit fixture and verify clear errors.
+7. Restart or redeploy the backend, verify `/health`, and repeat the smoke path
+   to catch cold-start or temporary-filesystem assumptions.
+8. Inspect browser network requests, built assets, host logs, and temporary
+   storage to verify no key or retained user document is present.
+
+Completion evidence to record:
+- public frontend URL and backend health URL
+- deployed Git revision
+- hosting and configuration decision
+- automated HTTPS smoke result
+- browser/device matrix and voice capability result
+- CORS, secret-scan, size-limit, timeout, restart, and no-persistence evidence
+- rollback/redeploy command or documented provider action
+
+Do not implement:
+- accounts, authentication, document history, database storage, analytics,
+  background jobs, autonomous submission, Docker, or an orchestration platform
+  unless the selected host strictly requires it and the change is separately
+  justified
+- new conversation, language, PDF, or user-interface features after freeze
 
 # Milestone 11 — Hackathon submission
 
@@ -4042,9 +4454,188 @@ Goal:
 Package a clear, repeatable demonstration of the conversation-first form
 assistant and its required NVIDIA/Nebius technology.
 
+Submission deliverables:
+- working hosted demo or clearly testable application
+- public GitHub repository with the existing open-source licence
+- current README covering setup, environment variables, architecture, local
+  frontend/backend commands, testing, limitations, and deployment
+- public YouTube demonstration video no longer than three minutes
+- Devpost description, selected `Best Apps and Agents` track, screenshots, and
+  working links
+- clear explanation of how NVIDIA Nemotron and Nebius Token Factory are used
+  at runtime
+- feedback on the NVIDIA and Nebius technologies used
+
 Acceptance criteria:
-- the demo shows upload, explanation, voice or typed guidance, confirmation, live PDF update, review, and download
+- the demo shows upload, explanation, voice or typed guidance, explicit
+  confirmation, live PDF update, review, correction, and download
 - the submission clearly identifies Nemotron and Nebius Token Factory usage
-- setup and local-run documentation is current
-- architecture and safety boundaries are explained
-- the demo has a tested fallback path if microphone access or an external API is unavailable
+  without implying that deterministic PDF or state logic is performed by AI
+- setup and local-run documentation works from a clean checkout
+- architecture, privacy, no-invention, canonical-state, and confirmation
+  boundaries are explained accurately
+- the public repository contains no `.env`, API key, personal data, generated
+  user document, or private evaluation artifact
+- the demo has a tested fallback path if microphone access, Tavily, Nemotron,
+  or the hosted service is unavailable
+- all public links work without the submitter's signed-in browser session
+- the final submitted build matches the tested deployed Git revision
+
+Required testing before submission:
+- run the complete established local regression gate one final time
+- run the deployed HTTPS smoke test and frozen hero script immediately before
+  recording and again before submission
+- follow the README from a clean clone or fresh environment and record any
+  missing step; a familiar development environment is not sufficient evidence
+- inspect `git status`, tracked files, commit history, the production frontend
+  bundle, screenshots, video frames, and documentation for secrets or personal
+  information
+- test repository, hosted demo, YouTube, and Devpost links in an incognito
+  window while signed out
+- rehearse the three-minute demo at least three times and keep one version that
+  finishes with time for the completed PDF result
+- verify video audio, captions, text legibility, synthetic data, and the visible
+  NVIDIA/Nebius runtime explanation
+- perform one rehearsal with the fallback script and locally retained demo
+  assets so a provider, network, or microphone problem does not end the demo
+
+Required manual submission checklist:
+1. Confirm the repository is public and the licence is visible.
+2. Confirm no secret exists in the repository or frontend bundle; rotate any
+   credential if exposure is suspected.
+3. Confirm README commands work exactly as written.
+4. Confirm the hosted demo opens and the health endpoint is healthy.
+5. Confirm the video is public, no longer than three minutes, and audible.
+6. Confirm Devpost names the track and explains the user problem, workflow,
+   real-world impact, originality, NVIDIA model, and Nebius runtime calls.
+7. Confirm the technology feedback is specific and truthful.
+8. Open every submitted link while signed out.
+9. Save the final submission confirmation and do not begin a new milestone
+   before the deadline.
+
+Completion evidence to record:
+- release Git revision and final regression output
+- clean-clone verification environment
+- hosted URLs and signed-out link-check result
+- final video duration and rehearsal result
+- completed official submission checklist and confirmation
+- known limitations stated in README and Devpost
+
+Do not implement:
+- last-minute new features, new providers, new models, new PDF types, new
+  languages, authentication, persistence, or infrastructure unrelated to a
+  release-blocking issue
+- claims that were not demonstrated or measured
+
+# Deferred post-hackathon roadmap
+
+The milestones below require a fresh decision after submission. Their order may
+change based on user evidence. They must not be pulled into Milestones 9.1–11.
+
+## Milestone 12 — Reviewed multilingual assistance expansion
+
+Status: DEFERRED UNTIL AFTER SUBMISSION
+
+Goal:
+Expand assistance-language support for English source PDFs one reviewed
+language at a time, using the Milestone 9.2 safety and parity boundary.
+
+Required testing after each added language:
+- fluent/native review of all interface strings and complete synthetic
+  transcripts
+- English-versus-target-language canonical-state and effect parity
+- per-language typed, code-switched, correction, guidance, and completion
+  transcript suites
+- Unicode, date, number, currency, address, names, finite-choice, and PDF-font
+  coverage appropriate to the language
+- supported browser speech-recognition and speech-synthesis checks when voice
+  is claimed; otherwise an explicit typed-only support label
+- accessibility review for language metadata, pronunciation, focus order, text
+  expansion, and right-to-left layout when relevant
+- provider-failure and English/manual fallback checks
+- complete regression gate with zero invention or confirmation regression
+
+Completion rule:
+Do not add a language to the public support matrix until its reviewer and test
+evidence pass. Model fluency or automated translation alone is insufficient.
+
+## Milestone 13 — Foreign-language source-form research and pilot
+
+Status: DEFERRED UNTIL AFTER SUBMISSION
+
+Goal:
+Determine whether Formless can safely help an English or bilingual user
+complete a form whose source language is not English, then implement one
+reviewed pilot only if extraction, field meaning, answer-language requirements,
+and PDF rendering can be validated.
+
+Required testing after the research and any pilot:
+- corpus review with legally reusable fillable fixtures in one source language
+- exact field-ID, widget, option, order, and label extraction comparison by a
+  fluent reviewer
+- tests that separately preserve source language, assistance language, and the
+  value language/format required by the form
+- no-guess tests for unreviewed legal, eligibility, declaration, or signature
+  wording
+- completed-PDF rendering and font/glyph checks in ordinary viewers
+- bilingual transcript, correction, final-review, and download tests
+- explicit unsupported-document and unsupported-language fallbacks
+- complete regression gate
+
+Completion rule:
+Research may conclude `do not support yet`; that is a valid outcome. Do not
+present machine-translated form meaning as official guidance.
+
+## Milestone 14 — Non-AcroForm document discovery and support decision
+
+Status: DEFERRED UNTIL AFTER SUBMISSION
+
+Goal:
+Evaluate static PDFs, scanned PDFs, and XFA separately before deciding whether
+to add OCR, field-region mapping, or a conversion workflow. Do not treat these
+formats as variants of the current reliable AcroForm path.
+
+Required testing after research and before any support claim:
+- a versioned corpus for digital static, scanned, and XFA documents
+- deterministic format classification with clear unsupported explanations
+- page-text/OCR accuracy, field-to-question alignment, confidence, and
+  no-silent-mapping measurements
+- visual region and completed-output review across rotation, scale, multi-page,
+  handwriting, poor scan, and complex-choice cases
+- explicit human review before any inferred field mapping can become writable
+- source-byte preservation and separate output-file checks
+- privacy and provider-boundary review before any PDF page or OCR result can be
+  sent externally
+- complete AcroForm regression gate
+
+Completion rule:
+Choose one format and one narrow workflow only after the research evidence.
+OCR, XFA, free-form annotation, and general document understanding must not be
+implemented together as one milestone.
+
+## Milestone 15 — Production trust, privacy, and operating model
+
+Status: DEFERRED UNTIL AFTER SUBMISSION
+
+Goal:
+Decide what a real public service needs beyond the ephemeral hackathon app,
+including retention, deletion, security, abuse controls, observability, and
+whether accounts or persistence are necessary at all.
+
+Required testing after any production-readiness implementation:
+- written threat model and data-flow review covering PDF bytes, answers,
+  transcripts, provider calls, logs, temporary files, and secrets
+- retention/deletion tests and proof that the documented policy matches actual
+  storage behaviour
+- authorization and tenant-isolation tests if accounts are introduced
+- upload abuse, malformed PDF, rate-limit, timeout, dependency-failure, and
+  resource-exhaustion tests
+- dependency and secret scanning, privacy-safe log inspection, backup/deletion
+  checks where storage exists, and incident/credential-rotation rehearsal
+- accessibility and supported-browser regression
+- complete conversation, PDF, multilingual, and deployment regression gates
+
+Completion rule:
+Do not add authentication, a database, persistent transcripts, document
+history, or analytics by default. Each requires an explicit user need,
+architecture decision, privacy boundary, and testable deletion story.
