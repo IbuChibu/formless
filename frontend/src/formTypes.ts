@@ -5,6 +5,25 @@ export type AgentStatus = "idle" | "loading" | "error";
 export type AgentActivity = "responding" | "guidance";
 export type MobileWorkspaceView = "assistant" | "form";
 export type FieldValue = string | boolean;
+export type AssistanceNeed =
+  | "plain_language"
+  | "slower_pace"
+  | "organise_details"
+  | "reassurance"
+  | "explain_bureaucracy"
+  | "other";
+export type InteractionModePreference =
+  | "no_preference"
+  | "voice"
+  | "typing";
+export type SupportIntroductionStatus = "pending" | "saved" | "skipped";
+
+export type AssistancePreferences = {
+  support_needs: AssistanceNeed[];
+  interaction_mode: InteractionModePreference;
+  other_note: string | null;
+  assistance_language: "en";
+};
 
 export type AgentEffectKind =
   | "none"
@@ -189,6 +208,7 @@ export type AgentRequest = {
   fields: AgentRequestField[];
   conversation_state: ConversationState;
   event: AgentEvent;
+  assistance_preferences: AssistancePreferences;
   history: AgentHistoryMessage[];
 };
 

@@ -13,6 +13,7 @@
     "test:workspace-layout": "node scripts/test-workspace-layout.mjs",
     "test:voice-interruption": "node scripts/test-voice-interruption.mjs",
     "test:milestone9-reliability": "node scripts/test-milestone9-reliability.mjs",
+    "test:support-preferences": "node scripts/test-support-preferences.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

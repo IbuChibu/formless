@@ -12,6 +12,7 @@ type VoiceAssistantPanelProps = {
   interview: VoiceInterviewControls;
   agentIsBusy: boolean;
   hasPendingProposal: boolean;
+  voicePreferred?: boolean;
 };
 
 export default function VoiceAssistantPanel({
@@ -19,6 +20,7 @@ export default function VoiceAssistantPanel({
   interview,
   agentIsBusy,
   hasPendingProposal,
+  voicePreferred = false,
 }: VoiceAssistantPanelProps) {
   const statusCopy = getInterviewStatusCopy(
     interview.status,
@@ -42,7 +44,9 @@ export default function VoiceAssistantPanel({
 
   return (
     <section
-      className={`voice-assistant-panel ${interview.status}`}
+      className={`voice-assistant-panel ${interview.status}${
+        voicePreferred ? " preferred" : ""
+      }`}
       aria-labelledby="voice-assistant-heading"
     >
       <div className="voice-assistant-heading">
@@ -54,7 +58,11 @@ export default function VoiceAssistantPanel({
             <strong id="voice-assistant-heading">
               Talk through this form
             </strong>
-            <span>The assistant asks, listens, and checks each answer</span>
+            <span>
+              {voicePreferred
+                ? "Your preferred way to answer — it starts only when you choose"
+                : "The assistant asks, listens, and checks each answer"}
+            </span>
           </div>
         </div>
         <span className="voice-status-label">{statusCopy.label}</span>

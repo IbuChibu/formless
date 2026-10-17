@@ -4079,7 +4079,7 @@ existing check simply to make a new milestone pass.
 
 # Milestone 9.1 — Support-aware introduction and adaptive assistance
 
-Status: NOT STARTED
+Status: IMPLEMENTED — MANUAL LOADED-FORM QA PENDING
 
 Why this is next:
 Formless currently starts with the form's first question. A person helping
@@ -4185,6 +4185,45 @@ Do not implement:
   accounts, persistent profiles, analytics, a database, or server-side memory
 - a second agent, a new model, autonomous planning, or changes to PDF semantics
 - Milestone 9.2 language output, deployment, or submission work
+
+Implemented outcome recorded 17 October 2026:
+- the loaded assistant now offers the optional needs-based introduction with
+  plain-language, slower-pace, detail-organisation, review-reassurance,
+  unfamiliar-bureaucracy, bounded-other-note, voice, typing, standard, save,
+  edit, cancel, and skip paths
+- `App` owns the preferences for one PDF session, includes them in every Form
+  Agent request, and resets them together with conversation and form state when
+  a PDF is selected or extraction is retried
+- the frontend visibly summarizes saved choices, emphasizes the selected voice
+  or typed surface, and states that choosing voice does not start a microphone;
+  the introduction component has no voice-start, microphone, agent-advance, or
+  PDF-state callback
+- the backend request contract accepts only six closed unique support needs,
+  three interaction modes, English assistance language, and an optional
+  200-character note paired with the `other` choice; unknown/profile-shaped,
+  duplicate, incomplete, overlong, and unsupported-language data is rejected
+- prompt construction converts only the closed choices into trusted style
+  instructions and places the optional note inside the existing untrusted
+  context boundary; preferences never enter field or conversation state
+- paired deterministic tests prove that standard and fully adapted requests
+  produce the same proposal, prepared value, pending-confirmation phase, and
+  canonical state without an added model call
+- a live local API smoke request with plain-language, slower-pace, and voice
+  preferences returned the normal closed `field_selected` effect and
+  `awaiting_answer` state
+- all 377 backend tests pass; the 14-scenario safety evaluation and five-
+  fixture/47-turn transcript evaluation have no failures; PDF workflow,
+  workspace layout, voice interruption, Milestone 9 reliability, and the new
+  support-preference frontend checks pass; the production build succeeds with
+  only the existing bundle-size advisory
+- the local application reached a healthy backend in the in-app browser with
+  no browser warning or error logs, but that browser surface cannot attach a
+  local PDF; the required loaded-form desktop/mobile save, skip, edit, reset,
+  and voice-permission manual checklist and screenshots therefore remain the
+  only completion evidence still pending
+
+Do not mark this milestone complete until the required manual loaded-form steps
+above have been performed with the sample and household-support fixtures.
 
 # Milestone 9.2 — One-language bilingual assistance pilot
 

@@ -11,7 +11,9 @@ import DocumentWorkspace from "./components/DocumentWorkspace";
 import FormReviewPanel from "./components/FormReviewPanel";
 import ManualFieldsDrawer from "./components/ManualFieldsDrawer";
 import ProposalReview from "./components/ProposalReview";
+import SupportPreferencesPanel from "./components/SupportPreferencesPanel";
 import UploadLanding from "./components/UploadLanding";
+import { createDefaultAssistancePreferences } from "./assistancePreferences";
 import { parseAgentResponse } from "./agentResponse";
 import {
   apiBaseUrl,
@@ -42,6 +44,7 @@ import type {
   AgentEvent,
   AgentRequest,
   AgentStatus,
+  AssistancePreferences,
   ConnectionStatus,
   ConversationMessage,
   ConversationState,
@@ -54,6 +57,7 @@ import type {
   PdfField,
   PreviewStatus,
   ProposalAgentEffect,
+  SupportIntroductionStatus,
 } from "./formTypes";
 
 const previewDebounceMs = 600;
@@ -110,6 +114,10 @@ function App() {
   const [showFullTranscript, setShowFullTranscript] = useState(false);
   const [mobileWorkspaceView, setMobileWorkspaceView] =
     useState<MobileWorkspaceView>("assistant");
+  const [assistancePreferences, setAssistancePreferences] =
+    useState<AssistancePreferences>(createDefaultAssistancePreferences());
+  const [supportIntroductionStatus, setSupportIntroductionStatus] =
+    useState<SupportIntroductionStatus>("pending");
   const voice = useVoiceAssistant();
 
   const originalUrlRef = useRef<string | null>(null);
@@ -313,6 +321,8 @@ function App() {
     setDirectEditValue("");
     setShowFullTranscript(false);
     setMobileWorkspaceView("assistant");
+    setAssistancePreferences(createDefaultAssistancePreferences());
+    setSupportIntroductionStatus("pending");
     voiceInterview.resetInterview();
     agentMessageIdRef.current = 0;
     setExtractionStatus("loading");
@@ -715,6 +725,7 @@ function App() {
       fields: requestFields,
       conversation_state: agentConversationState,
       event,
+      assistance_preferences: assistancePreferences,
       history: agentMessages
         .slice(-maxAgentHistoryMessages)
         .map(({ role, content }) => ({ role, content })),
@@ -1015,6 +1026,7 @@ function App() {
                   : ""
               }`}
               id="assistant-workspace"
+              data-input-preference={assistancePreferences.interaction_mode}
             >
               <div className="panel-header assistant-heading">
                 <div>
@@ -1069,6 +1081,24 @@ function App() {
                     </span>
                   </div>
                 </section>
+              ) : null}
+
+              {canUseAgent ? (
+                <SupportPreferencesPanel
+                  disabled={agentStatus === "loading"}
+                  preferences={assistancePreferences}
+                  status={supportIntroductionStatus}
+                  onSave={(preferences) => {
+                    setAssistancePreferences(preferences);
+                    setSupportIntroductionStatus("saved");
+                  }}
+                  onSkip={() => {
+                    setAssistancePreferences(
+                      createDefaultAssistancePreferences(),
+                    );
+                    setSupportIntroductionStatus("skipped");
+                  }}
+                />
               ) : null}
 
               {reviewPanelOpen ? (
@@ -1135,6 +1165,9 @@ function App() {
                     interview={voiceInterview}
                     agentIsBusy={agentStatus === "loading"}
                     hasPendingProposal={pendingProposal !== null}
+                    voicePreferred={
+                      assistancePreferences.interaction_mode === "voice"
+                    }
                   />
                 ) : null}
 
@@ -1308,6 +1341,9 @@ function App() {
               {canUseAgent ? (
                 <form
                   className="ai-question-form agent-message-form"
+                  data-input-preferred={
+                    assistancePreferences.interaction_mode === "typing"
+                  }
                   onSubmit={submitAgentMessage}
                 >
                   <label htmlFor="agent-message">

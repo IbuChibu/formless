@@ -437,6 +437,7 @@ def test_http_payload_shape_matches_existing_agent_interface() -> None:
         "fields",
         "conversation_state",
         "event",
+        "assistance_preferences",
         "history",
     }
     assert payload["event"] == {"type": "advance"}

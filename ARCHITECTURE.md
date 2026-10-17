@@ -30,6 +30,11 @@ Responsible for:
   stable field IDs, navigating to the active field, and opening a focused field
   editor when a supported widget is selected
 - displaying questions
+- offering one optional needs-based introduction after extraction, keeping the
+  user's explicit assistance preferences only for the current PDF session, and
+  allowing those preferences to be changed or skipped
+- visually adapting the preferred input emphasis without treating a voice
+  preference as microphone consent or starting a voice session
 - starting a turn-based browser voice interview only after an explicit user
   action
 - speaking the same already-visible assistant message, then opening one bounded
@@ -79,7 +84,8 @@ Frontend internals preserve one orchestration boundary while separating stable
 responsibilities:
 - `App` owns the current ephemeral session, canonical field values, confirmed
   and skipped IDs, conversation state, PDF-preview coordination, and the
-  callbacks that connect input modes
+  callbacks that connect input modes; it also owns the current explicit
+  assistance preferences and clears them on PDF replacement
 - `formTypes` owns the shared TypeScript contracts used by those boundaries
 - `api` owns the base URL and provider-independent HTTP/error validation helpers
 - `agentResponse` strictly parses and validates the Form Agent response,
@@ -206,6 +212,9 @@ or process conversation state.
 
 Responsible for:
 - processing bounded conversation state received with each request
+- validating bounded assistance preferences received with each request and
+  using them only to shape wording, pace, explanation depth, and spoken
+  readability
 - validating explicit conversation events and state transitions
 - deciding what context goes to Nemotron
 - selecting bounded official guidance for an exact allowlisted form version
@@ -413,6 +422,30 @@ returned from PDF extraction. The current form session distinguishes:
 This state may remain in the frontend for the hackathon MVP. It does not require
 a database. Conversation context can be sent explicitly to the Form Agent in a
 bounded request rather than introducing persistence.
+
+## Session-only assistance preferences
+
+After a PDF is extracted, the frontend may ask how the user would like help.
+The available support needs are explicit communication choices: plain
+language, slower pacing, help organising supplied details, clearer review
+reassurance, explanation of unfamiliar bureaucracy wording, and one optional
+bounded note. A separate interaction preference may be standard, voice, or
+typing. English is the only valid assistance language until a later reviewed
+language milestone.
+
+`App` owns this object for the current PDF session and includes it in each Form
+Agent request. Replacing the PDF clears it. The backend accepts only the closed
+preference values, requires unique needs, limits the optional note to 200
+characters, and treats that note as untrusted context. The prompt builder
+derives trusted style instructions from the closed values; it never turns the
+free-text note into a system instruction.
+
+Preferences are not canonical form data, conversation phase, model-inferred
+profiles, diagnoses, analytics, or persistence. They may alter presentation
+but cannot alter field selection, factual meaning, available options,
+validation, guidance eligibility, typed effects, explicit confirmation, or PDF
+filling. Selecting voice changes emphasis only; microphone access still begins
+solely through the existing explicit voice-session start.
 
 ## Conversation state machine
 

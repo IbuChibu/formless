@@ -523,3 +523,25 @@ reviewed answers. Keeping retries inside the existing `App` orchestration
 boundary preserves one canonical workflow, avoids persistence or a second
 state store, and makes failure recovery testable without weakening the rule
 that only confirmed values reach PDF filling.
+
+---
+
+## 2026-10-17 — Support preferences are explicit, session-only presentation data
+
+Decision:
+After extraction, Formless offers an optional needs-based introduction. The
+user may explicitly request plain language, slower pacing, help organising
+details, clearer review reassurance, explanation of unfamiliar official
+wording, one bounded custom note, and a voice or typing preference. `App` owns
+the choices for the current PDF and sends them with each Form Agent request.
+The backend validates a closed schema and derives presentation instructions;
+the custom note remains untrusted. Replacing the PDF clears the choices.
+
+Reason:
+A human helper asks how to make the task easier, but diagnosing or inferring a
+user category would be intrusive and unreliable. Explicit needs let the same
+assistant adapt communication while preserving the one-agent architecture and
+the rule that presentation preferences cannot change facts, field selection,
+validation, typed effects, confirmation, or PDF filling. A voice preference is
+not microphone consent, so capture remains behind the existing explicit start
+action.

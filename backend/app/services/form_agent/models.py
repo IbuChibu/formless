@@ -29,8 +29,21 @@ BoundedInstruction = Annotated[
     StrictStr,
     Field(min_length=1, max_length=500),
 ]
+BoundedSupportNote = Annotated[
+    StrictStr,
+    Field(min_length=1, max_length=200),
+]
 AgentFieldValue = Union[BoundedAgentString, StrictBool]
 FieldStatus = Literal["unanswered", "confirmed", "skipped"]
+AssistanceNeed = Literal[
+    "plain_language",
+    "slower_pace",
+    "organise_details",
+    "reassurance",
+    "explain_bureaucracy",
+    "other",
+]
+InteractionModePreference = Literal["no_preference", "voice", "typing"]
 ConversationPhase = Literal[
     "asking",
     "awaiting_answer",
@@ -64,6 +77,27 @@ class FormAgentTransitionError(FormAgentError):
 
 class _AgentModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class AssistancePreferences(_AgentModel):
+    support_needs: list[AssistanceNeed] = Field(
+        default_factory=list,
+        max_length=6,
+    )
+    interaction_mode: InteractionModePreference = "no_preference"
+    other_note: Optional[BoundedSupportNote] = None
+    assistance_language: Literal["en"] = "en"
+
+    @model_validator(mode="after")
+    def validate_support_choices(self) -> AssistancePreferences:
+        if len(self.support_needs) != len(set(self.support_needs)):
+            raise ValueError("Assistance support needs must be unique")
+        has_other = "other" in self.support_needs
+        if has_other != (self.other_note is not None):
+            raise ValueError(
+                "An other support need and its note must be supplied together"
+            )
+        return self
 
 
 class FormAgentFormContext(_AgentModel):
@@ -297,6 +331,9 @@ class FormAgentRequest(_AgentModel):
     )
     conversation_state: ConversationState
     event: FormAgentEvent
+    assistance_preferences: AssistancePreferences = Field(
+        default_factory=AssistancePreferences
+    )
     history: list[FormAgentMessage] = Field(
         default_factory=list,
         max_length=MAX_HISTORY_MESSAGES,

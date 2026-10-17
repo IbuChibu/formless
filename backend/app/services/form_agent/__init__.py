@@ -1,5 +1,7 @@
 from .models import (
     AdvanceEvent,
+    AssistanceNeed,
+    AssistancePreferences,
     CancelCorrectionEvent,
     ClarifyAction,
     ConfirmEditEvent,
@@ -30,6 +32,7 @@ from .models import (
     FormAgentRequest,
     FormAgentResponse,
     FormAgentTransitionError,
+    InteractionModePreference,
     MessageEvent,
     NextAction,
     NoFormEffect,
@@ -58,6 +61,8 @@ from .prompt_builder import MAX_AGENT_CONTEXT_CHARS
 
 __all__ = [
     "AdvanceEvent",
+    "AssistanceNeed",
+    "AssistancePreferences",
     "CancelCorrectionEvent",
     "ClarifyAction",
     "ConfirmEditEvent",
@@ -89,6 +94,7 @@ __all__ = [
     "FormAgentResponse",
     "FormAgentService",
     "FormAgentTransitionError",
+    "InteractionModePreference",
     "MAX_AGENT_CONTEXT_CHARS",
     "MessageEvent",
     "NextAction",
