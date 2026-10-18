@@ -269,6 +269,7 @@ function isPlaceholderDropdownOption(option: string): boolean {
 
 export function getQuestionStatusLabel(phase: ConversationPhase): string {
   const labels: Record<ConversationPhase, string> = {
+    support_setup: "Before we begin",
     asking: "Ready to begin",
     awaiting_answer: "Your current question",
     awaiting_clarification: "Let's clarify this",
@@ -331,10 +332,11 @@ export function agentRequestNeedsExternalGuidance(
 
 export function createInitialConversationState(): ConversationState {
   return {
-    phase: "asking",
+    phase: "support_setup",
     active_field_id: null,
     pending_proposal: null,
     remembered_candidates: [],
+    support_setup_step: "needs",
   };
 }
 

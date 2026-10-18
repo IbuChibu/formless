@@ -4,6 +4,8 @@ import type {
   AgentEffectKind,
   AgentRequestField,
   AgentResponse,
+  AssistanceNeed,
+  AssistancePreferences,
   ConversationPhase,
   ConversationState,
   OfficialGuidanceCitation,
@@ -170,6 +172,24 @@ function parseAgentEffect(
   }
 
   const fieldId = payload.field_id;
+  if (payload.effect === "assistance_preferences_updated") {
+    if (
+      fieldId !== null &&
+      (typeof fieldId !== "string" || !findAgentField(requestFields, fieldId))
+    ) {
+      throw new Error("The form assistant returned an invalid support update.");
+    }
+    if (!isSupportIntroductionStatus(payload.introduction_status)) {
+      throw new Error("The form assistant returned an invalid support update.");
+    }
+    return {
+      effect: "assistance_preferences_updated",
+      preferences: parseAssistancePreferences(payload.preferences),
+      introduction_status: payload.introduction_status,
+      field_id: fieldId,
+    };
+  }
+
   if (payload.effect === "none") {
     if (fieldId !== null && typeof fieldId !== "string") {
       throw new Error("The API returned an invalid form assistant response.");
@@ -264,6 +284,15 @@ function parseConversationState(
   }
 
   const activeFieldId = payload.active_field_id;
+  const supportSetupStep = payload.support_setup_step ?? null;
+  if (
+    supportSetupStep !== null &&
+    !["needs", "needs_after_interaction", "interaction"].includes(
+      String(supportSetupStep),
+    )
+  ) {
+    throw new Error("The API returned an invalid support setup state.");
+  }
   if (
     typeof activeFieldId === "string" &&
     !findAgentField(requestFields, activeFieldId)
@@ -355,6 +384,11 @@ function parseConversationState(
     active_field_id: activeFieldId,
     pending_proposal: pendingProposal,
     remembered_candidates: rememberedCandidates,
+    support_setup_step: supportSetupStep as
+      | "needs"
+      | "needs_after_interaction"
+      | "interaction"
+      | null,
   };
   const phaseNeedsActiveField = [
     "awaiting_answer",
@@ -367,8 +401,10 @@ function parseConversationState(
   ].includes(state.phase);
   if (
     (phaseNeedsActiveField && state.active_field_id === null) ||
-    (["asking", "form_complete"].includes(state.phase) &&
+    (["support_setup", "asking", "form_complete"].includes(state.phase) &&
       state.active_field_id !== null) ||
+    (state.phase === "support_setup" && state.support_setup_step === null) ||
+    (state.phase !== "support_setup" && state.support_setup_step !== null) ||
     (["awaiting_confirmation", "awaiting_replacement_confirmation"].includes(
       state.phase,
     ) &&
@@ -448,9 +484,36 @@ function validateAgentResponseState(
       (expectedNextField === undefined &&
         state.phase === "form_complete" &&
         state.active_field_id === null));
+  const isAssistanceUpdate =
+    effect.effect === "assistance_preferences_updated";
+  const validAssistanceUpdate =
+    effect.effect === "assistance_preferences_updated" &&
+    ((requestState.phase === "support_setup" &&
+      effect.introduction_status === "pending" &&
+      effect.field_id === null &&
+      state.phase === "support_setup" &&
+      state.active_field_id === null) ||
+      (requestState.phase === "support_setup" &&
+        effect.introduction_status !== "pending" &&
+        ((expectedNextField !== undefined &&
+          effect.field_id === expectedNextField.id &&
+          state.phase === "awaiting_answer" &&
+          state.active_field_id === expectedNextField.id) ||
+          (expectedNextField === undefined &&
+            effect.field_id === null &&
+            state.phase === "form_complete" &&
+            state.active_field_id === null))) ||
+      (requestState.phase !== "support_setup" &&
+        effect.introduction_status === "saved" &&
+        effect.field_id === requestState.active_field_id &&
+        state.phase === requestState.phase &&
+        state.active_field_id === requestState.active_field_id &&
+        JSON.stringify(state.pending_proposal) ===
+          JSON.stringify(requestState.pending_proposal)));
 
   if (
     !isResolutionEffect &&
+    !isAssistanceUpdate &&
     effect.effect !== "completed" &&
     effect.effect !== "correction_cancelled" &&
     !replacementRejected &&
@@ -483,8 +546,10 @@ function validateAgentResponseState(
       state.phase === "awaiting_replacement") ||
     (effect.effect === "skipped" &&
       (progressedToNextField || completedForm)) ||
+    validAssistanceUpdate ||
     (effect.effect === "none" &&
       [
+        "support_setup",
         "asking",
         "awaiting_answer",
         "awaiting_clarification",
@@ -509,6 +574,65 @@ function validateAgentResponseState(
   }
 }
 
+function parseAssistancePreferences(payload: unknown): AssistancePreferences {
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.support_needs) ||
+    payload.support_needs.length > 6 ||
+    !["no_preference", "voice", "typing"].includes(
+      String(payload.interaction_mode),
+    ) ||
+    payload.assistance_language !== "en" ||
+    (payload.other_note !== null &&
+      (typeof payload.other_note !== "string" ||
+        !payload.other_note.trim() ||
+        payload.other_note.length > 200))
+  ) {
+    throw new Error("The form assistant returned invalid support preferences.");
+  }
+
+  const allowedNeeds = new Set<AssistanceNeed>([
+    "plain_language",
+    "slower_pace",
+    "organise_details",
+    "reassurance",
+    "explain_bureaucracy",
+    "other",
+  ]);
+  const supportNeeds: AssistanceNeed[] = [];
+  for (const need of payload.support_needs) {
+    if (
+      typeof need !== "string" ||
+      !allowedNeeds.has(need as AssistanceNeed) ||
+      supportNeeds.includes(need as AssistanceNeed)
+    ) {
+      throw new Error("The form assistant returned invalid support preferences.");
+    }
+    supportNeeds.push(need as AssistanceNeed);
+  }
+
+  if (
+    supportNeeds.includes("other") !==
+    (typeof payload.other_note === "string")
+  ) {
+    throw new Error("The form assistant returned invalid support preferences.");
+  }
+
+  return {
+    support_needs: supportNeeds,
+    interaction_mode:
+      payload.interaction_mode as AssistancePreferences["interaction_mode"],
+    other_note: payload.other_note as string | null,
+    assistance_language: "en",
+  };
+}
+
+function isSupportIntroductionStatus(
+  value: unknown,
+): value is "pending" | "saved" | "skipped" {
+  return ["pending", "saved", "skipped"].includes(String(value));
+}
+
 function findAgentField(
   fields: AgentRequestField[],
   fieldId: string,
@@ -519,6 +643,7 @@ function findAgentField(
 function isAgentEffectKind(value: unknown): value is AgentEffectKind {
   return [
     "none",
+    "assistance_preferences_updated",
     "proposal",
     "replacement_proposal",
     "confirmed",
@@ -535,6 +660,7 @@ function isAgentEffectKind(value: unknown): value is AgentEffectKind {
 
 function isConversationPhase(value: unknown): value is ConversationPhase {
   return [
+    "support_setup",
     "asking",
     "awaiting_answer",
     "awaiting_clarification",

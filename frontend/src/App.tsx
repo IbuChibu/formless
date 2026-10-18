@@ -13,7 +13,10 @@ import ManualFieldsDrawer from "./components/ManualFieldsDrawer";
 import ProposalReview from "./components/ProposalReview";
 import SupportPreferencesPanel from "./components/SupportPreferencesPanel";
 import UploadLanding from "./components/UploadLanding";
-import { createDefaultAssistancePreferences } from "./assistancePreferences";
+import {
+  createDefaultAssistancePreferences,
+  hasAssistancePreferences,
+} from "./assistancePreferences";
 import { parseAgentResponse } from "./agentResponse";
 import {
   apiBaseUrl,
@@ -639,6 +642,16 @@ function App() {
       });
       setAgentConversationState(conversationState);
 
+      if (effect.effect === "assistance_preferences_updated") {
+        setAssistancePreferences(effect.preferences);
+        setSupportIntroductionStatus(effect.introduction_status);
+      } else if (
+        request.conversation_state.phase === "support_setup" &&
+        conversationState.phase !== "support_setup"
+      ) {
+        setSupportIntroductionStatus("skipped");
+      }
+
       if (
         effect.effect === "proposal" ||
         effect.effect === "replacement_proposal"
@@ -747,6 +760,17 @@ function App() {
       { type: "message", content: normalizedMessage },
       normalizedMessage,
     );
+  }
+
+  function advanceAgent() {
+    if (
+      agentConversationState.phase === "support_setup" &&
+      supportIntroductionStatus === "skipped"
+    ) {
+      sendAgentEvent({ type: "message", content: "Just start the form." });
+      return;
+    }
+    sendAgentEvent({ type: "advance" });
   }
 
   function submitAgentMessage(event: FormEvent<HTMLFormElement>) {
@@ -890,11 +914,13 @@ function App() {
   const canUseAgent =
     extractionStatus === "ready" && currentAgentFields.length > 0;
   const canStartAgent =
-    agentConversationState.phase === "asking" && agentMessages.length === 0;
+    ["support_setup", "asking"].includes(agentConversationState.phase) &&
+    agentMessages.length === 0;
   const canResumeAgent = ["field_confirmed", "field_skipped"].includes(
     agentConversationState.phase,
   );
   const canSendAgentMessage = [
+    "support_setup",
     "asking",
     "awaiting_answer",
     "awaiting_clarification",
@@ -915,7 +941,7 @@ function App() {
     activeQuestion: activeAgentQuestion,
     hasPendingProposal: pendingProposal !== null,
     isFormComplete: agentConversationState.phase === "form_complete",
-    onAdvance: () => sendAgentEvent({ type: "advance" }),
+    onAdvance: advanceAgent,
     onSendMessage: sendAgentMessage,
     onConfirmProposal: () => {
       if (pendingProposal) {
@@ -1090,7 +1116,11 @@ function App() {
                   status={supportIntroductionStatus}
                   onSave={(preferences) => {
                     setAssistancePreferences(preferences);
-                    setSupportIntroductionStatus("saved");
+                    setSupportIntroductionStatus(
+                      hasAssistancePreferences(preferences)
+                        ? "saved"
+                        : "skipped",
+                    );
                   }}
                   onSkip={() => {
                     setAssistancePreferences(
@@ -1290,7 +1320,7 @@ function App() {
                   <button
                     className="agent-progress-button secondary"
                     type="button"
-                    onClick={() => sendAgentEvent({ type: "advance" })}
+                    onClick={advanceAgent}
                   >
                     {canStartAgent
                       ? "Start with typing"
@@ -1347,7 +1377,9 @@ function App() {
                   onSubmit={submitAgentMessage}
                 >
                   <label htmlFor="agent-message">
-                    {activeAgentField
+                    {agentConversationState.phase === "support_setup"
+                      ? "Tell me what would make this form easier"
+                      : activeAgentField
                       ? pendingProposal
                         ? "Ask a question or use the review controls"
                         : "Your answer or question"
@@ -1362,7 +1394,9 @@ function App() {
                       type="text"
                       maxLength={2000}
                       placeholder={
-                        activeAgentField
+                        agentConversationState.phase === "support_setup"
+                          ? "For example: Use simpler words and go slowly"
+                          : activeAgentField
                           ? pendingProposal
                             ? "Ask about this proposal"
                             : "Type your answer or ask for help"

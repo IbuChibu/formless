@@ -545,3 +545,27 @@ the rule that presentation preferences cannot change facts, field selection,
 validation, typed effects, confirmation, or PDF filling. A voice preference is
 not microphone consent, so capture remains behind the existing explicit start
 action.
+
+---
+
+## 2026-10-18 — The support introduction is conversation-first
+
+Decision:
+The first guided-interview phase is `support_setup`. The assistant asks what
+makes forms difficult, maps only clear requests into the existing bounded
+assistance-preference object, optionally asks whether speaking or typing is
+preferred, and then asks the first real form question. `Just start` bypasses the
+setup. Ambiguous statements and disclosed conditions receive a neutral
+needs-based follow-up and are not stored as diagnoses or profiles.
+
+Conversational preference changes return a closed
+`assistance_preferences_updated` effect that cannot change a form value. The
+checkbox and radio controls remain available only as a collapsed `Adjust how I
+help` fallback over the same session-owned preference object.
+
+Reason:
+A visible preference questionnaire felt like another form before the user had
+received any help. A short dialogue better matches the human-helper experience
+and works naturally through both typing and the existing voice turn loop.
+Keeping recognition deterministic and effects typed preserves the no-invention,
+single-state, explicit-confirmation, and microphone-consent boundaries.

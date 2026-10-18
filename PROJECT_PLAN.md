@@ -4025,17 +4025,19 @@ this order so that product changes are validated before deployment and the
 deployed build is frozen before submission:
 
 1. Milestone 9.1 — Support-aware introduction
-2. Milestone 9.2 — One-language bilingual assistance pilot, only if its go/no-go
+2. Milestone 9.2 — Deepgram streaming speech and identity-field handling
+3. Milestone 9.3 — One-language bilingual assistance pilot, only if its go/no-go
    gate passes
-3. Milestone 9.3 — Hero workflow validation and release freeze
-4. Milestone 10 — Deployment
-5. Milestone 11 — Hackathon submission
+4. Milestone 9.4 — Hero workflow validation and release freeze
+5. Milestone 10 — Deployment
+6. Milestone 11 — Hackathon submission
 
 Recommended schedule for the 30 October 2026 deadline:
 - 18–19 October: Milestone 9.1
-- 20 October: Milestone 9.2 language/reviewer go/no-go decision
-- 20–22 October: Milestone 9.2 only if approved; otherwise defer it
-- 23–24 October: Milestone 9.3
+- 20–21 October: Milestone 9.2
+- 22 October: Milestone 9.3 language/reviewer go/no-go decision and, only if
+  approved, a tightly bounded implementation; otherwise defer it
+- 23–24 October: Milestone 9.4
 - 24–26 October: Milestone 10
 - 27–29 October: Milestone 11
 - 30 October: submission and contingency buffer, not new feature work
@@ -4094,7 +4096,11 @@ adapt wording, pacing, explanation depth, and the preferred interaction mode
 for the current form session only.
 
 Scope:
-- ask one plain question such as `How can I make this easier for you today?`
+- begin in an explicit `support_setup` conversation phase before selecting the
+  first form field
+- ask one open question such as `What tends to make forms difficult for you?`
+- accept a natural spoken or typed answer, then ask at most one focused
+  follow-up about speaking, typing, or either when that remains unclear
 - offer needs rather than identity or diagnosis labels, including:
   - use simpler language
   - go slowly and ask one thing at a time
@@ -4106,6 +4112,10 @@ Scope:
   - skip this and begin the form
 - optionally ask whether the user would rather speak or type; never start the
   microphone as a consequence of selecting a preference
+- let the user say `just start` at either support step and immediately ask the
+  first form question with standard or already-selected help
+- keep the checkbox/radio preference panel collapsed behind `Adjust how I
+  help` as an optional direct fallback, not the primary introduction
 - keep a small validated assistance-preference object in the current
   request-carried session state
 - allow preferences to be reviewed or changed during the session
@@ -4123,16 +4133,26 @@ Architecture boundaries:
   conversation service
 - preferences are explicit bounded data, not a model-inferred profile, hidden
   memory, analytics record, database record, or personal fact
-- the frontend may present the introduction, while backend models and prompt
-  construction validate and consume only the supported preference fields
+- the Form Agent owns the explicit setup phase and deterministically maps only
+  clear user requests into the bounded preference schema
+- conversation preference changes return a closed validated effect; model
+  prose cannot create a preference or a form mutation
+- the frontend presents the conversation and applies only that effect or an
+  explicit direct-settings change
 - no preference can cause a model response to write or confirm a form value
 - the architecture may reserve an explicit assistance-language value with
   English as the only supported value, but must not expose unsupported language
-  choices before Milestone 9.2
+  choices before Milestone 9.3
 
 Acceptance criteria:
-- introduction is optional, skippable, keyboard accessible, and does not block
-  the existing typed, voice, PDF-click, or manual workflows
+- introduction is conversational, optional, skippable, keyboard accessible,
+  and works through both the existing typed and voice interview paths
+- a clear natural-language need updates only supported preferences, receives a
+  natural acknowledgement, and progresses without displaying a questionnaire
+- an ambiguous difficulty or disclosed condition produces a neutral follow-up
+  and is not stored as a diagnosis, profile, or inferred preference
+- the direct preference controls start collapsed under `Adjust how I help`
+  and do not block the PDF-click or manual workflows
 - each supported choice produces a visible and relevant presentation change
   without changing the expected form effect or canonical field state
 - the free-text support note has a strict length limit, is treated as untrusted
@@ -4154,22 +4174,31 @@ Required automated testing after implementation:
   and cannot alter available fields, options, effects, or confirmation rules
 - paired transcript tests that send the same factual answers with and without
   each preference and assert identical typed effects and final canonical state
-- conversation tests for changing preferences mid-form, skipping the
-  introduction, frustration, explanation requests, and form replacement
-- frontend focused checks for optional/skip/edit/clear behaviour, keyboard and
-  screen-reader order, focus restoration, laptop/mobile layout, and the rule
-  that voice preference does not start microphone capture
+- conversation tests for the open question, needs acknowledgement, interaction
+  follow-up, `just start`, interaction-first answers, ambiguous conditions,
+  prompt-injection-shaped text, and explicit mid-form preference changes
+- state/effect tests proving support setup cannot create, confirm, skip, or
+  otherwise modify a PDF field
+- frontend focused checks for the initial setup phase, strict preference-effect
+  parsing, collapsed direct controls, optional/skip/edit/clear behaviour,
+  keyboard and screen-reader order, focus restoration, laptop/mobile layout,
+  and the rule that voice preference does not start microphone capture
 - the complete established local regression gate
 
 Required manual testing after implementation:
 1. Open the sample and household-support fixtures in separate fresh sessions.
-2. Complete one session with the introduction skipped.
-3. Complete one using simple language and slow pacing.
-4. Change the preferences halfway through and verify the next response adapts.
-5. Choose voice preference and verify no microphone prompt appears until
+2. Start once with typing and once with voice; verify the assistant asks what
+   feels difficult before it asks the first form question.
+3. Complete one session by saying `just start` and another by naturally asking
+   for simple language and one question at a time.
+4. Give an ambiguous condition or difficulty statement and verify the assistant
+   asks what adjustment would help without storing or repeating a diagnosis.
+5. Open `Adjust how I help`, change preferences halfway through, and verify the
+   next response adapts while the controls remain collapsed afterward.
+6. Choose voice preference and verify no microphone prompt appears until
    `Start conversation` is explicitly selected.
-6. Replace the PDF and verify the earlier preferences are gone.
-7. Confirm that identical user facts produce identical stored PDF values in all
+7. Replace the PDF and verify the earlier preferences are gone.
+8. Confirm that identical user facts produce identical stored PDF values in all
    runs.
 
 Completion evidence to record:
@@ -4184,48 +4213,223 @@ Do not implement:
 - diagnosis, demographic classification, automatic language detection, user
   accounts, persistent profiles, analytics, a database, or server-side memory
 - a second agent, a new model, autonomous planning, or changes to PDF semantics
-- Milestone 9.2 language output, deployment, or submission work
+- Milestone 9.2 speech-provider work, Milestone 9.3 language output,
+  deployment, or submission work
 
-Implemented outcome recorded 17 October 2026:
-- the loaded assistant now offers the optional needs-based introduction with
-  plain-language, slower-pace, detail-organisation, review-reassurance,
-  unfamiliar-bureaucracy, bounded-other-note, voice, typing, standard, save,
-  edit, cancel, and skip paths
-- `App` owns the preferences for one PDF session, includes them in every Form
-  Agent request, and resets them together with conversation and form state when
-  a PDF is selected or extraction is retried
-- the frontend visibly summarizes saved choices, emphasizes the selected voice
-  or typed surface, and states that choosing voice does not start a microphone;
-  the introduction component has no voice-start, microphone, agent-advance, or
-  PDF-state callback
-- the backend request contract accepts only six closed unique support needs,
-  three interaction modes, English assistance language, and an optional
-  200-character note paired with the `other` choice; unknown/profile-shaped,
-  duplicate, incomplete, overlong, and unsupported-language data is rejected
-- prompt construction converts only the closed choices into trusted style
-  instructions and places the optional note inside the existing untrusted
-  context boundary; preferences never enter field or conversation state
-- paired deterministic tests prove that standard and fully adapted requests
-  produce the same proposal, prepared value, pending-confirmation phase, and
-  canonical state without an added model call
-- a live local API smoke request with plain-language, slower-pace, and voice
-  preferences returned the normal closed `field_selected` effect and
-  `awaiting_answer` state
-- all 377 backend tests pass; the 14-scenario safety evaluation and five-
-  fixture/47-turn transcript evaluation have no failures; PDF workflow,
-  workspace layout, voice interruption, Milestone 9 reliability, and the new
-  support-preference frontend checks pass; the production build succeeds with
-  only the existing bundle-size advisory
-- the local application reached a healthy backend in the in-app browser with
-  no browser warning or error logs, but that browser surface cannot attach a
-  local PDF; the required loaded-form desktop/mobile save, skip, edit, reset,
-  and voice-permission manual checklist and screenshots therefore remain the
-  only completion evidence still pending
+Implemented outcome refined 18 October 2026:
+- a fresh frontend session now begins in the explicit `support_setup` phase;
+  the first assistant response asks what tends to make forms difficult instead
+  of displaying preference checkboxes
+- clear natural requests for simpler wording, slower pacing, organisation,
+  reassurance, or explanation of official wording are mapped deterministically
+  into the existing closed preference object; the next focused turn asks
+  whether speaking, typing, or either is preferred when necessary
+- an interaction preference supplied first is retained while the assistant asks
+  what support would help; `just start` at either step immediately selects the
+  first unanswered field
+- ambiguous statements and condition disclosures receive a neutral needs-based
+  follow-up; tests prove they are not stored as a diagnosis or passed to
+  Nemotron for profile inference
+- conversational changes use the new validated
+  `assistance_preferences_updated` effect; the effect cannot propose, confirm,
+  skip, or write a form value, and mid-form changes preserve the active field
+  and any pending proposal
+- `App` remains the session owner, applies only validated preference effects,
+  sends the resulting preferences with later Form Agent requests, and clears
+  them with all other form state on replacement
+- the checkbox/radio controls now start collapsed behind `Adjust how I help`;
+  they remain an accessible direct fallback over the same preference object and
+  still cannot start microphone capture; keyboard focus moves into the editor
+  when it opens and returns to the adjustment button when it closes
+- the original closed request validation, 200-character untrusted custom note,
+  prompt boundary, identical-effect parity, canonical field state, and explicit
+  confirmation rules remain unchanged
+- all 385 backend tests pass with only the existing five PyMuPDF/SWIG warnings;
+  the 14-scenario safety evaluation and five-fixture/47-turn transcript
+  evaluation have no failures, zero invalid actions or proposals, zero unsafe
+  transformations, and zero invention or confirmation-boundary failures
+- PDF workflow, workspace layout, voice interruption, Milestone 9 reliability,
+  and conversational support-preference frontend checks pass; the production
+  build succeeds with only the existing non-failing bundle-size advisory
+- the required loaded-form desktop/mobile conversational, skip, adjustment,
+  reset, and voice-permission checklist and screenshots remain pending
 
 Do not mark this milestone complete until the required manual loaded-form steps
 above have been performed with the sample and household-support fixtures.
 
-# Milestone 9.2 — One-language bilingual assistance pilot
+# Milestone 9.2 — Deepgram streaming speech and identity-field handling
+
+Status: NOT STARTED
+
+Why this is next:
+The current voice path relies on the browser's `SpeechRecognition` service,
+requests one transcript alternative, and does not retain word confidence. That
+is too opaque and inconsistent for important form facts, especially unfamiliar
+names. Prompt changes cannot recover a name that speech recognition has already
+misheard. Formless needs a controllable transcription boundary and a deliberate
+recovery path for identity fields before the voice experience is frozen.
+
+Goal:
+Make Deepgram Nova-3 streaming the primary speech-to-text path and handle names
+as high-risk identity values that can be repeated, spelled, corrected, reviewed,
+and explicitly confirmed without the assistant guessing.
+
+Technology and scope:
+- use Deepgram Nova-3 through the streaming `/v1/listen` WebSocket API for
+  speech-to-text only
+- keep NVIDIA Nemotron through Nebius as the only conversational model; do not
+  use Deepgram's Voice Agent, LLM, or text-to-speech products
+- keep browser speech synthesis for assistant output during this milestone
+- add a small speech-recognition adapter so provider transport, transcript
+  events, and confidence metadata remain separate from the Form Agent
+- keep the long-lived `DEEPGRAM_API_KEY` in the backend only
+- let the backend request a short-lived Deepgram token when an explicitly
+  started voice session needs a connection; connect the browser directly to
+  Deepgram with that temporary token to avoid proxying live audio through the
+  Form Agent or PDF Service
+- use native browser microphone and WebSocket capabilities unless a focused
+  dependency is demonstrably required
+- expose interim text as `What I hear`, but send only one finalized utterance
+  through the existing Form Agent message event
+- retain final word confidence and timing only for the active turn so critical
+  values can trigger a focused clarification
+- configure endpointing for natural pauses and preserve the existing explicit
+  start, stop, cancel, barge-in, and typed-fallback controls
+- configure one English locale for this milestone; multilingual assistance and
+  automatic language detection remain outside this scope
+- use only bounded, non-personal form terminology as recognition keyterms;
+  never send a guessed name or other invented personal fact as a keyterm
+- do not persist audio, temporary tokens, confidence metadata, or transcripts;
+  verify and document the provider's model-improvement/data-handling setting
+  before the hosted demo
+
+Name-specific interview policy:
+- recognise name fields through the existing field-type/semantic adapter rather
+  than asking Nemotron to decide whether a value is a name
+- ask for the name exactly as it appears on the relevant official record
+- when the PDF has separate name components, ask for the active component; when
+  it has one full-name field, do not invent a different field split
+- preserve what the recognizer heard and the user's original capitalization as
+  reviewable input
+- when confidence for a critical name token is below an evaluation-derived
+  threshold, identify the uncertain part and ask the user to repeat or spell it
+  instead of repeating the whole field question
+- understand explicit spelling such as `A-K-H-O-O-N`, join the letters
+  deterministically, and show the reconstructed value before confirmation
+- support corrections such as `No, my surname is ...` without discarding a
+  previously confirmed value until its replacement is explicitly confirmed
+- apply only safe presentation capitalization; never use Nemotron, a
+  dictionary, or recognition keyterms to guess or silently correct a person's
+  name
+- read the prepared name back and require the existing explicit confirmation
+  effect before changing canonical form state
+
+Architecture boundaries:
+- voice remains an input/output adapter over the existing typed interview; it
+  does not become a second agent or own form state
+- Deepgram returns transcript evidence only and cannot select a field, create a
+  proposal, confirm a value, call the PDF Service, or write PDF bytes
+- the existing Form Agent remains responsible for conversation policy,
+  field-aware interpretation, typed effects, and explicit confirmation
+- transcript confidence is a recovery signal, not factual authority; high
+  confidence does not bypass proposal review
+- the browser recognizer is no longer the production or demo default after the
+  cutover; any temporary development fallback must be explicit and must not
+  activate silently
+- if Deepgram is unconfigured or unavailable, retain the uploaded PDF,
+  conversation, and confirmed values and offer the existing typed path
+
+Acceptance criteria:
+- an explicitly started voice session obtains a short-lived credential without
+  exposing the long-lived Deepgram key to frontend source, network responses,
+  logs, or the production bundle
+- the primary voice path works in a supported browser even when
+  `window.SpeechRecognition` is unavailable
+- interim Nova-3 text is visibly distinguished from a final utterance
+- each finalized utterance is dispatched to the existing Form Agent exactly
+  once, with no partial transcript treated as an answer
+- endpointing tolerates a natural mid-sentence pause without prematurely
+  submitting the answer and finishes within a measured, documented latency
+- cancelling or stopping a session closes microphone and WebSocket resources
+  and has no form effect
+- an ordinary high-confidence name becomes an unconfirmed proposal and is read
+  back for explicit confirmation
+- a low-confidence name token produces a targeted repeat-or-spell clarification
+  and does not create a guessed proposal
+- spoken letter-by-letter spelling and a subsequent component correction create
+  the expected reviewable name while preserving the raw spoken answer
+- name capitalization never changes letters or silently repairs spelling
+- dates, numbers, finite choices, navigation commands, interruptions, and
+  ordinary free text still use the existing validated Form Agent path
+- Deepgram failure or missing configuration gives a clear recoverable message
+  and leaves typing, direct PDF editing, the manual drawer, and canonical state
+  usable
+- no audio or speech metadata is stored after the active browser session
+- existing PDF, Form Agent, confirmation, safety, and voice-interruption checks
+  remain green
+
+Required automated testing after implementation:
+- backend configuration and short-lived-token tests with mocked Deepgram HTTP
+  responses, including missing key, timeout, malformed response, and provider
+  rejection
+- security tests proving the long-lived API key is absent from API responses,
+  frontend assets, exception text, and logs
+- frontend parser tests for connected, interim, final, speech-final, confidence,
+  empty, malformed, duplicate, close, and error WebSocket events
+- lifecycle tests for microphone permission denial, explicit start, stop,
+  cancel, reconnect, component unmount, and release of every media track/socket
+- dispatch tests proving multiple interim revisions lead to exactly one final
+  Form Agent message
+- endpointing and barge-in regression tests, including assistant playback
+  leakage, a real interruption, and a speaker who pauses mid-answer
+- deterministic name-adapter tests for ordinary, unfamiliar, hyphenated,
+  apostrophised, multi-part, letter-spelled, corrected, and low-confidence names
+- tests proving no uncertain or corrected name reaches canonical field state
+  before its matching explicit confirmation
+- provider-unavailable tests proving typed completion retains the current PDF,
+  transcript, pending proposal, and confirmed values
+- the complete established local regression gate
+
+Required live and manual testing after implementation:
+1. Create a synthetic voice set covering at least 20 short utterances across
+   names, dates, postcodes, reference numbers, yes/no answers, and commands.
+2. Run the same set through the current browser recognizer before cutover and
+   Nova-3 after integration; record exact critical-entity accuracy, duplicate or
+   dropped submissions, clarification rate, and final-transcript latency.
+3. Include unfamiliar, hyphenated, apostrophised, and multi-part synthetic names
+   spoken normally and then spelled after one deliberate misrecognition.
+4. Complete the sample and household-support fixtures by voice using synthetic
+   facts, including one name correction, one interruption, and one typed fallback.
+5. Deny microphone permission, unset the Deepgram key, interrupt the network,
+   and verify that the form remains recoverable through typing and manual edit.
+6. Inspect browser network traffic, backend logs, and the production bundle to
+   confirm that only a short-lived token reaches the browser and no audio is
+   retained by Formless.
+
+Completion evidence to record:
+- selected Nova-3 model and English locale
+- focused automated-test commands and full regression output
+- before/after critical-entity accuracy and latency table using the fixed
+  synthetic voice set
+- a short transcript showing low-confidence surname clarification, spelling,
+  proposal review, correction, and confirmation
+- browser and operating-system versions used for the live voice test
+- provider data-handling/model-improvement configuration and any remaining
+  privacy limitation
+- known speech limitations and the demonstrated typed fallback
+
+Do not implement:
+- Deepgram Voice Agent, Flux, Deepgram text-to-speech, a second conversational
+  model, a second agent, or autonomous voice-owned form actions
+- multilingual assistance, language auto-detection, translation, speaker
+  identification, diarisation, telephony, call recording, or persistent audio
+- silent model correction of names or any other personal fact
+- authentication, accounts, databases, analytics, or transcript persistence
+- PDF extraction or filling changes unrelated to preserving the existing safe
+  voice-to-confirmation path
+- deployment, submission, or later milestone work
+
+# Milestone 9.3 — One-language bilingual assistance pilot
 
 Status: NOT STARTED — CONDITIONAL
 
@@ -4237,8 +4441,8 @@ Go/no-go gate before implementation:
 - confirm that the browser used for the demo supports speech recognition and
   speech synthesis for the selected language, or explicitly scope the pilot to
   typed assistance
-- if these conditions are not met by 20 October 2026, defer this milestone to
-  Milestone 12 and proceed directly to Milestone 9.3
+- if these conditions are not met by 22 October 2026, defer this milestone to
+  Milestone 12 and proceed directly to Milestone 9.4
 
 Goal:
 Help a speaker of one selected non-English language complete an English
@@ -4326,7 +4530,7 @@ Do not implement:
 - a second agent, translation framework, persistence, accounts, or analytics
 - later deployment or submission work
 
-# Milestone 9.3 — Hero workflow validation and release freeze
+# Milestone 9.4 — Hero workflow validation and release freeze
 
 Status: NOT STARTED
 
@@ -4577,7 +4781,7 @@ Status: DEFERRED UNTIL AFTER SUBMISSION
 
 Goal:
 Expand assistance-language support for English source PDFs one reviewed
-language at a time, using the Milestone 9.2 safety and parity boundary.
+language at a time, using the Milestone 9.3 safety and parity boundary.
 
 Required testing after each added language:
 - fluent/native review of all interface strings and complete synthetic

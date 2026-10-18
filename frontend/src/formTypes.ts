@@ -27,6 +27,7 @@ export type AssistancePreferences = {
 
 export type AgentEffectKind =
   | "none"
+  | "assistance_preferences_updated"
   | "proposal"
   | "replacement_proposal"
   | "confirmed"
@@ -47,6 +48,7 @@ export type ReviewFieldStatus =
   | "proposed";
 
 export type ConversationPhase =
+  | "support_setup"
   | "asking"
   | "awaiting_answer"
   | "awaiting_clarification"
@@ -191,6 +193,11 @@ export type ConversationState = {
   active_field_id: string | null;
   pending_proposal: PendingProposal | null;
   remembered_candidates: RememberedCandidate[];
+  support_setup_step?:
+    | "needs"
+    | "needs_after_interaction"
+    | "interaction"
+    | null;
 };
 
 export type AgentEvent =
@@ -215,6 +222,12 @@ export type AgentRequest = {
 export type AgentEffect =
   | {
       effect: "none";
+      field_id: string | null;
+    }
+  | {
+      effect: "assistance_preferences_updated";
+      preferences: AssistancePreferences;
+      introduction_status: SupportIntroductionStatus;
       field_id: string | null;
     }
   | {

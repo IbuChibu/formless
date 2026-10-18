@@ -1,12 +1,24 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [appSource, componentSource, preferenceSource, voiceSource, styles] =
+const [
+  appSource,
+  componentSource,
+  preferenceSource,
+  voiceSource,
+  stateSource,
+  responseSource,
+  typeSource,
+  styles,
+] =
   await Promise.all([
     read("../src/App.tsx"),
     read("../src/components/SupportPreferencesPanel.tsx"),
     read("../src/assistancePreferences.ts"),
     read("../src/VoiceAssistantPanel.tsx"),
+    read("../src/formFieldState.ts"),
+    read("../src/agentResponse.ts"),
+    read("../src/formTypes.ts"),
     read("../src/index.css"),
   ]);
 
@@ -28,7 +40,7 @@ assert.match(
 assert.match(
   appSource,
   /<SupportPreferencesPanel[\s\S]*onSave=[\s\S]*onSkip=/,
-  "the loaded assistant must expose save and skip paths",
+  "the loaded assistant must retain the optional direct settings fallback",
 );
 assert.match(
   appSource,
@@ -52,9 +64,44 @@ for (const preference of [
 }
 
 assert.match(
+  stateSource,
+  /phase: "support_setup"[\s\S]*support_setup_step: "needs"/,
+  "a fresh form must begin in the explicit conversational support phase",
+);
+assert.match(
+  typeSource,
+  /"assistance_preferences_updated"/,
+  "conversation preference changes must use a closed typed effect",
+);
+assert.match(
+  responseSource,
+  /parseAssistancePreferences[\s\S]*validAssistanceUpdate/,
+  "the frontend must validate preference effects and their state transition",
+);
+assert.match(
+  appSource,
+  /effect\.effect === "assistance_preferences_updated"[\s\S]*setAssistancePreferences\(effect\.preferences\)[\s\S]*setSupportIntroductionStatus\(effect\.introduction_status\)/,
+  "App must apply only the validated conversational preference effect",
+);
+assert.match(
+  appSource,
+  /phase === "support_setup"[\s\S]*Tell me what would make this form easier/,
+  "the typed composer must support the conversational introduction",
+);
+assert.match(
+  componentSource,
+  /useState\(false\)[\s\S]*Adjust how I help/,
+  "the checkbox controls must start collapsed behind Adjust how I help",
+);
+assert.match(
+  componentSource,
+  /adjustButtonRef[\s\S]*editHeadingRef[\s\S]*\.focus\(\)[\s\S]*adjustButtonRef\.current\?\.focus\(\)/,
+  "opening and closing the optional settings must manage keyboard focus",
+);
+assert.doesNotMatch(
   componentSource,
   /How can I make this easier for you today\?/,
-  "the introduction must ask a needs-based question",
+  "the checkbox fallback must not impersonate the conversational introduction",
 );
 assert.match(
   componentSource,
@@ -74,7 +121,7 @@ assert.match(
 assert.match(
   componentSource,
   /Choosing voice does not turn on your microphone/,
-  "the introduction must explain that voice preference is not consent",
+  "the adjustment fallback must explain that voice preference is not consent",
 );
 assert.doesNotMatch(
   componentSource,

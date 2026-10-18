@@ -30,9 +30,11 @@ Responsible for:
   stable field IDs, navigating to the active field, and opening a focused field
   editor when a supported widget is selected
 - displaying questions
-- offering one optional needs-based introduction after extraction, keeping the
-  user's explicit assistance preferences only for the current PDF session, and
-  allowing those preferences to be changed or skipped
+- opening the guided interview with one optional conversational support setup,
+  keeping the user's explicit assistance preferences only for the current PDF
+  session, and allowing those preferences to be changed or skipped
+- keeping checkbox and radio preference controls collapsed behind `Adjust how
+  I help` as a direct fallback rather than making them the primary introduction
 - visually adapting the preferred input emphasis without treating a voice
   preference as microphone consent or starting a voice session
 - starting a turn-based browser voice interview only after an explicit user
@@ -215,6 +217,8 @@ Responsible for:
 - validating bounded assistance preferences received with each request and
   using them only to shape wording, pace, explanation depth, and spoken
   readability
+- deterministically mapping only clear support requests made during the
+  introduction or interview into the closed assistance-preference schema
 - validating explicit conversation events and state transitions
 - deciding what context goes to Nemotron
 - selecting bounded official guidance for an exact allowlisted form version
@@ -425,13 +429,21 @@ bounded request rather than introducing persistence.
 
 ## Session-only assistance preferences
 
-After a PDF is extracted, the frontend may ask how the user would like help.
+After a PDF is extracted, the Form Agent enters a `support_setup` phase before
+the first field. It asks what tends to make forms difficult, accepts a natural
+answer, and asks whether speaking, typing, or either is preferred when that is
+still unclear. The user may say `just start` at either step. Only clear requests
+are mapped deterministically to the closed preference schema; an identity,
+diagnosis, or ambiguous difficulty statement receives a neutral follow-up
+instead of an inferred preference.
+
 The available support needs are explicit communication choices: plain
 language, slower pacing, help organising supplied details, clearer review
 reassurance, explanation of unfamiliar bureaucracy wording, and one optional
 bounded note. A separate interaction preference may be standard, voice, or
 typing. English is the only valid assistance language until a later reviewed
-language milestone.
+language milestone. The checkbox and radio controls expose the same object only
+after the user opens `Adjust how I help`.
 
 `App` owns this object for the current PDF session and includes it in each Form
 Agent request. Replacing the PDF clears it. The backend accepts only the closed
@@ -440,17 +452,21 @@ characters, and treats that note as untrusted context. The prompt builder
 derives trusted style instructions from the closed values; it never turns the
 free-text note into a system instruction.
 
-Preferences are not canonical form data, conversation phase, model-inferred
-profiles, diagnoses, analytics, or persistence. They may alter presentation
-but cannot alter field selection, factual meaning, available options,
-validation, guidance eligibility, typed effects, explicit confirmation, or PDF
-filling. Selecting voice changes emphasis only; microphone access still begins
-solely through the existing explicit voice-session start.
+Preference updates returned from conversation use a closed
+`assistance_preferences_updated` effect. `App` validates and applies that effect
+without treating it as a form mutation. Preferences are not canonical form
+data, model-inferred profiles, diagnoses, analytics, or persistence. They may
+alter presentation but cannot alter factual meaning, available options,
+validation, guidance eligibility, explicit confirmation, or PDF filling.
+Selecting voice changes emphasis only; microphone access still begins solely
+through the existing explicit voice-session start.
 
 ## Conversation state machine
 
 The frontend sends the complete ephemeral conversation state and one explicit
 event with each Form Agent request. The canonical phases are:
+- `support_setup`, with an explicit `needs`, `needs_after_interaction`, or
+  `interaction` step and no active form field
 - `asking`
 - `awaiting_answer`
 - `awaiting_clarification`

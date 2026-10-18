@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   assistanceNeedOptions,
@@ -25,13 +25,28 @@ export default function SupportPreferencesPanel({
   onSave,
   onSkip,
 }: SupportPreferencesPanelProps) {
-  const [isEditing, setIsEditing] = useState(status === "pending");
+  const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(preferences);
+  const adjustButtonRef = useRef<HTMLButtonElement>(null);
+  const editHeadingRef = useRef<HTMLHeadingElement>(null);
+  const hasOpenedEditorRef = useRef(false);
 
   useEffect(() => {
     setDraft(preferences);
-    setIsEditing(status === "pending");
+    setIsEditing(false);
   }, [preferences, status]);
+
+  useEffect(() => {
+    if (isEditing) {
+      hasOpenedEditorRef.current = true;
+      editHeadingRef.current?.focus();
+      return;
+    }
+    if (hasOpenedEditorRef.current) {
+      hasOpenedEditorRef.current = false;
+      adjustButtonRef.current?.focus();
+    }
+  }, [isEditing]);
 
   const labels = assistancePreferenceLabels(preferences);
   const otherNeedsNote =
@@ -64,14 +79,18 @@ export default function SupportPreferencesPanel({
         <div>
           <span>Your support choices</span>
           <strong id="support-preferences-summary-heading">
-            {status === "skipped" || labels.length === 0
-              ? "Standard guided help"
-              : "I’ll adapt how I help"}
+            {status === "pending"
+              ? "The assistant will ask what would help"
+              : status === "skipped" || labels.length === 0
+                ? "Standard guided help"
+                : "I’ll adapt how I help"}
           </strong>
           <p>
-            {status === "skipped" || labels.length === 0
-              ? "You can personalise the pace and wording at any time."
-              : "These choices change how help is presented, never what is written into the form."}
+            {status === "pending"
+              ? "Start the conversation for a short introduction, or adjust the settings directly here."
+              : status === "skipped" || labels.length === 0
+                ? "You can personalise the pace and wording at any time."
+                : "These choices change how help is presented, never what is written into the form."}
           </p>
         </div>
         {labels.length > 0 ? (
@@ -82,13 +101,12 @@ export default function SupportPreferencesPanel({
           </ul>
         ) : null}
         <button
+          ref={adjustButtonRef}
           type="button"
           disabled={disabled}
           onClick={() => setIsEditing(true)}
         >
-          {status === "skipped" || labels.length === 0
-            ? "Personalise help"
-            : "Change support"}
+          {labels.length === 0 ? "Adjust how I help" : "Change support"}
         </button>
       </section>
     );
@@ -111,13 +129,17 @@ export default function SupportPreferencesPanel({
       }}
     >
       <div className="support-preferences-heading">
-        <span>Before we begin</span>
-        <h3 id="support-preferences-heading">
-          How can I make this easier for you today?
+        <span>Optional settings</span>
+        <h3
+          ref={editHeadingRef}
+          id="support-preferences-heading"
+          tabIndex={-1}
+        >
+          Adjust how I help
         </h3>
         <p>
-          Choose any that help. This only changes how the assistant explains
-          things during this form.
+          The conversation can set these naturally. These controls are a
+          direct fallback for changing the wording, pace, or input emphasis.
         </p>
       </div>
 
@@ -193,11 +215,11 @@ export default function SupportPreferencesPanel({
 
       <div className="support-preferences-actions">
         <button type="submit" disabled={disabled || otherNeedsNote}>
-          Save and continue
+          Save settings
         </button>
         {status === "pending" ? (
           <button type="button" disabled={disabled} onClick={onSkip}>
-            Skip this
+            Use standard settings
           </button>
         ) : (
           <button
@@ -215,4 +237,3 @@ export default function SupportPreferencesPanel({
     </form>
   );
 }
-

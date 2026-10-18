@@ -49,6 +49,16 @@ export function createDefaultAssistancePreferences(): AssistancePreferences {
   };
 }
 
+export function hasAssistancePreferences(
+  preferences: AssistancePreferences,
+): boolean {
+  return Boolean(
+    preferences.support_needs.length ||
+      preferences.interaction_mode !== "no_preference" ||
+      preferences.other_note,
+  );
+}
+
 export function assistancePreferenceLabels(
   preferences: AssistancePreferences,
 ): string[] {
@@ -64,4 +74,3 @@ export function assistancePreferenceLabels(
   }
   return labels;
 }
-
