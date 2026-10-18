@@ -8,6 +8,8 @@ from pydantic import TypeAdapter
 
 from .models import (
     AdvanceEvent,
+    AssistancePreferencesUpdatedAction,
+    AssistancePreferencesUpdatedEffect,
     ClarifyAction,
     ConfirmedAction,
     ConfirmedEffect,
@@ -56,6 +58,7 @@ from .value_normalizer import validate_field_value
 _RESPONSE_ADAPTER = TypeAdapter(FormAgentResponse)
 
 _ALLOWED_EVENTS: dict[ConversationPhase, set[str]] = {
+    "support_setup": {"advance", "message", "focus_field"},
     "asking": {"advance", "message", "focus_field"},
     "awaiting_answer": {"message", "skip", "focus_field"},
     "awaiting_clarification": {"message", "skip", "focus_field"},
@@ -255,6 +258,26 @@ def response_for_action(
             request.fields,
             remembered_candidates=remembered_candidates,
         )
+    elif isinstance(action, AssistancePreferencesUpdatedAction):
+        if request.conversation_state.phase != "support_setup":
+            state = request.conversation_state
+        elif action.introduction_status == "pending":
+            state = ConversationState(
+                phase="support_setup",
+                support_setup_step=action.support_setup_step,
+                remembered_candidates=remembered_candidates,
+            )
+        elif action.field_id is None:
+            state = ConversationState(
+                phase="form_complete",
+                remembered_candidates=remembered_candidates,
+            )
+        else:
+            state = ConversationState(
+                phase="awaiting_answer",
+                active_field_id=action.field_id,
+                remembered_candidates=remembered_candidates,
+            )
     elif (
         isinstance(action, ClarifyAction)
         and request.conversation_state.phase
@@ -322,6 +345,12 @@ def response_for_action(
 
 
 def _effect_for_action(action: FormAgentAction) -> dict[str, object]:
+    if isinstance(action, AssistancePreferencesUpdatedAction):
+        return AssistancePreferencesUpdatedEffect(
+            preferences=action.preferences,
+            introduction_status=action.introduction_status,
+            field_id=action.field_id,
+        ).model_dump()
     if isinstance(action, ProposeAction):
         return ProposalEffect(
             field_id=action.field_id,

@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Optional
 
 from .answer_preparation import prepare_proposal_action
+from .assistance_policy import assistance_preference_action
 from .answer_adapters import (
     AnswerAdapterResult,
     ClarificationNeeded,
@@ -235,6 +236,10 @@ def deterministic_action(
     )
     event = request.event
     turn_intent = classify_turn_intent(request)
+
+    assistance_action = assistance_preference_action(request)
+    if assistance_action is not None:
+        return assistance_action
 
     if isinstance(event, AdvanceEvent):
         return _next_unanswered_action(request.fields)

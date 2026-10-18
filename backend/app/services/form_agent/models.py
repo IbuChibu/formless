@@ -44,7 +44,14 @@ AssistanceNeed = Literal[
     "other",
 ]
 InteractionModePreference = Literal["no_preference", "voice", "typing"]
+SupportIntroductionStatus = Literal["pending", "saved", "skipped"]
+SupportSetupStep = Literal[
+    "needs",
+    "needs_after_interaction",
+    "interaction",
+]
 ConversationPhase = Literal[
+    "support_setup",
     "asking",
     "awaiting_answer",
     "awaiting_clarification",
@@ -206,12 +213,15 @@ class ConversationState(_AgentModel):
         default_factory=list,
         max_length=MAX_REMEMBERED_CANDIDATES,
     )
+    support_setup_step: Optional[SupportSetupStep] = None
 
     @model_serializer(mode="wrap")
     def serialize_state(self, handler):
         data = handler(self)
         if not self.remembered_candidates:
             data.pop("remembered_candidates", None)
+        if self.support_setup_step is None:
+            data.pop("support_setup_step", None)
         return data
 
     @model_validator(mode="after")
@@ -232,11 +242,21 @@ class ConversationState(_AgentModel):
             raise ValueError(
                 f"{self.phase} requires an active field ID"
             )
-        if self.phase in {"asking", "form_complete"}:
+        if self.phase in {"support_setup", "asking", "form_complete"}:
             if self.active_field_id is not None:
                 raise ValueError(
                     f"{self.phase} cannot include an active field ID"
                 )
+
+        if self.phase == "support_setup":
+            if self.support_setup_step is None:
+                raise ValueError(
+                    "support_setup requires a support setup step"
+                )
+        elif self.support_setup_step is not None:
+            raise ValueError(
+                "Only support_setup may include a support setup step"
+            )
 
         if self.phase in {
             "awaiting_confirmation",
@@ -524,6 +544,28 @@ class CorrectionCancelledAction(_AgentModel):
     field_id: str = Field(min_length=1, max_length=500)
 
 
+class AssistancePreferencesUpdatedAction(_AgentModel):
+    action: Literal["assistance_preferences_updated"]
+    message: str = Field(min_length=1, max_length=4000)
+    preferences: AssistancePreferences
+    introduction_status: SupportIntroductionStatus
+    support_setup_step: Optional[SupportSetupStep] = None
+    field_id: Optional[str] = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_setup_shape(self) -> AssistancePreferencesUpdatedAction:
+        if self.introduction_status == "pending":
+            if self.support_setup_step is None or self.field_id is not None:
+                raise ValueError(
+                    "A pending support introduction requires a setup step"
+                )
+        elif self.support_setup_step is not None:
+            raise ValueError(
+                "A completed support introduction cannot retain a setup step"
+            )
+        return self
+
+
 class OfficialGuidanceCitation(_AgentModel):
     source_id: str = Field(min_length=1, max_length=100)
     title: str = Field(min_length=1, max_length=300)
@@ -610,6 +652,7 @@ FormAgentAction = Annotated[
         FieldReopenedAction,
         CorrectionStartedAction,
         CorrectionCancelledAction,
+        AssistancePreferencesUpdatedAction,
     ],
     Field(discriminator="action"),
 ]
@@ -702,6 +745,15 @@ class CompletedEffect(_AgentModel):
     effect: Literal["completed"] = "completed"
 
 
+class AssistancePreferencesUpdatedEffect(_AgentModel):
+    effect: Literal[
+        "assistance_preferences_updated"
+    ] = "assistance_preferences_updated"
+    preferences: AssistancePreferences
+    introduction_status: SupportIntroductionStatus
+    field_id: Optional[str] = Field(default=None, max_length=500)
+
+
 FormAgentEffect = Annotated[
     Union[
         NoFormEffect,
@@ -716,6 +768,7 @@ FormAgentEffect = Annotated[
         ReplacementRejectedEffect,
         CorrectionCancelledEffect,
         CompletedEffect,
+        AssistancePreferencesUpdatedEffect,
     ],
     Field(discriminator="effect"),
 ]
