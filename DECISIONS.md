@@ -569,3 +569,29 @@ received any help. A short dialogue better matches the human-helper experience
 and works naturally through both typing and the existing voice turn loop.
 Keeping recognition deterministic and effects typed preserves the no-invention,
 single-state, explicit-confirmation, and microphone-consent boundaries.
+
+---
+
+## 2026-10-18 — Semantic interpretation is bounded data, not an effect
+
+Decision:
+When deterministic routing cannot safely isolate the meaning of a natural user
+turn, the existing Form Agent may ask its existing Nemotron model for one closed
+turn interpretation. The interpretation classifies intent and identifies only
+user-supplied candidate data tied to real request field IDs. Existing field
+adapters, value validation, answer preparation, state transitions, and explicit
+confirmation remain authoritative. The interpreter cannot return a public
+effect or interact with the PDF Service.
+
+Reason:
+Exact phrase matching is safe but forces people to learn the assistant's
+wording. Speech recognition improvements cannot solve an accurately transcribed
+answer that the application interprets too literally. A bounded semantic layer
+lets natural paraphrases reach the established deterministic safety pipeline
+without adding another agent, granting model prose state-changing authority, or
+weakening the rule that every factual proposal is visibly confirmed.
+
+The confidence label alone is not trusted. Candidate evidence, navigation
+references, and assistance preferences must also be grounded in the latest
+user message by deterministic code before orchestration may create an existing
+closed action.

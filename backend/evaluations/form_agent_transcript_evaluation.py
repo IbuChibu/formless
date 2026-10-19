@@ -768,6 +768,7 @@ async def run_transcript_evaluation(
         Callable[[FormAgentField, str], AnswerAdapterResult]
     ] = None,
     enforce_expected_model_calls: bool = True,
+    turn_interpretation_enabled: bool = True,
 ) -> TranscriptEvaluationReport:
     selected_transcripts = transcripts or transcript_fixtures()
     failures: list[str] = []
@@ -833,6 +834,7 @@ async def run_transcript_evaluation(
             try:
                 service = FormAgentService(  # type: ignore[arg-type]
                     turn_service,
+                    turn_interpretation_enabled=turn_interpretation_enabled,
                     **(
                         {"answer_interpreter": answer_interpreter}
                         if answer_interpreter is not None
@@ -1181,11 +1183,13 @@ async def run_adapter_comparison(
     selected_transcripts = transcripts or transcript_fixtures()
     adapter_report = await run_transcript_evaluation(
         transcripts=selected_transcripts,
+        turn_interpretation_enabled=False,
     )
     legacy_report = await run_transcript_evaluation(
         transcripts=selected_transcripts,
         answer_interpreter=_legacy_answer_interpreter,
         enforce_expected_model_calls=False,
+        turn_interpretation_enabled=False,
     )
     before = legacy_report.metrics
     after = adapter_report.metrics

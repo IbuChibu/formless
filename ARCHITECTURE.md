@@ -252,6 +252,12 @@ The Form Agent is one service boundary with small internal modules:
   established non-private policy functions from their focused owners
 - `intent_policy` classifies bounded turn intent and tracks explanation-repair
   depth without producing a form effect
+- `turn_interpreter` asks the existing Nemotron Service for one bounded semantic
+  interpretation only when deterministic routing cannot safely isolate the
+  user's meaning; its result is validation input, never a public effect
+- `turn_interpretation_grounding` owns pure evidence, field-reference, option,
+  number-word, polarity, navigation, and assistance-preference checks used to
+  distrust and constrain that interpretation
 - `action_validation` checks model-authored actions and explanations against
   the active turn, field context, and approved guidance before they can proceed
 - `state_machine` validates allowed events, owns conversation-phase changes,
@@ -282,6 +288,27 @@ depending on those internal modules. Existing policy callers use the
 `conversation_policy` compatibility surface, so module ownership can change
 without changing the service contract. The internal split does not create
 multiple agents or allow any module to bypass the Nemotron Service.
+
+Natural-language turn interpretation is a semantic boundary inside that same
+agent. Its closed result distinguishes answer, correction, explanation,
+uncertainty, multiple supplied facts, unrelated conversation, assistance,
+skip, and return-to-field intent. Candidate field IDs must come from the
+request and candidate values remain untrusted until a field adapter accepts
+them. Low-confidence, contradictory, malformed, or ungrounded results fall back
+to clarification or the established action path.
+
+Candidate evidence must be a contiguous excerpt of the latest user turn, and
+deterministic grounding independently checks names, dates, number words,
+checkbox polarity, dropdown membership, field references, and explicit support
+preferences. The model cannot turn unrelated speech into a form answer or an
+assistance-setting change merely by assigning it a high confidence score.
+
+The interpreter cannot return a frontend effect, confirm a proposal, change a
+field status, select a Tavily query, or call the PDF Service. The orchestrator
+may turn a validated candidate into an existing proposal action, while the
+state machine continues to own every public effect and transition. Model
+interpretation can therefore reduce literal phrasing requirements without
+moving the explicit-confirmation or canonical-state boundary.
 
 The latest user message is authoritative for the current turn; bounded history
 is context, not a replacement answer. Model explanations are checked against
@@ -615,27 +642,30 @@ For agent or voice input:
 2. For explanatory turns, the Form Agent first selects bounded local guidance
    for an exact allowlisted form version and active field. If that is
    insufficient, deterministic policy may perform one bounded Tavily lookup.
-3. The Form Agent first asks the selected field-type adapter to match or clarify
-   common answers; genuinely complex interpretation can fall through to
-   Nemotron.
-4. The answer-preparation layer preserves the user's original candidate,
+3. Exact commands and already-unambiguous values use deterministic policy. When
+   meaning remains conversational or ambiguous, the Form Agent requests one
+   closed Nemotron turn interpretation with no state-changing authority.
+4. The selected field-type adapter validates and normalizes every interpreted
+   candidate; an invalid, low-confidence, or unsupported interpretation becomes
+   a focused clarification rather than a proposal.
+5. The answer-preparation layer preserves the user's original candidate,
    applies only conservative field-aware formatting, and records any visible
    transformation.
-5. Backend code validates every deterministic or model proposal through the
+6. Backend code validates every deterministic or model proposal through the
    field adapter and the field's ID, type, and available options.
-6. The Form Agent returns a natural assistant message, one typed effect,
+7. The Form Agent returns a natural assistant message, one typed effect,
    resulting conversation state, and any attributable reviewed or live
    guidance used by the explanation.
-7. The frontend shows original and prepared values together when they differ,
+8. The frontend shows original and prepared values together when they differ,
    then asks the user to confirm, edit, use the original when valid, reject, or
    skip the proposal.
-8. A separate confirmation event is validated before the value enters shared
+9. A separate confirmation event is validated before the value enters shared
    field state exactly once. Rejection keeps the same field active. For a
    replacement proposal, rejection or cancellation preserves the previous
    confirmed value and the frontend does not update the PDF preview.
-9. Confirmation, edited confirmation, and skip deterministically transition to
+10. Confirmation, edited confirmation, and skip deterministically transition to
    the next unanswered field, or to form complete, without another model call.
-10. The frontend sends confirmed values to the existing PDF filling endpoint.
+11. The frontend sends confirmed values to the existing PDF filling endpoint.
 
 For manual or direct-on-form input, the explicit user edit is already a
 confirmation. It updates the same shared state and uses the same PDF filling

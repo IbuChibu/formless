@@ -14,6 +14,11 @@ from app.services.form_agent import (
     FormAgentRequest,
     FormAgentService,
 )
+from app.services.form_agent.response_parser import (
+    canonicalize_proposal_value,
+    parse_action,
+    validate_action_against_request,
+)
 from app.services.nemotron_service import NemotronServiceError
 
 
@@ -240,18 +245,6 @@ def test_agent_correction_retry_explains_an_invalid_proposal_value() -> None:
             '"yes"',
             True,
         ),
-        (
-            "full_name",
-            {"type": "number"},
-            "1200.5",
-            "1200.5",
-        ),
-        (
-            "full_name",
-            {"type": "number"},
-            '"£1,200.50"',
-            "1200.50",
-        ),
     ],
 )
 def test_agent_canonicalizes_safe_proposal_formatting(
@@ -266,7 +259,6 @@ def test_agent_canonicalizes_safe_proposal_formatting(
     if field.get("confirmed_value") is None:
         field.pop("confirmed_value", None)
     payload["active_field_id"] = field_id
-    payload["message"] = "Use the value I just provided."
     nemotron = StubNemotronService(
         '{"action":"propose","message":"Proposal",'
         f'"field_id":"{field_id}","value":{model_value}}}'
@@ -277,6 +269,34 @@ def test_agent_canonicalizes_safe_proposal_formatting(
             FormAgentRequest.model_validate(payload)
         )
     ).action
+
+    assert action.action == "propose"
+    assert action.value == expected_value
+
+
+@pytest.mark.parametrize(
+    ("model_value", "expected_value"),
+    [
+        ("1200.5", "1200.5"),
+        ('"£1,200.50"', "1200.50"),
+    ],
+)
+def test_response_parser_canonicalizes_numeric_model_values(
+    model_value: str,
+    expected_value: str,
+) -> None:
+    payload = agent_request_payload()
+    field = next(field for field in payload["fields"] if field["id"] == "full_name")
+    field["type"] = "number"
+    payload["active_field_id"] = "full_name"
+    request = FormAgentRequest.model_validate(payload)
+    parsed = parse_action(
+        '{"action":"propose","message":"Proposal",'
+        f'"field_id":"full_name","value":{model_value}}}'
+    )
+
+    action = canonicalize_proposal_value(parsed, request)
+    validate_action_against_request(action, request)
 
     assert action.action == "propose"
     assert action.value == expected_value

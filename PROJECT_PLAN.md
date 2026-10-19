@@ -4025,16 +4025,18 @@ this order so that product changes are validated before deployment and the
 deployed build is frozen before submission:
 
 1. Milestone 9.1 — Support-aware introduction
-2. Milestone 9.2 — Deepgram streaming speech and identity-field handling
-3. Milestone 9.3 — One-language bilingual assistance pilot, only if its go/no-go
+2. Milestone 9.1.1 — Natural-language turn interpretation
+3. Milestone 9.2 — Deepgram streaming speech and identity-field handling
+4. Milestone 9.3 — One-language bilingual assistance pilot, only if its go/no-go
    gate passes
-4. Milestone 9.4 — Hero workflow validation and release freeze
-5. Milestone 10 — Deployment
-6. Milestone 11 — Hackathon submission
+5. Milestone 9.4 — Hero workflow validation and release freeze
+6. Milestone 10 — Deployment
+7. Milestone 11 — Hackathon submission
 
 Recommended schedule for the 30 October 2026 deadline:
 - 18–19 October: Milestone 9.1
-- 20–21 October: Milestone 9.2
+- 19–20 October: Milestone 9.1.1
+- 20–22 October: Milestone 9.2
 - 22 October: Milestone 9.3 language/reviewer go/no-go decision and, only if
   approved, a tightly bounded implementation; otherwise defer it
 - 23–24 October: Milestone 9.4
@@ -4256,6 +4258,195 @@ Implemented outcome refined 18 October 2026:
 
 Do not mark this milestone complete until the required manual loaded-form steps
 above have been performed with the sample and household-support fixtures.
+
+# Milestone 9.1.1 — Natural-language turn interpretation
+
+Status: IMPLEMENTED — MANUAL QA PENDING
+
+Why this is next:
+The deterministic adapters are reliable for recognized phrases but can be too
+literal. A user may state the same fact conversationally, answer a checkbox
+without saying exactly `yes`, describe a dropdown option in ordinary words,
+correct themselves, or supply several facts together. When those turns fall
+outside narrow patterns, the assistant may repeat the question or ask the user
+to adopt its wording. Better speech recognition will not fix an accurately
+transcribed turn that the Form Agent does not understand.
+
+Goal:
+Interpret natural typed or transcribed turns through one bounded Nemotron
+schema, then pass every candidate through the existing field adapters,
+normalization, proposal review, and explicit confirmation boundary. The user
+should be able to speak naturally without giving Nemotron authority to write
+form state or PDF bytes.
+
+Target flow:
+
+```text
+natural user turn
+    -> bounded Nemotron turn interpretation
+    -> deterministic field adapter and value validation
+    -> focused clarification when uncertain or invalid
+    -> ordinary typed proposal effect
+    -> explicit user confirmation
+    -> canonical field state
+    -> existing PDF filling path
+```
+
+Scope:
+- establish a fixed paraphrase-heavy baseline against the existing public Form
+  Agent interface before changing production interpretation
+- introduce one closed structured interpretation containing an intent,
+  confidence, clarification flag, and only user-grounded candidate data
+- distinguish answer, correction, explanation request, uncertainty,
+  multi-field answer, unrelated conversation, explicit assistance preference,
+  skip request, and return-to-field reference
+- allow a candidate only for a supplied real field ID and preserve bounded
+  evidence from the current user turn
+- use the latest turn as authoritative; history may resolve references but may
+  not replace the current answer
+- send interpreted candidates through existing field-specific adapters and
+  validators; invalid or ambiguous candidates produce a specific clarification
+- keep exact deterministic commands and already-unambiguous values on their
+  current fast path when semantic interpretation is unnecessary
+- permit conversational dropdown or checkbox paraphrases only when the model
+  returns one valid closed value with sufficiently high confidence; every
+  result remains an unconfirmed visible proposal
+- retain at most five validated later-field candidates through the existing
+  request-carried remembered-candidate state when several facts are supplied
+- use interpreted skip, navigation, correction, and assistance intents only as
+  input to deterministic policy; interpretation cannot emit a public effect
+- fall back safely to the existing clarification or action path when an
+  interpretation is malformed, low-confidence, unsupported, or unavailable
+- preserve names, identifiers, negation, uncertainty, and the user's evidence;
+  do not silently repair spelling or manufacture missing precision
+- keep the frontend and voice adapter unchanged; both already send the same
+  message event into the Form Agent
+
+Examples the fixed suite must cover:
+- `I get overwhelmed, so take it slowly.`
+- `Talk me through the official wording.`
+- `I'd rather just explain things in my own words.`
+- `Yeah, that applies to me.`
+- `It was the seventeenth of October 1986.`
+- `Actually, use my current address instead.`
+- `My first name is Ibrahim, surname Akhoon.`
+- `I'm employed full-time.` when the form exposes an `Employed` option
+- one message that supplies the active answer and one later-field answer
+- uncertainty that must remain a clarification rather than becoming a guess
+
+Architecture boundaries:
+- this remains one Form Agent and one Nemotron model behind the existing
+  Nemotron Service; it is not a second agent or an agent debate
+- the interpreter owns semantic classification only; it cannot return public
+  effects, change conversation state, call Tavily, call the PDF Service, or
+  fill a PDF
+- orchestration owns when interpretation is needed and converts only validated
+  results into existing actions
+- field adapters and value normalization remain deterministic authorities over
+  valid stored values and exact dropdown options
+- the state machine remains the only owner of public effects and transitions
+- explicit confirmation remains mandatory for every interpreted factual value
+- malformed structured output receives no broader authority than the existing
+  controlled model-repair and fallback path
+
+Acceptance criteria:
+- a versioned synthetic suite groups at least 10 natural paraphrases across
+  names/free text, dates, numbers, checkboxes, dropdowns, uncertainty,
+  corrections, explanation requests, skips, and multi-field answers
+- a saved baseline records current acceptance, clarification, repetition,
+  invalid-action, invention, and confirmation-boundary results before the
+  production change
+- every successful interpretation uses a closed validated schema and references
+  only supplied real field IDs
+- semantically equivalent paraphrases produce the same prepared candidate or
+  the same safe clarification after deterministic validation
+- an unknown, incompatible, invalid-option, ungrounded, or low-confidence model
+  candidate cannot become a proposal
+- no interpreted value enters canonical field state before its matching
+  explicit confirmation event
+- a correction preserves the currently confirmed value until a replacement is
+  explicitly confirmed
+- multi-field turns retain only bounded, uniquely mapped, adapter-valid later
+  candidates and cannot confirm any of them implicitly
+- explanation, unrelated-conversation, skip, navigation, and assistance intents
+  do not accidentally become factual proposals
+- provider failure leaves the active question and canonical form state intact
+  and gives a usable clarification or established fallback
+- the candidate evaluation materially improves paraphrase acceptance or reduces
+  avoidable clarification/repetition relative to the fixed baseline without
+  increasing invention, invalid-action, or confirmation-boundary failures
+- existing PDF, guidance, conversation, frontend, voice, safety, and
+  human-helper regression gates remain green
+
+Required testing:
+- parser tests for every intent, missing and contradictory properties, extra
+  keys, unknown fields, duplicate or excessive candidates, malformed JSON, and
+  prompt-injection-shaped user text
+- orchestration tests proving deterministic fast paths remain deterministic and
+  conversational answers use interpretation only when needed
+- field-type tests for natural names, spoken dates, numbers, checkbox phrases,
+  dropdown paraphrases, addresses, uncertainty, and corrections
+- state/effect tests proving interpretation alone cannot confirm, skip, select,
+  replace, or mutate a field
+- multi-turn tests covering clarification, corrected answer, proposal,
+  rejection, replacement, confirmation, remembered later answer, and return
+  to a field
+- before/after execution of the identical paraphrase suite with saved reports
+  and a digest-checked comparison
+- the complete established local regression gate
+
+Automated implementation outcome recorded 19 October 2026:
+- the fixed suite contains 19 synthetic scenarios and 40 scheduled turns across
+  names, dates, number words, checkboxes, dropdowns, uncertainty, explanation,
+  skip, return navigation, correction, bundled facts, and interruption
+- its digest is `13246da029a1a841`; the pre-change revision `cc61298` and the
+  candidate were run through the same configured
+  `nvidia/Nemotron-3_5-Lightning` model using that identical digest
+- pre-change deterministic failures were 34, form-state accuracy was 89.5%,
+  latest-answer adherence was 28.6%, context retention was 50%, and recovery
+  success was 0%
+- the candidate recorded zero deterministic failures, 100% form-state
+  accuracy, 100% latest-answer adherence, 100% context retention, and 100%
+  recovery success; the comparison reported 34 fixed failures and no new or
+  unchanged failures
+- both runs retained zero invention, contradiction, repetition, and
+  confirmation-boundary failures
+- average turn latency increased from 142.886 ms to 340.122 ms on this focused
+  model-handled suite; exact deterministic fast paths still make no interpreter
+  call
+- parser and orchestration coverage verifies strict schema fields, every
+  intent, malformed and extra data, unknown and duplicate fields, excessive
+  candidates, grounded evidence, prompt-injection-shaped text, provider
+  failure, field adapters, multi-field memory, replacement preservation,
+  support-preference grounding, navigation, and the confirmation boundary
+- all 420 backend tests pass and the frontend production build succeeds; the
+  existing Vite large-chunk warning remains non-blocking
+- no frontend, PDF, voice-provider, Tavily, persistence, authentication, or
+  deployment behavior changed
+- manual sample/household completion and typed-versus-voice effect comparison
+  remain pending, so this milestone is not marked complete
+
+Required live/manual testing:
+1. Run the fixed paraphrase suite through the configured Nemotron model before
+   and after implementation and save both reports.
+2. Complete the sample and household-support fixtures with synthetic facts
+   while deliberately avoiding the field labels' exact wording.
+3. Include one natural checkbox answer, one ordinary-language dropdown answer,
+   one spoken-style date, one correction, one uncertain answer, and one message
+   containing two facts.
+4. Verify every accepted fact appears as a proposal before it can reach the PDF
+   and that rejecting it leaves canonical state unchanged.
+5. Repeat representative turns through typing and the existing voice adapter;
+   identical transcripts must produce identical effects.
+
+Do not implement:
+- Deepgram or another speech provider; that remains Milestone 9.2
+- a second agent, second model, agent framework, autonomous planning, model
+  debate, model-selected tools, or model-authored state transitions
+- silent confirmation, inferred personal facts, speculative spelling repair,
+  eligibility decisions, or legal, financial, or medical advice
+- frontend redesign, PDF extraction/filling changes, authentication,
+  persistence, analytics, a database, deployment, or later milestone work
 
 # Milestone 9.2 — Deepgram streaming speech and identity-field handling
 

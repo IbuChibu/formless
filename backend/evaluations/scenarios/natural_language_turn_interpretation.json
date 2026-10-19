@@ -1,0 +1,366 @@
+{
+  "schema_version": 1,
+  "suite_id": "natural-language-turn-interpretation-v1",
+  "description": "Fixed synthetic paraphrase groups for natural field answers, uncertainty, explanation, skip, and bundled facts. Every factual value remains an unconfirmed proposal.",
+  "personas": [
+    {
+      "id": "natural_form_speaker",
+      "name": "Alex",
+      "summary": "A synthetic user who answers in ordinary conversational language rather than copying form labels.",
+      "communication_style": "Brief spoken-style sentences, self-corrections, and indirect but explicit answers.",
+      "behaviours": [
+        "does not mirror the assistant's wording",
+        "expects meaning to be understood",
+        "still reviews every proposed value"
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "name-put-that-down",
+      "title": "Name phrased as an instruction",
+      "persona_id": "natural_form_speaker",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "The assistant should isolate the supplied name rather than store the whole conversational sentence.",
+      "tags": ["paraphrase_group:name", "natural_answer"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}},
+        {"id": "answer", "event": {"type": "message", "content": "You can put Ibrahim Akhoon down for that."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "full_name", "prepared_value": "Ibrahim Akhoon", "message_includes_all": ["Ibrahim Akhoon", "review"]}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["full_name"]},
+      "allowed_proposals": {"full_name": ["Ibrahim Akhoon"]}
+    },
+    {
+      "id": "name-that-would-be",
+      "title": "Name supplied with conversational padding",
+      "persona_id": "natural_form_speaker",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "Equivalent name wording should create the same reviewable candidate.",
+      "tags": ["paraphrase_group:name", "natural_answer"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}},
+        {"id": "answer", "event": {"type": "message", "content": "That would be Ibrahim Akhoon, thanks."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "full_name", "prepared_value": "Ibrahim Akhoon"}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["full_name"]},
+      "allowed_proposals": {"full_name": ["Ibrahim Akhoon"]}
+    },
+    {
+      "id": "name-want-there",
+      "title": "Name supplied by reference to the box",
+      "persona_id": "natural_form_speaker",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "A reference to what belongs in the field should not become part of the name.",
+      "tags": ["paraphrase_group:name", "natural_answer"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}},
+        {"id": "answer", "event": {"type": "message", "content": "The name you'll want there is Ibrahim Akhoon."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "full_name", "prepared_value": "Ibrahim Akhoon"}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["full_name"]},
+      "allowed_proposals": {"full_name": ["Ibrahim Akhoon"]}
+    },
+    {
+      "id": "date-that-was",
+      "title": "Date supplied as a natural recollection",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_date_of_birth"],
+      "purpose": "The assistant should isolate and deterministically format an explicit spoken-style date.",
+      "tags": ["paraphrase_group:date", "natural_answer"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_date_of_birth"}},
+        {"id": "answer", "event": {"type": "message", "content": "That was the seventeenth of October 1986."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_date_of_birth", "prepared_value": "17/10/1986"}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["applicant_date_of_birth"]},
+      "allowed_proposals": {"applicant_date_of_birth": ["17/10/1986"]}
+    },
+    {
+      "id": "date-came-into-world",
+      "title": "Date supplied without form terminology",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_date_of_birth"],
+      "purpose": "Ordinary language for a birth date should reach the same adapter result.",
+      "tags": ["paraphrase_group:date", "natural_answer"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_date_of_birth"}},
+        {"id": "answer", "event": {"type": "message", "content": "I came into the world on 17 October 1986."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_date_of_birth", "prepared_value": "17/10/1986"}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["applicant_date_of_birth"]},
+      "allowed_proposals": {"applicant_date_of_birth": ["17/10/1986"]}
+    },
+    {
+      "id": "checkbox-applies-to-me",
+      "title": "Affirmative checkbox paraphrase",
+      "persona_id": "natural_form_speaker",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["accept_terms"],
+      "purpose": "A clear affirmative paraphrase should become a reviewable true value.",
+      "tags": ["paraphrase_group:checkbox", "natural_answer"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "accept_terms"}},
+        {"id": "answer", "event": {"type": "message", "content": "Yeah, that applies to me."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "accept_terms", "prepared_value": true}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["accept_terms"]},
+      "allowed_proposals": {"accept_terms": [true]}
+    },
+    {
+      "id": "checkbox-share-costs",
+      "title": "Checkbox answered as an ordinary statement",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["shares_food_or_living_costs"],
+      "purpose": "A direct factual statement should map to the checkbox without requiring the word yes.",
+      "tags": ["paraphrase_group:checkbox", "natural_answer"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "shares_food_or_living_costs"}},
+        {"id": "answer", "event": {"type": "message", "content": "I do share those costs with someone."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "shares_food_or_living_costs", "prepared_value": true}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["shares_food_or_living_costs"]},
+      "allowed_proposals": {"shares_food_or_living_costs": [true]}
+    },
+    {
+      "id": "checkbox-natural-negative",
+      "title": "Negative checkbox paraphrase",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["shares_food_or_living_costs"],
+      "purpose": "A clear negative sentence should become a reviewable false value.",
+      "tags": ["paraphrase_group:checkbox", "natural_answer"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "shares_food_or_living_costs"}},
+        {"id": "answer", "event": {"type": "message", "content": "No, that's not something I do."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "shares_food_or_living_costs", "prepared_value": false}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["shares_food_or_living_costs"]},
+      "allowed_proposals": {"shares_food_or_living_costs": [false]}
+    },
+    {
+      "id": "dropdown-sole-tenant-description",
+      "title": "Housing option described naturally",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["residency_arrangement"],
+      "purpose": "A description equivalent to one visible option should map to that exact option for review.",
+      "tags": ["paraphrase_group:dropdown", "natural_answer"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "residency_arrangement"}},
+        {"id": "answer", "event": {"type": "message", "content": "It's just me renting the place."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "residency_arrangement", "prepared_value": "Sole tenant"}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["residency_arrangement"]},
+      "allowed_proposals": {"residency_arrangement": ["Sole tenant"]}
+    },
+    {
+      "id": "dropdown-joint-tenant-description",
+      "title": "Joint tenancy described naturally",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["residency_arrangement"],
+      "purpose": "A clear description should resolve to one exact available option.",
+      "tags": ["paraphrase_group:dropdown", "natural_answer"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "residency_arrangement"}},
+        {"id": "answer", "event": {"type": "message", "content": "I rent it jointly with somebody else."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "residency_arrangement", "prepared_value": "Joint tenant"}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["residency_arrangement"]},
+      "allowed_proposals": {"residency_arrangement": ["Joint tenant"]}
+    },
+    {
+      "id": "dropdown-family-description",
+      "title": "Family living arrangement described naturally",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["residency_arrangement"],
+      "purpose": "Everyday wording for living with family should map to the exact available option.",
+      "tags": ["paraphrase_group:dropdown", "natural_answer"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "residency_arrangement"}},
+        {"id": "answer", "event": {"type": "message", "content": "I'm staying with relatives right now."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "residency_arrangement", "prepared_value": "Living with family or friends"}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["residency_arrangement"]},
+      "allowed_proposals": {"residency_arrangement": ["Living with family or friends"]}
+    },
+    {
+      "id": "uncertain-date-stays-uncertain",
+      "title": "Uncertain date requires clarification",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_date_of_birth"],
+      "purpose": "Missing day precision must not be invented merely to satisfy the field format.",
+      "tags": ["paraphrase_group:uncertainty", "clarification", "no_invention"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_date_of_birth"}},
+        {"id": "answer", "event": {"type": "message", "content": "It was sometime in October 1986, but I don't know the day."}, "tags": ["clarification", "confirmation_boundary"], "expect": {"effects": ["none"], "phase": "awaiting_clarification", "field_id": "applicant_date_of_birth", "message_includes_any": ["exact", "day", "date"]}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["applicant_date_of_birth"]},
+      "allowed_proposals": {}
+    },
+    {
+      "id": "natural-explanation-request",
+      "title": "Explanation requested without command wording",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["residency_arrangement"],
+      "purpose": "A natural request for help should remain informational and keep the same active field.",
+      "tags": ["paraphrase_group:explanation", "clarification"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "residency_arrangement"}},
+        {"id": "ask", "event": {"type": "message", "content": "Could you say what they're actually asking me for here?"}, "tags": ["clarification", "context_retention"], "expect": {"effects": ["none"], "phase": "awaiting_answer", "field_id": "residency_arrangement", "state_unchanged": true, "message_includes_any": ["live", "housing", "arrangement", "tenant"]}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["residency_arrangement"]},
+      "allowed_proposals": {}
+    },
+    {
+      "id": "natural-skip-request",
+      "title": "Skip requested conversationally",
+      "persona_id": "natural_form_speaker",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "A conversational request to leave the field for later should use deterministic skip policy rather than become a value.",
+      "tags": ["paraphrase_group:skip", "navigation"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}},
+        {"id": "skip", "event": {"type": "message", "content": "Can we leave this one and circle back later?"}, "expect": {"effects": ["skipped"], "phase": "form_complete", "field_id": "full_name"}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": ["full_name"], "unanswered_field_ids": []},
+      "allowed_proposals": {}
+    },
+    {
+      "id": "number-spoken-in-a-sentence",
+      "title": "Household count supplied conversationally",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["household_member_count"],
+      "purpose": "A spoken number inside an ordinary sentence should become the same exact numeric candidate.",
+      "tags": ["number", "paraphrase", "confirmation_boundary"],
+      "turns": [
+        {
+          "id": "start",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "household_member_count"}
+        },
+        {
+          "id": "answer",
+          "event": {"type": "message", "content": "All together there are four of us."},
+          "tags": ["latest_answer", "confirmation_boundary"],
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "household_member_count", "prepared_value": "4"}
+        }
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["household_member_count"]},
+      "allowed_proposals": {"household_member_count": ["4"]}
+    },
+    {
+      "id": "multiple-facts-supplied-together",
+      "title": "Name and date supplied in one natural turn",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_full_legal_name", "applicant_date_of_birth"],
+      "purpose": "The active answer should be proposed while one adapter-valid later answer is retained without implicit confirmation.",
+      "tags": ["multiple_fields", "paraphrase", "confirmation_boundary"],
+      "turns": [
+        {
+          "id": "start",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_full_legal_name"}
+        },
+        {
+          "id": "bundle",
+          "event": {"type": "message", "content": "My name's Maya Patel and I came into the world on 9 April 1990."},
+          "tags": ["latest_answer", "confirmation_boundary"],
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_full_legal_name", "prepared_value": "Maya Patel"}
+        },
+        {
+          "id": "confirm-name",
+          "event": {"type": "confirm"},
+          "visible_user_message": "Yes, use that name.",
+          "tags": ["confirmation_boundary"],
+          "expect": {"effects": ["confirmed"], "phase": "awaiting_answer", "field_id": "applicant_full_legal_name", "prepared_value": "Maya Patel"}
+        },
+        {
+          "id": "recall-date",
+          "event": {"type": "message", "content": "I gave you my date with my name."},
+          "tags": ["volunteered_fact_recall", "confirmation_boundary"],
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_date_of_birth", "prepared_value": "09/04/1990"}
+        }
+      ],
+      "expected_final": {"confirmed_values": {"applicant_full_legal_name": "Maya Patel"}, "skipped_field_ids": [], "unanswered_field_ids": ["applicant_date_of_birth"]},
+      "allowed_proposals": {"applicant_full_legal_name": ["Maya Patel"], "applicant_date_of_birth": ["09/04/1990"]}
+    },
+    {
+      "id": "natural-replacement-phrase",
+      "title": "Confirmed name corrected conversationally",
+      "persona_id": "natural_form_speaker",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "A conversational replacement should remain a proposal and preserve the confirmed value until confirmation.",
+      "tags": ["correction", "recovery", "confirmation_boundary"],
+      "initial_confirmed_values": {"full_name": "Ibrahim Khan"},
+      "turns": [
+        {
+          "id": "start-correction",
+          "event": {"type": "message", "content": "I need to correct the full name."},
+          "tags": ["recovery"],
+          "expect": {"effects": ["correction_started"], "phase": "awaiting_replacement", "field_id": "full_name"}
+        },
+        {
+          "id": "replacement",
+          "event": {"type": "message", "content": "Actually, use Ibrahim Akhoon instead."},
+          "tags": ["latest_answer", "recovery", "confirmation_boundary"],
+          "expect": {"effects": ["replacement_proposal"], "phase": "awaiting_replacement_confirmation", "field_id": "full_name", "prepared_value": "Ibrahim Akhoon"}
+        }
+      ],
+      "expected_final": {"confirmed_values": {"full_name": "Ibrahim Khan"}, "skipped_field_ids": [], "unanswered_field_ids": []},
+      "allowed_proposals": {"full_name": ["Ibrahim Akhoon"]}
+    },
+    {
+      "id": "return-to-skipped-field-conversationally",
+      "title": "Return to a skipped field by reference",
+      "persona_id": "natural_form_speaker",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name", "accept_terms"],
+      "purpose": "A natural reference should reopen the skipped field without proposing or confirming a value.",
+      "tags": ["navigation", "recovery", "confirmation_boundary"],
+      "initial_skipped_field_ids": ["full_name"],
+      "turns": [
+        {
+          "id": "start",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "accept_terms"}
+        },
+        {
+          "id": "return",
+          "event": {"type": "message", "content": "Before this, can we go back to the name I left for later?"},
+          "tags": ["context_retention", "recovery", "confirmation_boundary"],
+          "expect": {"effects": ["field_reopened"], "phase": "awaiting_answer", "field_id": "full_name"}
+        }
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["full_name", "accept_terms"]},
+      "allowed_proposals": {}
+    },
+    {
+      "id": "unrelated-interruption-is-not-a-name",
+      "title": "Unrelated interruption remains non-factual",
+      "persona_id": "natural_form_speaker",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "An interruption while a name field is active must not be stored as the name.",
+      "tags": ["interruption", "safety", "confirmation_boundary"],
+      "turns": [
+        {
+          "id": "start",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}
+        },
+        {
+          "id": "interrupt",
+          "event": {"type": "message", "content": "Give me a second, my doorbell is ringing."},
+          "tags": ["interruption_recovery", "confirmation_boundary"],
+          "expect": {"effects": ["none"], "phase": "awaiting_clarification", "field_id": "full_name"}
+        }
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["full_name"]},
+      "allowed_proposals": {}
+    }
+  ]
+}

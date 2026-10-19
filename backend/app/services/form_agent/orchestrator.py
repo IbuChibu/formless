@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Optional
 
-from app.services.nemotron_service import NemotronService
+from app.services.nemotron_service import NemotronService, NemotronServiceError
 from app.services.tavily_service import (
     TavilyConfigurationError,
     TavilyService,
@@ -35,7 +35,11 @@ from .conversation_policy import (
     validate_event_transition,
 )
 from .models import (
+    AssistancePreferencesUpdatedAction,
+    CorrectionStartedAction,
     ExplainAction,
+    FieldReopenedAction,
+    FieldSelectedAction,
     FormAgentError,
     FormAgentField,
     FormAgentRequest,
@@ -68,6 +72,11 @@ from .web_guidance import (
     unavailable_web_guidance,
     validate_web_guidance_action,
 )
+from .turn_interpreter import (
+    action_from_interpretation,
+    interpret_turn,
+    should_interpret_turn,
+)
 
 
 class FormAgentService:
@@ -80,10 +89,12 @@ class FormAgentService:
             [FormAgentField, str],
             AnswerAdapterResult,
         ] = interpret_answer,
+        turn_interpretation_enabled: bool = True,
     ) -> None:
         self._nemotron_service = nemotron_service
         self._tavily_service = tavily_service
         self._answer_interpreter = answer_interpreter
+        self._turn_interpretation_enabled = turn_interpretation_enabled
 
     async def respond(self, request: FormAgentRequest) -> FormAgentResponse:
         validate_event_transition(request)
@@ -134,6 +145,53 @@ class FormAgentService:
             request,
             self._answer_interpreter,
         )
+        if self._turn_interpretation_enabled and should_interpret_turn(
+            request,
+            policy_action,
+        ):
+            try:
+                interpreted_turn = await interpret_turn(
+                    self._nemotron_service,
+                    request,
+                )
+            except (FormAgentError, NemotronServiceError):
+                if policy_action is not None and not isinstance(
+                    policy_action,
+                    (ProposeAction, ReplacementProposeAction),
+                ):
+                    return response_for_action(policy_action, request)
+                fallback = model_failure_fallback(request)
+                if fallback is not None:
+                    return response_for_action(fallback, request)
+            else:
+                try:
+                    interpreted_action, request = action_from_interpretation(
+                        request,
+                        interpreted_turn,
+                        self._answer_interpreter,
+                    )
+                    if interpreted_action is not None:
+                        if not isinstance(
+                            interpreted_action,
+                            (
+                                AssistancePreferencesUpdatedAction,
+                                CorrectionStartedAction,
+                                FieldReopenedAction,
+                                FieldSelectedAction,
+                            ),
+                        ):
+                            validate_action_against_request(
+                                interpreted_action,
+                                request,
+                            )
+                except FormAgentError:
+                    interpreted_action = None
+                if interpreted_action is not None:
+                    return response_for_action(
+                        normalize_action_message(interpreted_action, request),
+                        request,
+                    )
+
         if policy_action is not None:
             return response_for_action(policy_action, request)
 

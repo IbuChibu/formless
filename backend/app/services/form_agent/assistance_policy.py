@@ -150,6 +150,53 @@ def assistance_preference_action(
     return _mid_form_update(request, preferences)
 
 
+def interpreted_assistance_preference_action(
+    request: FormAgentRequest,
+    needs: list[AssistanceNeed],
+    interaction_mode: Optional[InteractionModePreference],
+) -> AssistancePreferencesUpdatedAction:
+    """Convert already-bounded semantic preferences into a closed action."""
+    preferences = _merged_preferences(
+        request.assistance_preferences,
+        needs,
+        interaction_mode,
+    )
+    if request.conversation_state.phase != "support_setup":
+        return _mid_form_update(request, preferences)
+
+    step = request.conversation_state.support_setup_step or "needs"
+    if needs and (interaction_mode is not None or step == "needs_after_interaction"):
+        return _complete_setup(request, preferences, skipped=False)
+    if interaction_mode is not None and step == "interaction":
+        return _complete_setup(request, preferences, skipped=False)
+    if needs:
+        return AssistancePreferencesUpdatedAction(
+            action="assistance_preferences_updated",
+            message=(
+                f"{_preference_acknowledgement(preferences)} Would you rather "
+                "speak, type, or use either? Choosing voice will not turn on "
+                "your microphone by itself."
+            ),
+            preferences=preferences,
+            introduction_status="pending",
+            support_setup_step="interaction",
+            field_id=None,
+        )
+    return AssistancePreferencesUpdatedAction(
+        action="assistance_preferences_updated",
+        message=(
+            "Thanks — I’ve noted how you would rather answer. What would make "
+            "the form itself easier: simpler wording, a slower pace, help "
+            "organising details, clearer review points, or explanations of "
+            "official wording? You can also say “just start”."
+        ),
+        preferences=preferences,
+        introduction_status="pending",
+        support_setup_step="needs_after_interaction",
+        field_id=None,
+    )
+
+
 def _support_setup_action(request: FormAgentRequest) -> FormAgentAction:
     event = request.event
     preferences = request.assistance_preferences
