@@ -73,6 +73,13 @@ def validate_action_for_turn(
         raise FormAgentError(
             "This conversational turn requires a non-mutating response"
         )
+    if (
+        turn_intent_override == "uncertain_answer"
+        and not isinstance(action, ClarifyAction)
+    ):
+        raise FormAgentError(
+            "This uncertain turn requires a clarification action"
+        )
     if intent == "prose_polish" and not isinstance(
         action,
         (ProposeAction, ReplacementProposeAction, ClarifyAction),

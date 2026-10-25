@@ -615,3 +615,34 @@ Treating those as candidate field values produces an irrelevant format error
 and makes the assistant appear not to understand the conversation. Reusing the
 bounded, validated explanation path fixes the routing problem without widening
 model authority or weakening explicit confirmation.
+
+---
+
+## 2026-10-25 — Ordinary conversation is semantic-first; effects remain deterministic
+
+Decision:
+For an ordinary message while awaiting an answer, clarification, or
+replacement, bounded Nemotron interpretation is the primary semantic router.
+Explicit UI and state events, pending-proposal review, progress and guidance
+operations, closed support-setup effects, and unmistakable adapter-valid values
+retain deterministic fast paths. The earlier phrase classifier remains the
+safe fallback when semantic interpretation is unavailable or invalid.
+
+A non-factual interpretation may only choose an existing grounded response
+path. A factual candidate still requires evidence grounding, a field-specific
+adapter, a visible proposal, and separate explicit confirmation before any
+canonical state changes. If the provider fills `referenced_field_id` for a
+non-navigation intent, that non-operational slot is normalized to `null`;
+candidate grounding and real navigation references remain strict.
+
+Reason:
+Treating deterministic phrase patterns as the first conversational decision
+made harmless variations such as `what do you mean` or `I need a moment` look
+like invalid form answers. On the same live suite digest and model, the
+semantic-first route removed 35 deterministic failures and raised form-state
+accuracy, context retention, latest-answer adherence, and interruption
+recovery, with no new invention or confirmation-boundary failures. The measured
+latency increase is acceptable because model authority remains bounded to
+interpretation and all effects remain deterministic and validated. This
+supersedes the trigger order in the 18 October semantic-interpretation decision
+without changing its safety boundary.

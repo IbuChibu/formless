@@ -264,7 +264,10 @@ def test_supported_purpose_response_is_attributed_without_model_call() -> None:
     )
 
     response = asyncio.run(
-        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(request)
     )
 
     assert response.action.action == "explain"
@@ -286,7 +289,10 @@ def test_plain_field_explanation_uses_bounded_context_without_guidance() -> None
     )
 
     response = asyncio.run(
-        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(request)
     )
     raw_context = nemotron.calls[0]["user_prompt"].split(
         "UNTRUSTED_AGENT_CONTEXT\n",

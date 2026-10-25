@@ -524,4 +524,4 @@ def test_invalid_model_output_during_correction_preserves_previous_value() -> No
     assert response.effect.effect == "none"
     assert response.conversation_state == agent_request.conversation_state
     assert agent_request.fields[0].confirmed_value == "Ada Lovelace"
-    assert len(nemotron.calls) == 2
+    assert len(nemotron.calls) == 1

@@ -4478,6 +4478,130 @@ Do not implement:
 - frontend redesign, PDF extraction/filling changes, authentication,
   persistence, analytics, a database, deployment, or later milestone work
 
+# Milestone 9.1.2 — Semantic-first conversational routing
+
+Status: IMPLEMENTED — MANUAL QA PENDING
+
+Why this is next:
+Milestone 9.1.1 added bounded semantic interpretation, but deterministic phrase
+classification can still decide the conversational route before Nemotron sees
+the turn. That makes ordinary questions and side comments dependent on an
+ever-growing phrase list. The model should decide whether an ordinary message
+is an answer, explanation request, uncertainty, correction, preference,
+navigation request, or conversation; deterministic code should decide only
+whether any resulting value or effect is safe.
+
+Goal:
+Make bounded Nemotron interpretation the first semantic decision for ordinary
+typed or finalized-transcript messages while retaining deterministic field
+validation, grounding, explicit confirmation, state transitions, guidance
+policy, and PDF writing.
+
+Target flow:
+
+```text
+ordinary user message
+    -> bounded Nemotron intent and candidate interpretation
+    -> non-factual intent routes to the existing grounded response path
+    -> factual candidate passes deterministic grounding and field adapter
+    -> visible proposal
+    -> explicit confirmation
+    -> canonical state and existing PDF fill path
+```
+
+Scope:
+- semantically interpret ordinary messages while the interview is awaiting an
+  answer, clarification, or replacement
+- retain deterministic handling for explicit non-message events, pending
+  proposal review, exact progress commands, reviewed-guidance policy, and
+  already-closed setup effects
+- retain the deterministic fast path for an unmistakable adapter-valid field
+  value; conversational framing, ambiguity, or a non-proposal result invokes
+  semantic interpretation
+- treat the active field as the implicit referent for phrases such as `what do
+  you mean`, `what are they getting at`, and `I am not sure what they want`
+- route `ask_explanation` to the existing grounded explanation generator even
+  when the interpreter is cautious about confidence; this route has no form
+  effect and cannot create a candidate
+- route unrelated comments and pauses to the existing natural-conversation
+  response path rather than converting them into field-format errors
+- route semantic uncertainty to a natural clarification response while still
+  preventing a proposal
+- keep interpreted answer candidates behind deterministic evidence grounding,
+  field adapters, normalization, proposal review, and explicit confirmation
+- use deterministic classification only as a safe provider-failure fallback,
+  not the primary authority over ordinary conversation
+- keep one Form Agent and the existing Nemotron Service; do not add another
+  agent, framework, provider, or model debate
+
+Acceptance criteria:
+- an ordinary side comment cannot become a field proposal or field-format
+  clarification and leaves the active question ready for an answer
+- natural explanation requests reach the grounded explanation path without a
+  phrase-specific production rule being required
+- semantic uncertainty produces a focused non-mutating clarification and
+  cannot become a proposal
+- valid interpreted answers still pass through field-specific adapters and
+  remain unconfirmed until a separate confirmation event
+- malformed or unavailable interpretation leaves canonical state unchanged
+  and uses the existing safe fallback
+- progress, guidance, support-setup, confirmation, rejection, skip-button,
+  direct-edit, and PDF behavior do not regress
+- a fixed before/after suite shows fewer routing or context failures with no
+  new invention, invalid-action, or confirmation-boundary failures
+- the complete backend, evaluation, frontend, and build gates pass
+
+Required testing:
+- unit tests for explanation, uncertainty, unrelated conversation, factual
+  answer, malformed interpretation, and provider-failure routing
+- state/effect tests proving non-factual interpretations cannot mutate fields
+- transcript scenarios for a pause/side comment and a natural explanation
+  request that contains uncertainty language
+- live before/after execution using an identical suite digest and model
+- the complete established regression gate
+
+Do not implement:
+- Deepgram, voice-provider changes, audio handling, or name-confidence policy;
+  those remain Milestone 9.2
+- silent confirmation, model-authored state transitions, inferred personal
+  facts, speculative spelling correction, or bypasses around field adapters
+- frontend redesign, PDF changes, Tavily policy changes, persistence,
+  authentication, deployment, or later milestone work
+
+Automated implementation outcome recorded 25 October 2026:
+- The live suite exercised 25 scenarios and 53 turns with suite digest
+  `8681c11101715f7c` against `nvidia/Nemotron-3_5-Lightning`.
+- A digest- and model-matched A/B run with semantic interpretation disabled
+  recorded 35 deterministic failures, 0.920 form-state accuracy, 0.714 context
+  retention, 0.400 latest-answer adherence, and 0.000 interruption recovery.
+- With semantic-first routing enabled, the same suite recorded zero
+  deterministic failures and 1.000 for form-state accuracy, context retention,
+  latest-answer adherence, and interruption recovery.
+- Both runs recorded zero invention, confirmation-boundary, and contradiction
+  failures. Average measured turn latency increased from 137.318 ms to
+  292.885 ms, a 155.567 ms cost accepted for the routing improvement.
+- Provider responses that unnecessarily populate `referenced_field_id` for a
+  non-navigation intent are now normalized to the closed non-operational slot;
+  candidate grounding and actual return-to-field references remain strict.
+- The complete backend suite passes with 429 tests. The focused semantic tests,
+  deterministic evaluation, transcript evaluation, frontend workflow/layout/
+  voice/reliability/support-preference checks, and production frontend build
+  also pass.
+- No frontend workflow, PDF, voice-provider, Tavily, persistence, or later-
+  milestone functionality was changed.
+
+Manual QA still required before marking complete:
+- In the browser, try natural explanation requests such as `what do you mean`
+  and `I am not sure what they want from me here` on text, date, and dropdown
+  fields, and verify the assistant explains instead of issuing a format error.
+- Say or type a side comment such as `I need a moment to find the right
+  document`; verify no proposal is created and the current question remains
+  ready for an answer.
+- Give one natural valid answer and verify it still becomes a reviewable
+  proposal that requires explicit confirmation before updating the form.
+- Repeat the explanation and pause checks through finalized voice transcripts
+  to verify the shared typed/voice turn path in the browser.
+
 # Milestone 9.2 — Deepgram streaming speech and identity-field handling
 
 Status: NOT STARTED

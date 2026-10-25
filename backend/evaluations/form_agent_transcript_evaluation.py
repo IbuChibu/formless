@@ -431,11 +431,10 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "awaiting_clarification",
                     "shares_food_or_living_costs",
                     confirmed=household_name_category,
-                    model_response=_action_json(
-                        "clarify",
-                        "Please answer yes or no for this checkbox.",
-                        "shares_food_or_living_costs",
+                    model_response=_uncertain_interpretation_json(
+                        "The answer changes from week to week."
                     ),
+                    expected_model_calls=1,
                 ),
                 _turn(
                     "cost-sharing-proposal",
@@ -632,11 +631,10 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     "awaiting_clarification",
                     "Monthly actual cost 1",
                     confirmed=sba_label_budget,
-                    model_response=_action_json(
-                        "clarify",
-                        "Please provide one exact numeric amount.",
-                        "Monthly actual cost 1",
+                    model_response=_uncertain_interpretation_json(
+                        "The amount is approximate."
                     ),
+                    expected_model_calls=1,
                 ),
                 _turn(
                     "actual-cost-proposal",
@@ -1183,6 +1181,7 @@ async def run_adapter_comparison(
     selected_transcripts = transcripts or transcript_fixtures()
     adapter_report = await run_transcript_evaluation(
         transcripts=selected_transcripts,
+        enforce_expected_model_calls=False,
         turn_interpretation_enabled=False,
     )
     legacy_report = await run_transcript_evaluation(
@@ -1263,6 +1262,21 @@ def _proposal_json(field_id: str, value: FieldValue) -> str:
             "message": "Proposal awaiting confirmation.",
             "field_id": field_id,
             "value": value,
+        }
+    )
+
+
+def _uncertain_interpretation_json(reason: str) -> str:
+    return json.dumps(
+        {
+            "intent": "uncertain_answer",
+            "confidence": "low",
+            "needs_clarification": True,
+            "clarification_reason": reason,
+            "candidates": [],
+            "referenced_field_id": None,
+            "assistance_needs": [],
+            "interaction_mode": None,
         }
     )
 

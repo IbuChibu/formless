@@ -37,6 +37,7 @@ from .conversation_policy import (
 from .intent_policy import TurnIntent
 from .models import (
     AssistancePreferencesUpdatedAction,
+    ClarifyAction,
     CorrectionStartedAction,
     ExplainAction,
     FieldReopenedAction,
@@ -168,7 +169,8 @@ class FormAgentService:
                     return response_for_action(fallback, request)
             else:
                 turn_intent_override = turn_intent_from_interpretation(
-                    interpreted_turn
+                    interpreted_turn,
+                    request,
                 )
                 if turn_intent_override is None:
                     try:
@@ -201,6 +203,12 @@ class FormAgentService:
                             ),
                             request,
                         )
+
+        if (
+            turn_intent_override == "uncertain_answer"
+            and isinstance(policy_action, ClarifyAction)
+        ):
+            return response_for_action(policy_action, request)
 
         if policy_action is not None and turn_intent_override is None:
             return response_for_action(policy_action, request)

@@ -35,7 +35,7 @@ class ConversationQualityScenario:
     expected_objective: Optional[str]
     expected_action: str = "explain"
     accepted_actions: tuple[str, ...] = ()
-    expected_model_calls: int = 1
+    expected_model_calls: int = 2
     maximum_model_calls: Optional[int] = None
     field_type: str = "text"
     field_options: tuple[str, ...] = ()
@@ -595,21 +595,22 @@ def _service_model_name(service: _NemotronCompletionService) -> str:
 
 
 def _turn_objective_from_calls(calls: list[dict[str, Any]]) -> Optional[str]:
-    if not calls:
-        return None
-    user_prompt = calls[0].get("user_prompt")
-    if not isinstance(user_prompt, str):
-        return None
-    try:
-        raw_context = user_prompt.split(
-            "UNTRUSTED_AGENT_CONTEXT\n",
-            maxsplit=1,
-        )[1].split("\nEND_UNTRUSTED_AGENT_CONTEXT", maxsplit=1)[0]
-        context = json.loads(raw_context)
-        objective = context["conversation"]["turn_objective"]
-    except (IndexError, KeyError, TypeError, ValueError):
-        return None
-    return objective if isinstance(objective, str) else None
+    for call in calls:
+        user_prompt = call.get("user_prompt")
+        if not isinstance(user_prompt, str):
+            continue
+        try:
+            raw_context = user_prompt.split(
+                "UNTRUSTED_AGENT_CONTEXT\n",
+                maxsplit=1,
+            )[1].split("\nEND_UNTRUSTED_AGENT_CONTEXT", maxsplit=1)[0]
+            context = json.loads(raw_context)
+            objective = context["conversation"]["turn_objective"]
+        except (IndexError, KeyError, TypeError, ValueError):
+            continue
+        if isinstance(objective, str):
+            return objective
+    return None
 
 
 def _explanations_are_near_duplicate(first: str, second: str) -> bool:

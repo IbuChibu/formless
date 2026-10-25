@@ -82,7 +82,8 @@ def test_conversation_response_separates_message_from_non_mutating_effect() -> N
         StubNemotronService(
             '{"action":"explain","message":"It asks for your full name.",'
             '"field_id":"full_name"}'
-        )
+        ),
+        turn_interpretation_enabled=False,
     )
 
     response = asyncio.run(service.respond(request))

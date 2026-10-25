@@ -264,6 +264,17 @@ def test_parser_canonicalizes_non_operational_provider_slots() -> None:
     assert parsed.referenced_field_id is None
     assert parsed.interaction_mode is None
 
+    explanation = parse_turn_interpretation(
+        _interpretation(
+            intent="ask_explanation",
+            referenced_field_id="full_name",
+        ),
+        _request("What are they asking me for here?"),
+    )
+
+    assert explanation.intent == "ask_explanation"
+    assert explanation.referenced_field_id is None
+
 
 def test_parser_repairs_only_a_grounded_navigation_schema_drift() -> None:
     message = "Can we go back to the name I left for later?"
@@ -433,6 +444,67 @@ def test_semantic_explanation_intent_uses_the_existing_explanation_path() -> Non
     assert '"turn_objective": "initial_paraphrase"' in model.calls[1][
         "user_prompt"
     ]
+
+
+def test_known_wording_question_is_semantically_routed_before_response() -> None:
+    model = StubNemotronService(
+        [
+            _interpretation(intent="ask_explanation"),
+            '{"action":"explain","message":"This asks for the name on '
+            'your official records.","field_id":"full_name"}',
+        ]
+    )
+    request = _request("what do you mean")
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert len(model.calls) == 2
+    assert model.calls[0]["system_prompt"] == TURN_INTERPRETER_SYSTEM_PROMPT
+
+
+def test_side_comment_routes_to_natural_conversation_without_field_effect() -> None:
+    model = StubNemotronService(
+        [
+            _interpretation(intent="unrelated"),
+            '{"action":"conversation","message":"Take your time. Tell me '
+            'when you are ready.","field_id":"full_name"}',
+        ]
+    )
+    request = _request("I need a moment to find the right document")
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert "Take your time" in response.assistant_message
+    assert len(model.calls) == 2
+    assert model.calls[0]["system_prompt"] == TURN_INTERPRETER_SYSTEM_PROMPT
+
+
+def test_uncertainty_about_wording_is_semantically_routed_to_explanation() -> None:
+    model = StubNemotronService(
+        [
+            _interpretation(intent="ask_explanation"),
+            '{"action":"explain","message":"This asks for the name on '
+            'your official records.","field_id":"full_name"}',
+        ]
+    )
+    request = _request("I'm not sure what they want from me here")
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert len(model.calls) == 2
+    assert model.calls[0]["system_prompt"] == TURN_INTERPRETER_SYSTEM_PROMPT
 
 
 def test_conversational_skip_becomes_a_closed_skip_effect() -> None:

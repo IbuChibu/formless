@@ -109,7 +109,10 @@ def post_with_nemotron(
     nemotron_service: StubNemotronService,
     payload: dict[str, Any],
 ):
-    agent_service = FormAgentService(nemotron_service)  # type: ignore[arg-type]
+    agent_service = FormAgentService(  # type: ignore[arg-type]
+        nemotron_service,
+        turn_interpretation_enabled=False,
+    )
     app.dependency_overrides[get_form_agent_service] = lambda: agent_service
     try:
         return client.post("/agent/respond", json=payload)
@@ -126,7 +129,10 @@ def test_agent_returns_a_validated_proposal_without_confirming_it() -> None:
     request = FormAgentRequest.model_validate(agent_request_payload())
 
     response = asyncio.run(
-        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(request)
     )
     action = response.action
 
@@ -184,7 +190,10 @@ def test_agent_retries_one_invalid_proposal_schema() -> None:
     request = FormAgentRequest.model_validate(agent_request_payload())
 
     action = asyncio.run(
-        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(request)
     ).action
 
     assert action.action == "propose"
@@ -214,7 +223,10 @@ def test_agent_correction_retry_explains_an_invalid_proposal_value() -> None:
     request = FormAgentRequest.model_validate(agent_request_payload())
 
     action = asyncio.run(
-        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(request)
     ).action
 
     assert action.action == "propose"
@@ -265,7 +277,10 @@ def test_agent_canonicalizes_safe_proposal_formatting(
     )
 
     action = asyncio.run(
-        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(
             FormAgentRequest.model_validate(payload)
         )
     ).action
@@ -341,7 +356,10 @@ def test_agent_handles_unambiguous_structured_answers_without_model_call(
     nemotron = StubNemotronService("not used")
 
     action = asyncio.run(
-        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(
             FormAgentRequest.model_validate(payload)
         )
     ).action
@@ -363,7 +381,10 @@ def test_option_in_an_explanatory_question_is_not_treated_as_an_answer() -> None
     )
 
     action = asyncio.run(
-        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(
             FormAgentRequest.model_validate(payload)
         )
     ).action
@@ -381,7 +402,10 @@ def test_negated_option_is_not_treated_as_an_answer() -> None:
     )
 
     action = asyncio.run(
-        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(
             FormAgentRequest.model_validate(payload)
         )
     ).action
@@ -397,7 +421,10 @@ def test_explicit_skip_is_reliable_without_model_call() -> None:
     nemotron = StubNemotronService("not used")
 
     action = asyncio.run(
-        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(
             FormAgentRequest.model_validate(payload)
         )
     ).action
@@ -558,7 +585,10 @@ def test_purpose_question_uses_grounded_fallback_without_calling_model() -> None
     request = FormAgentRequest.model_validate(payload)
 
     action = asyncio.run(
-        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(request)
     ).action
 
     assert action.action == "explain"
@@ -775,7 +805,10 @@ def test_form_agent_parser_failure_does_not_escape_the_service() -> None:
     request = FormAgentRequest.model_validate(agent_request_payload())
 
     response = asyncio.run(
-        FormAgentService(nemotron).respond(  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(
             request
         )
     )

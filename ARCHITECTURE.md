@@ -297,11 +297,22 @@ request and candidate values remain untrusted until a field adapter accepts
 them. Low-confidence, contradictory, malformed, or ungrounded results fall back
 to clarification or the established action path.
 
+Explicit UI/state events, pending-proposal review, exact progress and guidance
+operations, closed support-setup effects, and unmistakable adapter-valid values
+retain deterministic routes. For other ordinary messages while awaiting an
+answer, clarification, or replacement, the bounded interpretation is the first
+semantic routing decision. The earlier phrase classifier is a provider-failure
+fallback rather than the primary judge of whether conversational wording is an
+answer, question, uncertainty, or side comment.
+
 Candidate evidence must be a contiguous excerpt of the latest user turn, and
 deterministic grounding independently checks names, dates, number words,
 checkbox polarity, dropdown membership, field references, and explicit support
 preferences. The model cannot turn unrelated speech into a form answer or an
 assistance-setting change merely by assigning it a high confidence score.
+For non-navigation intent, a provider-populated `referenced_field_id` has no
+operational meaning and is normalized to `null`; candidate field grounding and
+actual return-to-field references remain strict.
 
 The interpreter cannot return a frontend effect, confirm a proposal, change a
 field status, select a Tavily query, or call the PDF Service. The orchestrator
@@ -651,9 +662,11 @@ For agent or voice input:
 2. For explanatory turns, the Form Agent first selects bounded local guidance
    for an exact allowlisted form version and active field. If that is
    insufficient, deterministic policy may perform one bounded Tavily lookup.
-3. Exact commands and already-unambiguous values use deterministic policy. When
-   meaning remains conversational or ambiguous, the Form Agent requests one
-   closed Nemotron turn interpretation with no state-changing authority.
+3. Explicit workflow operations and already-unambiguous adapter-valid values
+   use deterministic policy. All remaining ordinary messages request one
+   closed Nemotron turn interpretation before response routing. The
+   interpretation has no state-changing authority, and deterministic phrase
+   classification remains the provider-failure fallback.
 4. The selected field-type adapter validates and normalizes every interpreted
    candidate; an invalid, low-confidence, or unsupported interpretation becomes
    a focused clarification rather than a proposal.

@@ -18,6 +18,18 @@ class ScriptedNemotronService:
 
     async def complete(self, **kwargs: Any) -> str:
         self.calls.append(kwargs)
+        if "bounded turn interpreter" in kwargs["system_prompt"]:
+            intent = (
+                "unrelated"
+                if "Can we pause for a minute?" in kwargs["user_prompt"]
+                else "ask_explanation"
+            )
+            return (
+                '{"intent":"' + intent + '","confidence":"high",'
+                '"needs_clarification":false,"clarification_reason":null,'
+                '"candidates":[],"referenced_field_id":null,'
+                '"assistance_needs":[],"interaction_mode":null}'
+            )
         return self.responses.pop(0)
 
 
@@ -66,15 +78,15 @@ def test_conversation_quality_evaluation_reports_required_metrics() -> None:
     assert report.metrics.conversation_repair_success_rate == 1.0
     assert report.metrics.safety_boundary_failures == 0
     assert report.metrics.average_latency_ms >= 0
-    assert report.metrics.total_model_calls == 6
-    assert report.metrics.model_calls_per_scenario == 0.667
+    assert report.metrics.total_model_calls == 12
+    assert report.metrics.model_calls_per_scenario == 1.333
     assert len(report.samples) == 9
     assert report.samples[0].scenario == "usual-address-date"
     assert report.samples[0].assistant_message is not None
-    assert report.samples[0].model_calls == 1
+    assert report.samples[0].model_calls == 2
     assert report.samples[-1].scenario == "post-completion-summary"
     assert report.samples[-1].model_calls == 0
-    assert len(service.calls) == 6
+    assert len(service.calls) == 12
 
 
 def test_conversation_quality_scenarios_are_small_and_fixed() -> None:
