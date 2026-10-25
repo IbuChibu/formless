@@ -23,7 +23,7 @@ from .answer_adapters import (
 from .answer_preparation import prepare_proposal_action
 from .assistance_policy import interpreted_assistance_preference_action
 from .field_navigation import NavigationDecision
-from .intent_policy import classify_turn_intent
+from .intent_policy import TurnIntent, classify_turn_intent
 from .models import (
     AgentFieldValue,
     AssistancePreferencesUpdatedAction,
@@ -282,6 +282,18 @@ async def interpret_turn(
         json_response=True,
     )
     return parse_turn_interpretation(raw, request)
+
+
+def turn_intent_from_interpretation(
+    interpretation: TurnInterpretation,
+) -> Optional[TurnIntent]:
+    """Convert settled semantic intent into internal routing data only."""
+    if (
+        interpretation.intent == "ask_explanation"
+        and _interpretation_is_settled(interpretation)
+    ):
+        return "wording_clarification"
+    return None
 
 
 def build_turn_interpreter_prompt(request: FormAgentRequest) -> str:

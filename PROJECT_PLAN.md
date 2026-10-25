@@ -4426,6 +4426,36 @@ Automated implementation outcome recorded 19 October 2026:
 - manual sample/household completion and typed-versus-voice effect comparison
   remain pending, so this milestone is not marked complete
 
+Clarification-routing refinement recorded 25 October 2026:
+- manual sample-form QA exposed ordinary follow-up questions such as `what if
+  they live there but they don't share cost` and `I don't know what this mean`
+  being validated as numeric or date answers instead of reaching the existing
+  field-explanation path
+- the initial clarification regression suite contains 22 scenarios and 47
+  turns with digest
+  `8ca707a1061ca5a0`; it also proves that a second ordinary `yes` message cannot
+  confirm a pending checkbox proposal
+- on the configured `nvidia/Nemotron-3_5-Lightning` model, the pre-fix run had
+  four deterministic failures and 50% context retention; the candidate had
+  zero deterministic failures, 100% context retention, 100% form-state
+  accuracy, zero invention failures, and zero confirmation-boundary failures
+- common conditional clarification phrases use deterministic intent routing;
+  a settled semantic `ask_explanation` interpretation is only an internal
+  routing hint into the existing grounded explanation generator and is never a
+  field value, public effect, or state transition
+- follow-up browser QA exposed the shorter phrase `what do you mean` taking the
+  answer-validation path for both a name and date field; that phrase and `what
+  do you mean by this` now use the same deterministic explanation route
+- the expanded live suite contains 23 scenarios and 49 turns with digest
+  `82657b2869acabd7`; it passes with 100% form-state accuracy and context
+  retention, zero deterministic failures, zero invention failures, and zero
+  confirmation-boundary failures
+- all 426 backend tests, both established offline Form Agent evaluations, all
+  five frontend workflow checks, and the frontend production build pass; the
+  existing Vite large-chunk warning remains non-blocking
+- browser QA of the reported clarification flow remains pending, so the
+  milestone status remains `IMPLEMENTED — MANUAL QA PENDING`
+
 Required live/manual testing:
 1. Run the fixed paraphrase suite through the configured Nemotron model before
    and after implementation and save both reports.

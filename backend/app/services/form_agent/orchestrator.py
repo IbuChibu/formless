@@ -34,6 +34,7 @@ from .conversation_policy import (
     validate_action_for_turn,
     validate_event_transition,
 )
+from .intent_policy import TurnIntent
 from .models import (
     AssistancePreferencesUpdatedAction,
     CorrectionStartedAction,
@@ -76,6 +77,7 @@ from .turn_interpreter import (
     action_from_interpretation,
     interpret_turn,
     should_interpret_turn,
+    turn_intent_from_interpretation,
 )
 
 
@@ -145,6 +147,7 @@ class FormAgentService:
             request,
             self._answer_interpreter,
         )
+        turn_intent_override: Optional[TurnIntent] = None
         if self._turn_interpretation_enabled and should_interpret_turn(
             request,
             policy_action,
@@ -164,35 +167,42 @@ class FormAgentService:
                 if fallback is not None:
                     return response_for_action(fallback, request)
             else:
-                try:
-                    interpreted_action, request = action_from_interpretation(
-                        request,
-                        interpreted_turn,
-                        self._answer_interpreter,
-                    )
+                turn_intent_override = turn_intent_from_interpretation(
+                    interpreted_turn
+                )
+                if turn_intent_override is None:
+                    try:
+                        interpreted_action, request = action_from_interpretation(
+                            request,
+                            interpreted_turn,
+                            self._answer_interpreter,
+                        )
+                        if interpreted_action is not None:
+                            if not isinstance(
+                                interpreted_action,
+                                (
+                                    AssistancePreferencesUpdatedAction,
+                                    CorrectionStartedAction,
+                                    FieldReopenedAction,
+                                    FieldSelectedAction,
+                                ),
+                            ):
+                                validate_action_against_request(
+                                    interpreted_action,
+                                    request,
+                                )
+                    except FormAgentError:
+                        interpreted_action = None
                     if interpreted_action is not None:
-                        if not isinstance(
-                            interpreted_action,
-                            (
-                                AssistancePreferencesUpdatedAction,
-                                CorrectionStartedAction,
-                                FieldReopenedAction,
-                                FieldSelectedAction,
-                            ),
-                        ):
-                            validate_action_against_request(
+                        return response_for_action(
+                            normalize_action_message(
                                 interpreted_action,
                                 request,
-                            )
-                except FormAgentError:
-                    interpreted_action = None
-                if interpreted_action is not None:
-                    return response_for_action(
-                        normalize_action_message(interpreted_action, request),
-                        request,
-                    )
+                            ),
+                            request,
+                        )
 
-        if policy_action is not None:
+        if policy_action is not None and turn_intent_override is None:
             return response_for_action(policy_action, request)
 
         guidance = select_official_guidance(request)
@@ -252,7 +262,12 @@ class FormAgentService:
                 guidance,
             )
 
-        user_prompt = build_user_prompt(request, guidance, web_guidance)
+        user_prompt = build_user_prompt(
+            request,
+            guidance,
+            web_guidance,
+            turn_intent_override=turn_intent_override,
+        )
         validation_error: Optional[FormAgentError] = None
         attempt_user_prompt = user_prompt
 
@@ -330,7 +345,12 @@ class FormAgentService:
                         )
                 validate_guidance_action(action, guidance)
                 validate_web_guidance_action(action, web_guidance)
-                validate_action_for_turn(action, request, guidance)
+                validate_action_for_turn(
+                    action,
+                    request,
+                    guidance,
+                    turn_intent_override=turn_intent_override,
+                )
                 navigation_clarification = (
                     unexpected_navigation_clarification(action, request)
                 )
@@ -350,7 +370,11 @@ class FormAgentService:
                     )
                 continue
 
-            normalized_action = normalize_action_message(action, request)
+            normalized_action = normalize_action_message(
+                action,
+                request,
+                turn_intent_override,
+            )
             if (
                 isinstance(normalized_action, ExplainAction)
                 and web_guidance is not None
@@ -414,6 +438,7 @@ class FormAgentService:
         repair_fallback = explanation_repair_fallback(
             validation_error,
             request,
+            turn_intent_override,
         )
         if repair_fallback is not None:
             return response_for_action(repair_fallback, request)
@@ -423,7 +448,7 @@ class FormAgentService:
         )
         if clarification is not None:
             return response_for_action(clarification, request)
-        fallback = model_failure_fallback(request)
+        fallback = model_failure_fallback(request, turn_intent_override)
         if fallback is not None:
             return response_for_action(fallback, request)
         raise validation_error

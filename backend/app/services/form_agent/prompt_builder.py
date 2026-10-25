@@ -8,6 +8,7 @@ from .conversation_policy import (
     explanation_repair_context,
     turn_objective,
 )
+from .intent_policy import TurnIntent
 from .models import (
     FormAgentError,
     FormAgentField,
@@ -138,8 +139,15 @@ def build_user_prompt(
     request: FormAgentRequest,
     guidance: tuple[OfficialGuidanceCitation, ...] = (),
     web_guidance: WebGuidanceMetadata | None = None,
+    *,
+    turn_intent_override: TurnIntent | None = None,
 ) -> str:
-    request_data = build_agent_context(request, guidance, web_guidance)
+    request_data = build_agent_context(
+        request,
+        guidance,
+        web_guidance,
+        turn_intent_override=turn_intent_override,
+    )
     return (
         "UNTRUSTED_AGENT_CONTEXT\n"
         f"{json.dumps(request_data, ensure_ascii=False)}\n"
@@ -179,8 +187,10 @@ def build_agent_context(
     request: FormAgentRequest,
     guidance: tuple[OfficialGuidanceCitation, ...] = (),
     web_guidance: WebGuidanceMetadata | None = None,
+    *,
+    turn_intent_override: TurnIntent | None = None,
 ) -> dict[str, object]:
-    objective = turn_objective(request)
+    objective = turn_objective(request, turn_intent_override)
     repair_context = (
         explanation_repair_context(request)
         if objective

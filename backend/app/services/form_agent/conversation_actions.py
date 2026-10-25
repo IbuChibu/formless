@@ -51,6 +51,7 @@ from .models import (
 )
 from .field_navigation import navigation_decision
 from .intent_policy import (
+    TurnIntent,
     _comparison_words,
     classify_turn_intent,
 )
@@ -100,6 +101,7 @@ _SKIP_REQUEST_PATTERNS = (
 def explanation_repair_fallback(
     error: FormAgentError,
     request: FormAgentRequest,
+    turn_intent_override: Optional[TurnIntent] = None,
 ) -> Optional[ExplainAction]:
     if str(error) not in {
         _REPEATED_EXPLANATION_ERROR,
@@ -108,7 +110,9 @@ def explanation_repair_fallback(
         _UNSUPPORTED_FORMAT_CLAIM_ERROR,
     }:
         return None
-    if classify_turn_intent(request) != "wording_clarification":
+    if (
+        turn_intent_override or classify_turn_intent(request)
+    ) != "wording_clarification":
         return None
 
     active_field_id = request_active_field_id(request)
@@ -149,6 +153,7 @@ def explanation_repair_fallback(
 
 def model_failure_fallback(
     request: FormAgentRequest,
+    turn_intent_override: Optional[TurnIntent] = None,
 ) -> Optional[FormAgentAction]:
     """Keep a failed model turn useful without granting it a form effect."""
     active_field_id = request_active_field_id(request)
@@ -161,7 +166,7 @@ def model_failure_fallback(
     if field is None:
         return None
 
-    intent = classify_turn_intent(request)
+    intent = turn_intent_override or classify_turn_intent(request)
     message = request_message(request)
     question = truncate_text(field_question(field), 220).rstrip(" .?")
 
@@ -574,6 +579,7 @@ def unexpected_navigation_clarification(
 def normalize_action_message(
     action: FormAgentAction,
     request: FormAgentRequest,
+    turn_intent_override: Optional[TurnIntent] = None,
 ) -> FormAgentAction:
     if isinstance(action, NextAction):
         if action.field_id is None:
@@ -646,7 +652,9 @@ def normalize_action_message(
 
     if (
         isinstance(action, ExplainAction)
-        and classify_turn_intent(request) == "wording_clarification"
+        and (
+            turn_intent_override or classify_turn_intent(request)
+        ) == "wording_clarification"
     ):
         field = next(
             (

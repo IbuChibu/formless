@@ -86,6 +86,8 @@ _WORDING_CLARIFICATION_PATTERN = re.compile(
     r"\b(?:what\s+does\s+.{1,80}?\s+mean(?:\s+here)?|"
     r"what\s+does\s+(?:this|that|it|(?:this|that|the)\s+"
     r"(?:field|question))\s+mean|"
+    r"what\s+do\s+you\s+mean(?:\s+by\s+(?:this|that|it|"
+    r"(?:this|that|the)\s+(?:field|question)))?|"
     r"what\s+is\s+(?:this|that|it|(?:this|that|the)\s+"
     r"(?:field|question))\s+asking|"
     r"explain(?:\s+(?:this|that|it|the\s+(?:field|question)))?|"
@@ -95,6 +97,11 @@ _WORDING_CLARIFICATION_PATTERN = re.compile(
     r"what\s+should\s+i\s+(?:put|enter|write|answer|choose)|"
     r"what\s+(?:this|that|the)\s+(?:box|field)\s+wants?\s+me\s+to\s+say|"
     r"what\s+do\s+you\s+need\s+me\s+to\s+say|"
+    r"(?:i\s+)?(?:do\s+not|don't)\s+know\s+what\s+"
+    r"(?:this|that|it)\s+means?|"
+    r"what\s+if\b|"
+    r"(?:do|does|would)\s+(?:this|that|it)\s+"
+    r"(?:include|exclude|count|cover)\b|"
     r"ask\s+(?:me\s+)?(?:that|this|it)\s+(?:normally|simply)|"
     r"ask\s+the\s+question\s+in\s+(?:one\s+)?simple\s+sentence)\b",
     re.IGNORECASE,
@@ -164,8 +171,11 @@ def _classify_message(message: str) -> TurnIntent:
     return "field_answer"
 
 
-def turn_objective(request: FormAgentRequest) -> TurnObjective:
-    intent = classify_turn_intent(request)
+def turn_objective(
+    request: FormAgentRequest,
+    intent_override: Optional[TurnIntent] = None,
+) -> TurnObjective:
+    intent = intent_override or classify_turn_intent(request)
     if intent == "wording_clarification":
         return explanation_repair_context(request).objective
     return {

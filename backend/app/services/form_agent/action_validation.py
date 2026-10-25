@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from .intent_policy import (
+    TurnIntent,
     _comparison_words,
     classify_turn_intent,
     explanation_repair_context,
@@ -57,8 +58,10 @@ def validate_action_for_turn(
     action: FormAgentAction,
     request: FormAgentRequest,
     guidance: tuple[OfficialGuidanceCitation, ...] = (),
+    *,
+    turn_intent_override: TurnIntent | None = None,
 ) -> None:
-    intent = classify_turn_intent(request)
+    intent = turn_intent_override or classify_turn_intent(request)
     if intent == "evidence_question" and not isinstance(action, ExplainAction):
         raise FormAgentError(
             "This conversational turn requires an explanation action"

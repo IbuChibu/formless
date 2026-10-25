@@ -122,6 +122,22 @@
       "allowed_proposals": {"shares_food_or_living_costs": [true]}
     },
     {
+      "id": "checkbox-message-cannot-confirm",
+      "title": "Checkbox answer remains behind explicit confirmation",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["shares_food_or_living_costs"],
+      "purpose": "A yes answer should create a reviewable checkbox proposal, while another ordinary message cannot confirm it.",
+      "tags": ["paraphrase_group:checkbox", "confirmation_boundary"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "shares_food_or_living_costs"}},
+        {"id": "answer", "event": {"type": "message", "content": "yes"}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "shares_food_or_living_costs", "prepared_value": true}},
+        {"id": "ordinary-message", "event": {"type": "message", "content": "yes"}, "tags": ["confirmation_boundary"], "expect": {"effects": ["none"], "phase": "awaiting_confirmation", "field_id": "shares_food_or_living_costs", "state_unchanged": true, "message_includes_all": ["awaiting confirmation"]}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["shares_food_or_living_costs"]},
+      "allowed_proposals": {"shares_food_or_living_costs": [true]}
+    },
+    {
       "id": "checkbox-natural-negative",
       "title": "Negative checkbox paraphrase",
       "persona_id": "natural_form_speaker",
@@ -209,6 +225,51 @@
         {"id": "ask", "event": {"type": "message", "content": "Could you say what they're actually asking me for here?"}, "tags": ["clarification", "context_retention"], "expect": {"effects": ["none"], "phase": "awaiting_answer", "field_id": "residency_arrangement", "state_unchanged": true, "message_includes_any": ["live", "housing", "arrangement", "tenant"]}}
       ],
       "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["residency_arrangement"]},
+      "allowed_proposals": {}
+    },
+    {
+      "id": "conditional-count-clarification",
+      "title": "Conditional follow-up is treated as a question",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["household_member_count"],
+      "purpose": "A question about who belongs in the count should be answered from the active field wording rather than validated as a number.",
+      "tags": ["paraphrase_group:explanation", "clarification", "context_retention"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "household_member_count"}},
+        {"id": "ask", "event": {"type": "message", "content": "what if they live there but they don't share cost"}, "tags": ["clarification", "context_retention", "confirmation_boundary"], "expect": {"effects": ["none"], "phase": "awaiting_answer", "field_id": "household_member_count", "state_unchanged": true, "message_includes_any": ["share", "cost", "count"]}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["household_member_count"]},
+      "allowed_proposals": {}
+    },
+    {
+      "id": "informal-reporting-month-clarification",
+      "title": "Informal confusion requests an explanation",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["resources_reporting_month"],
+      "purpose": "A speech-like request without polished grammar should explain the reporting month instead of asking for an MM/YYYY value immediately.",
+      "tags": ["paraphrase_group:explanation", "clarification", "context_retention"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "resources_reporting_month"}},
+        {"id": "ask", "event": {"type": "message", "content": "I don't know what this mean"}, "tags": ["clarification", "context_retention", "confirmation_boundary"], "expect": {"effects": ["none"], "phase": "awaiting_answer", "field_id": "resources_reporting_month", "state_unchanged": true, "message_includes_any": ["month", "income", "reporting"]}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["resources_reporting_month"]},
+      "allowed_proposals": {}
+    },
+    {
+      "id": "direct-what-do-you-mean-clarification",
+      "title": "Direct clarification question keeps the date field active",
+      "persona_id": "natural_form_speaker",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_date_of_birth"],
+      "purpose": "The common phrase what do you mean should explain the active question rather than become an invalid date candidate.",
+      "tags": ["paraphrase_group:explanation", "clarification", "context_retention"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_date_of_birth"}},
+        {"id": "ask", "event": {"type": "message", "content": "what do you mean"}, "tags": ["clarification", "context_retention", "confirmation_boundary"], "expect": {"effects": ["none"], "phase": "awaiting_answer", "field_id": "applicant_date_of_birth", "state_unchanged": true, "message_includes_any": ["birth", "born", "date"]}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["applicant_date_of_birth"]},
       "allowed_proposals": {}
     },
     {

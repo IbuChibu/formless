@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from app.services.form_agent import FormAgentRequest, FormAgentService
+from app.services.form_agent.intent_policy import _classify_message
 
 
 class StubNemotronService:
@@ -108,6 +109,22 @@ def _prompt_context(
         maxsplit=1,
     )[1].split("\nEND_UNTRUSTED_AGENT_CONTEXT", maxsplit=1)[0]
     return json.loads(raw_context)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "what do you mean",
+        "What do you mean by this?",
+        "what if they live there but they don't share cost",
+        "I don't know what this mean",
+        "Does that include people who live there but pay separately",
+    ],
+)
+def test_speech_like_field_questions_are_wording_clarifications(
+    message: str,
+) -> None:
+    assert _classify_message(message) == "wording_clarification"
 
 
 def test_wording_clarification_uses_nemotron_once_without_tavily() -> None:

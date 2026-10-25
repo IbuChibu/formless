@@ -310,6 +310,15 @@ state machine continues to own every public effect and transition. Model
 interpretation can therefore reduce literal phrasing requirements without
 moving the explicit-confirmation or canonical-state boundary.
 
+A settled semantic explanation request is likewise routing data, not a
+clarification action. The orchestrator forwards that intent to the existing
+grounded explanation prompt, validation, normalization, and safe-fallback path
+while preserving the active field and conversation phase. Common phrases such
+as `what do you mean`, `what if ...`, `does this include ...`, and `I don't
+know what this means` are recognized deterministically so users are not forced
+to ask for help with one exact phrase. Neither route can propose, confirm, or
+store a field value.
+
 The latest user message is authoritative for the current turn; bounded history
 is context, not a replacement answer. Model explanations are checked against
 the active field and reviewed guidance before they are returned. An explicit

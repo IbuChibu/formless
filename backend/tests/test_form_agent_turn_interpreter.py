@@ -18,10 +18,12 @@ from app.services.nemotron_service import NemotronServiceError
 class StubNemotronService:
     def __init__(
         self,
-        response: str = "",
+        response: str | list[str] = "",
         error: NemotronServiceError | None = None,
     ) -> None:
-        self.response = response
+        self.responses = (
+            response.copy() if isinstance(response, list) else [response]
+        )
         self.error = error
         self.calls: list[dict[str, Any]] = []
 
@@ -29,7 +31,9 @@ class StubNemotronService:
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
-        return self.response
+        if len(self.responses) > 1:
+            return self.responses.pop(0)
+        return self.responses[0]
 
 
 def _field(
@@ -404,6 +408,31 @@ def test_prompt_injection_shaped_turn_cannot_create_a_proposal() -> None:
 
     assert response.effect.effect == "none"
     assert request.fields[0].status == "unanswered"
+
+
+def test_semantic_explanation_intent_uses_the_existing_explanation_path() -> None:
+    message = "I'm trying to work out what they're asking me for here"
+    model = StubNemotronService(
+        [
+            _interpretation(intent="ask_explanation"),
+            '{"action":"explain","message":"This asks for the full name '
+            'you use on official records.","field_id":"full_name"}',
+        ]
+    )
+    request = _request(message)
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert "official records" in response.assistant_message
+    assert len(model.calls) == 2
+    assert model.calls[0]["system_prompt"] == TURN_INTERPRETER_SYSTEM_PROMPT
+    assert '"turn_objective": "initial_paraphrase"' in model.calls[1][
+        "user_prompt"
+    ]
 
 
 def test_conversational_skip_becomes_a_closed_skip_effect() -> None:

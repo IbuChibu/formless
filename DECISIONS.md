@@ -595,3 +595,23 @@ The confidence label alone is not trusted. Candidate evidence, navigation
 references, and assistance preferences must also be grounded in the latest
 user message by deterministic code before orchestration may create an existing
 closed action.
+
+---
+
+## 2026-10-25 — Semantic explanation intent routes to the grounded explainer
+
+Decision:
+A settled `ask_explanation` turn interpretation may override the internal turn
+objective only so the existing explanation generator handles the message. It
+does not become the generic field-type clarification used for invalid answers,
+and it cannot create a proposal or public effect. Frequent conditional and
+plain-language clarification phrases remain on a deterministic route to the
+same explanation path.
+
+Reason:
+Users naturally ask follow-up questions such as `what do you mean`, `what if
+they live there but they don't share cost`, or `I don't know what this means`.
+Treating those as candidate field values produces an irrelevant format error
+and makes the assistant appear not to understand the conversation. Reusing the
+bounded, validated explanation path fixes the routing problem without widening
+model authority or weakening explicit confirmation.
