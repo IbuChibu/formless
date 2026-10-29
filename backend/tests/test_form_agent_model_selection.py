@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
@@ -179,6 +180,49 @@ class _OrderedScriptedService:
 
     async def complete(self, **kwargs: Any) -> str:
         self._order.append(self.model)
+        if "conversational turn interpreter" in kwargs["system_prompt"]:
+            prompt = kwargs["user_prompt"]
+            if "my email is jane@example.com" in prompt:
+                return json.dumps(
+                    {
+                        "intent": "answer_current_field",
+                        "confidence": "high",
+                        "needs_clarification": False,
+                        "clarification_reason": None,
+                        "candidates": [
+                            {
+                                "field_id": "active_field",
+                                "value": "jane@example.com",
+                                "evidence": "jane@example.com",
+                            }
+                        ],
+                        "referenced_field_id": None,
+                        "assistance_needs": [],
+                        "interaction_mode": None,
+                        "assistant_reply": (
+                            "I understood jane@example.com. Please review "
+                            "and confirm it."
+                        ),
+                    }
+                )
+            unrelated = "Can we pause for a minute?" in prompt
+            return json.dumps(
+                {
+                    "intent": "unrelated" if unrelated else "ask_explanation",
+                    "confidence": "high",
+                    "needs_clarification": False,
+                    "clarification_reason": None,
+                    "candidates": [],
+                    "referenced_field_id": None,
+                    "assistance_needs": [],
+                    "interaction_mode": None,
+                    "assistant_reply": (
+                        "Of course. We can pause and resume when you are ready."
+                        if unrelated
+                        else "I'll explain that in simpler words."
+                    ),
+                }
+            )
         return self._responses.pop(0)
 
 
@@ -194,7 +238,7 @@ def test_live_comparison_runs_primary_then_candidate_sequentially() -> None:
         )
     )
 
-    assert order == ["primary"] * 6 + ["candidate"] * 6
+    assert order == ["primary"] * 12 + ["candidate"] * 12
     assert comparison.primary.model == "primary"
     assert comparison.candidate.model == "candidate"
     assert comparison.recommendation == "manual_review"

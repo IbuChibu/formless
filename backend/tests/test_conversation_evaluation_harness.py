@@ -183,7 +183,10 @@ def _scenario() -> ConversationScenario:
 
 def _target() -> ServiceConversationTarget:
     provider = NeverCalledNemotron()
-    service = FormAgentService(provider)  # type: ignore[arg-type]
+    service = FormAgentService(  # type: ignore[arg-type]
+        provider,
+        turn_interpretation_enabled=False,
+    )
     return ServiceConversationTarget(service, model=provider.model)
 
 

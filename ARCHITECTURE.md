@@ -242,8 +242,8 @@ Responsible for:
 - validating bounded assistance preferences received with each request and
   using them only to shape wording, pace, explanation depth, and spoken
   readability
-- deterministically mapping only clear support requests made during the
-  introduction or interview into the closed assistance-preference schema
+- mapping natural support requests through the same bounded Nemotron turn
+  decision into the closed assistance-preference schema
 - validating explicit conversation events and state transitions
 - deciding what context goes to Nemotron
 - selecting bounded official guidance for an exact allowlisted form version
@@ -251,8 +251,9 @@ Responsible for:
 - building non-personal search queries from bounded form and field metadata
 - validating, ranking, labeling, and bounding live sources before model use
 - processing model actions
-- preparing user-supplied candidate values through deterministic field-aware
-  formatting before they become reviewable proposals
+- structurally validating Nemotron-interpreted candidates against real field
+  IDs, field types, and finite options before conservative preparation makes
+  them reviewable proposals
 - retaining at most five uniquely mapped, adapter-valid later-field candidates
   in request-carried conversation state when a user explicitly volunteers
   several answers together
@@ -277,12 +278,13 @@ The Form Agent is one service boundary with small internal modules:
   established non-private policy functions from their focused owners
 - `intent_policy` classifies bounded turn intent and tracks explanation-repair
   depth without producing a form effect
-- `turn_interpreter` asks the existing Nemotron Service for one bounded semantic
-  interpretation only when deterministic routing cannot safely isolate the
-  user's meaning; its result is validation input, never a public effect
-- `turn_interpretation_grounding` owns pure evidence, field-reference, option,
-  number-word, polarity, navigation, and assistance-preference checks used to
-  distrust and constrain that interpretation
+- `turn_interpreter` asks the existing Nemotron Service for one bounded turn
+  decision before semantic deterministic policy for every eligible natural
+  message; its result includes intent, candidates, uncertainty, exact source
+  evidence, and a natural reply, but never a public effect
+- `turn_interpretation_grounding` owns pure evidence and field-reference checks
+  plus conservative provider-fallback helpers; it no longer re-interprets a
+  structurally valid Nemotron candidate through a parallel semantic regex gate
 - `action_validation` checks model-authored actions and explanations against
   the active turn, field context, and approved guidance before they can proceed
 - `state_machine` validates allowed events, owns conversation-phase changes,
@@ -316,25 +318,29 @@ multiple agents or allow any module to bypass the Nemotron Service.
 
 Natural-language turn interpretation is a semantic boundary inside that same
 agent. Its closed result distinguishes answer, correction, explanation,
-uncertainty, multiple supplied facts, unrelated conversation, assistance,
-skip, and return-to-field intent. Candidate field IDs must come from the
-request and candidate values remain untrusted until a field adapter accepts
-them. Low-confidence, contradictory, malformed, or ungrounded results fall back
-to clarification or the established action path.
+guidance, progress, uncertainty, multiple supplied facts, unrelated
+conversation, assistance, setup completion, skip, and return-to-field intent.
+Candidate field IDs must come from the request; checkbox values must be boolean,
+numbers must be structurally numeric, and dropdown values must be one supplied
+option. Malformed, unknown-field, wrong-type, out-of-option, or ungrounded
+results fall back to clarification or the established provider-failure path.
 
-Explicit UI/state events, pending-proposal review, exact progress and guidance
-operations, closed support-setup effects, and unmistakable adapter-valid values
-retain deterministic routes. For other ordinary messages while awaiting an
-answer, clarification, or replacement, the bounded interpretation is the first
-semantic routing decision. The earlier phrase classifier is a provider-failure
-fallback rather than the primary judge of whether conversational wording is an
-answer, question, uncertainty, or side comment.
+Explicit non-message UI/state events and pending-proposal review retain
+deterministic routes. Every eligible natural message during support setup,
+answering, clarification, or replacement reaches the bounded Nemotron decision
+before deterministic semantic policy, including exact-looking values, progress
+questions, and guidance requests. The earlier phrase classifier and focused
+field adapters remain provider-failure fallbacks and isolated deterministic
+test seams, not parallel authorities that must agree with the model's meaning.
 
-Candidate evidence must be a contiguous excerpt of the latest user turn, and
-deterministic grounding independently checks names, dates, number words,
-checkbox polarity, dropdown membership, field references, and explicit support
-preferences. The model cannot turn unrelated speech into a form answer or an
-assistance-setting change merely by assigning it a high confidence score.
+Candidate evidence must be a contiguous excerpt of the latest user turn.
+Nemotron may remove conversational framing and normalize an unambiguous date,
+spoken number, checkbox meaning, finite option, capitalization, or deliberately
+spelled word. Deterministic code then checks provenance, IDs, types, and options
+without trying to infer the meaning a second time. Ambiguity is controlled by
+the explicit `needs_clarification` result rather than by requiring only high
+confidence: a settled medium-confidence candidate may be reviewed, but no
+candidate can be applied without separate confirmation.
 For non-navigation intent, a provider-populated `referenced_field_id` has no
 operational meaning and is normalized to `null`; candidate field grounding and
 actual return-to-field references remain strict.
@@ -687,19 +693,23 @@ For agent or voice input:
 2. For explanatory turns, the Form Agent first selects bounded local guidance
    for an exact allowlisted form version and active field. If that is
    insufficient, deterministic policy may perform one bounded Tavily lookup.
-3. Explicit workflow operations and already-unambiguous adapter-valid values
-   use deterministic policy. All remaining ordinary messages request one
-   closed Nemotron turn interpretation before response routing. The
-   interpretation has no state-changing authority, and deterministic phrase
-   classification remains the provider-failure fallback.
-4. The selected field-type adapter validates and normalizes every interpreted
-   candidate; an invalid, low-confidence, or unsupported interpretation becomes
-   a focused clarification rather than a proposal.
+3. Explicit non-message workflow operations use deterministic policy. Every
+   eligible natural message requests one closed Nemotron turn decision before
+   semantic response routing. The decision has no state-changing authority,
+   and deterministic phrase classification remains the provider-failure
+   fallback.
+4. Backend code validates exact latest-turn evidence, the real field ID, the
+   field's structural value type, and finite options. It does not ask a second
+   regex/adapter layer to reproduce Nemotron's semantic interpretation. An
+   invalid or explicitly uncertain interpretation becomes a focused
+   clarification rather than a proposal.
 5. The answer-preparation layer preserves the user's original candidate,
    applies only conservative field-aware formatting, and records any visible
    transformation.
-6. Backend code validates every deterministic or model proposal through the
-   field adapter and the field's ID, type, and available options.
+6. Backend code validates every proposal through the field's ID, type,
+   available options, legal phase, and confirmation boundary. Legacy model
+   action and provider-fallback paths additionally retain their established
+   field-adapter validation.
 7. The Form Agent returns a natural assistant message, one typed effect,
    resulting conversation state, and any attributable reviewed or live
    guidance used by the explanation.

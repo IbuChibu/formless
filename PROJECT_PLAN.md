@@ -4027,11 +4027,12 @@ deployed build is frozen before submission:
 1. Milestone 9.1 — Support-aware introduction
 2. Milestone 9.1.1 — Natural-language turn interpretation
 3. Milestone 9.2 — Deepgram streaming speech and identity-field handling
-4. Milestone 9.3 — One-language bilingual assistance pilot, only if its go/no-go
+4. Milestone 9.2.1 — Nemotron-first conversational orchestration
+5. Milestone 9.3 — One-language bilingual assistance pilot, only if its go/no-go
    gate passes
-5. Milestone 9.4 — Hero workflow validation and release freeze
-6. Milestone 10 — Deployment
-7. Milestone 11 — Hackathon submission
+6. Milestone 9.4 — Hero workflow validation and release freeze
+7. Milestone 10 — Deployment
+8. Milestone 11 — Hackathon submission
 
 Recommended schedule for the 30 October 2026 deadline:
 - 18–19 October: Milestone 9.1
@@ -4608,7 +4609,7 @@ Completion disposition recorded 29 October 2026:
 
 # Milestone 9.2 — Deepgram streaming speech and identity-field handling
 
-Status: IMPLEMENTED — LIVE TOKEN PERMISSION AND MANUAL QA PENDING
+Status: IMPLEMENTED — LIVE VOICE DATASET AND MANUAL QA PENDING
 
 Why this is next:
 The current voice path relies on the browser's `SpeechRecognition` service,
@@ -4815,13 +4816,143 @@ Automated implementation outcome recorded 29 October 2026:
   Deepgram checks pass, and the production frontend build succeeds.
 
 Live blocker and remaining completion evidence:
-- The first live `/v1/auth/grant` request reached Deepgram but returned HTTP
-  403. The configured key must be replaced with one carrying Deepgram Member
-  permission before live browser transcription can be evaluated.
+- The original project-level key returned HTTP 403 from `/v1/auth/grant`; it
+  has since been replaced by a Member-level key and the temporary-token and
+  synthetic streaming connection checks pass.
 - No live critical-entity accuracy, duplicate/drop rate, clarification rate,
   final-transcript latency, browser/OS matrix, or complete fixture transcript
   is claimed yet. The required live/manual steps above remain open, so this
   milestone is not complete.
+
+# Milestone 9.2.1 — Nemotron-first conversational orchestration
+
+Status: IMPLEMENTED — LIVE/MANUAL QA PENDING
+
+Why this is next:
+Milestone 9.1.2 made semantic interpretation the first route for many
+conversational turns, but the implementation still calculated deterministic
+policy first, bypassed Nemotron for exact-looking answers, and then required a
+second regex/adapter interpretation to independently agree with Nemotron's
+meaning. That made ordinary phrases such as `make things clearer`, `either is
+fine`, or a natural dropdown answer depend on several overlapping gates. It
+also caused the assistant to discard values it had correctly understood.
+
+Goal:
+Let the existing Nemotron model own the meaning and conversational reply for
+every eligible natural message, while deterministic code owns field IDs,
+allowed value shapes and options, legal state transitions, explicit
+confirmation, canonical form state, and PDF effects.
+
+Target flow:
+
+```text
+natural typed or finalized voice message
+    -> one bounded Nemotron turn decision
+       (intent, natural reply, candidates, uncertainty, source evidence)
+    -> structural field/type/option and state validation
+    -> focused clarification, non-mutating reply, or visible proposal
+    -> separate explicit confirmation
+    -> canonical state and existing PDF fill path
+```
+
+Scope:
+- send natural messages in support setup, awaiting answer, awaiting
+  clarification, and awaiting replacement to Nemotron before deterministic
+  semantic policy
+- extend the bounded decision with a concise natural `assistant_reply`, closed
+  guidance/progress/start intents, and the closed `no_preference` interaction
+  mode
+- include the active field, bounded recent history, setup step, assistance
+  preferences, real field IDs, field types, and finite options in the bounded
+  prompt
+- let Nemotron remove conversational framing and return an unambiguous value
+  in the field's requested representation, including dates, spoken numbers,
+  checkboxes, finite options, capitalization, and deliberately spelled words
+- require exact latest-turn evidence for every personal-fact candidate and
+  reject unknown fields, invalid field types, and values outside finite options
+- do not pass an accepted semantic candidate through a second general-purpose
+  regex or adapter meaning check; field preparation may still apply visible,
+  conservative presentation formatting
+- accept a medium-confidence interpretation when the model says no
+  clarification is needed; `needs_clarification` remains the explicit boundary
+  for ambiguous, incomplete, contradictory, or uncertain facts
+- use the model's bounded natural reply for proposals, focused clarification,
+  and side conversation; reject proposal wording that falsely claims an
+  unconfirmed value was already saved, applied, or confirmed
+- keep explicit UI events, proposal confirmation/rejection, confirm-edit,
+  skip-button events, canonical state transitions, guidance lookup, and PDF
+  filling deterministic and closed
+- retain the established deterministic interpretation path only as a provider
+  failure/invalid-response fallback and as an explicit test seam for adapters
+  and state-machine policy
+
+Acceptance criteria:
+- an exact-looking answer and a paraphrased answer both reach Nemotron before
+  any semantic answer policy
+- a natural dropdown or checkbox meaning accepted by Nemotron is not rejected
+  merely because a regex cannot reproduce the interpretation
+- unknown field IDs, non-boolean checkbox values, invalid number values, and
+  values outside supplied dropdown options cannot become proposals
+- a candidate must cite an exact contiguous excerpt from the latest user turn;
+  bounded history cannot silently supply a missing current personal fact
+- ambiguous or incomplete answers produce one focused clarification and no
+  field effect
+- side conversation produces one natural non-mutating response rather than a
+  second model-action round trip or a field-format error
+- proposals remain review-only, cannot claim they were already applied, and
+  require the existing separate confirmation event before canonical state or
+  PDF output changes
+- provider failure uses the conservative established fallback without
+  mutating the original request
+- deterministic adapter/state tests, semantic integration tests, complete
+  backend/evaluation gates, frontend regression checks, and production build
+  pass
+
+Required live/manual testing:
+1. Run the fixed paraphrase-heavy and human-helper suites using the configured
+   Nemotron model and save the report and suite digest.
+2. Complete the sample and household-support fixtures with natural phrasing,
+   including `make things clearer`, `either is fine`, one ordinary-language
+   dropdown answer, one checkbox answer, one spoken date, one uncertain answer,
+   one correction, and one message containing two facts.
+3. Repeat the clarification probes `what do you mean`, `what if they live there
+   but do not share costs`, and `I do not know what this means`; verify they are
+   not treated as attempted field values.
+4. Repeat representative turns through Deepgram final transcripts, including a
+   deliberately spelled name, and verify the same bounded decision and proposal
+   boundary as typed input.
+5. Confirm that rejected proposals, provider failure, and invalid model output
+   leave canonical form state and the source PDF unchanged.
+
+Do not implement:
+- direct model writes to fields or PDFs, silent confirmation, inferred personal
+  facts, speculative missing letters/date components, or model-selected tools
+- another agent, agent framework, model debate, second conversational model,
+  Deepgram Voice Agent, or another speech provider
+- frontend redesign, PDF extraction/filling changes, multilingual assistance,
+  persistence, authentication, analytics, deployment, or later milestones
+
+Automated implementation outcome recorded 29 October 2026:
+- eligible natural setup, answer, clarification, and replacement messages now
+  reach the bounded Nemotron turn decision before deterministic semantic policy
+- the decision now includes closed guidance, progress, and setup-start intents,
+  `no_preference`, bounded assistance context, and an optional natural reply
+- interpreted candidates retain exact latest-turn evidence and are checked
+  against real field IDs, structural field types, finite options, active phase,
+  and closed proposal effects without a second general semantic-adapter vote
+- model replies can make proposals and clarification more conversational, but a
+  false claim that an unconfirmed value was saved, applied, or confirmed is
+  replaced by safe review wording
+- explicit confirmation, rejection, edited confirmation, navigation effects,
+  canonical state, Tavily policy, and PDF extraction/filling remain unchanged
+- 456 backend tests pass; the 14-scenario evaluation and five-fixture, 47-turn
+  transcript evaluation report zero failures, invalid actions, invalid
+  proposals, invention failures, and confirmation-boundary failures
+- all six frontend workflow, layout, interruption, reliability, Deepgram, and
+  support-preference checks pass, and the production frontend build succeeds
+  with only the existing non-blocking Vite chunk-size advisory
+- the required configured-model and browser/Deepgram manual runs above have not
+  yet been recorded, so this milestone is implemented but not marked complete
 
 # Milestone 9.3 — One-language bilingual assistance pilot
 

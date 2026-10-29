@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
@@ -24,6 +25,83 @@ class StubNemotronService:
 
     async def complete(self, **kwargs: Any) -> str:
         self.calls.append(kwargs)
+        if "conversational turn interpreter" in kwargs["system_prompt"]:
+            prompt = kwargs["user_prompt"]
+            base: dict[str, Any] = {
+                "confidence": "high",
+                "needs_clarification": False,
+                "clarification_reason": None,
+                "candidates": [],
+                "referenced_field_id": None,
+                "assistance_needs": [],
+                "interaction_mode": None,
+                "assistant_reply": None,
+            }
+            if "my name is jane doe" in prompt:
+                base.update(
+                    {
+                        "intent": "answer_current_field",
+                        "candidates": [
+                            {
+                                "field_id": "full_name",
+                                "value": "Jane Doe",
+                                "evidence": "my name is jane doe",
+                            }
+                        ],
+                        "assistant_reply": (
+                            "I understood your name as Jane Doe. Please review "
+                            "and confirm it."
+                        ),
+                    }
+                )
+            elif "Official wording confuses me" in prompt:
+                base.update(
+                    {
+                        "intent": "assistance_preference",
+                        "assistance_needs": [
+                            "reassurance",
+                            "explain_bureaucracy",
+                        ],
+                    }
+                )
+            elif "I would rather speak" in prompt:
+                base.update(
+                    {
+                        "intent": "assistance_preference",
+                        "interaction_mode": "voice",
+                    }
+                )
+            elif "Either is fine" in prompt:
+                base.update(
+                    {
+                        "intent": "assistance_preference",
+                        "interaction_mode": "no_preference",
+                    }
+                )
+            elif "Please use simpler words" in prompt:
+                base.update(
+                    {
+                        "intent": "assistance_preference",
+                        "assistance_needs": ["plain_language"],
+                    }
+                )
+            elif "Just start the form" in prompt:
+                base.update({"intent": "start_form"})
+            elif "Please slow down" in prompt:
+                base.update(
+                    {
+                        "intent": "assistance_preference",
+                        "assistance_needs": ["slower_pace"],
+                    }
+                )
+            else:
+                base.update(
+                    {
+                        "intent": "unrelated",
+                        "assistant_reply": "Okay — we can continue when you're ready.",
+                    }
+                )
+            return json.dumps(base)
         return (
             '{"action":"propose","message":"Review this answer.",'
             '"field_id":"full_name","value":"jane doe"}'
@@ -237,8 +315,8 @@ def test_preferences_cannot_change_deterministic_form_effects_or_state() -> None
     )
     assert adapted_response.effect.effect == "proposal"
     assert adapted_response.effect.prepared_value == "Jane Doe"  # type: ignore[union-attr]
-    assert standard_model.calls == []
-    assert adapted_model.calls == []
+    assert len(standard_model.calls) == 1
+    assert len(adapted_model.calls) == 1
 
 
 def test_preference_change_does_not_enter_conversation_or_form_state() -> None:
@@ -312,7 +390,7 @@ def test_natural_support_answer_updates_closed_preferences_then_asks_mode() -> N
     assert response.conversation_state.phase == "support_setup"
     assert response.conversation_state.support_setup_step == "interaction"
     assert "rather speak, type, or use either" in response.assistant_message
-    assert model.calls == []
+    assert len(model.calls) == 1
 
 
 def test_interaction_reply_completes_setup_and_asks_first_form_question() -> None:
@@ -337,7 +415,7 @@ def test_interaction_reply_completes_setup_and_asks_first_form_question() -> Non
     assert response.conversation_state.phase == "awaiting_answer"
     assert response.conversation_state.active_field_id == "full_name"
     assert "What is your full name?" in response.assistant_message
-    assert model.calls == []
+    assert len(model.calls) == 1
 
 
 def test_interaction_first_is_remembered_while_needs_are_asked() -> None:
@@ -364,8 +442,8 @@ def test_interaction_first_is_remembered_while_needs_are_asked() -> None:
     assert second.effect.preferences.support_needs == [  # type: ignore[union-attr]
         "plain_language"
     ]
-    assert model.calls == []
-    assert second_model.calls == []
+    assert len(model.calls) == 1
+    assert len(second_model.calls) == 1
 
 
 def test_just_start_skips_setup_without_changing_form_state() -> None:
@@ -378,7 +456,7 @@ def test_just_start_skips_setup_without_changing_form_state() -> None:
     assert response.effect.preferences == AssistancePreferences()  # type: ignore[union-attr]
     assert response.conversation_state.phase == "awaiting_answer"
     assert response.conversation_state.active_field_id == "full_name"
-    assert model.calls == []
+    assert len(model.calls) == 1
 
 
 def test_profile_statement_is_not_stored_or_diagnosed() -> None:
@@ -406,7 +484,7 @@ def test_explicit_mid_form_pacing_change_preserves_active_turn() -> None:
     assert response.conversation_state.phase == "awaiting_answer"
     assert response.conversation_state.active_field_id == "full_name"
     assert "form answer has not changed" in response.assistant_message
-    assert model.calls == []
+    assert len(model.calls) == 1
 
 
 def test_setup_prompt_injection_cannot_become_a_preference_or_form_effect() -> None:

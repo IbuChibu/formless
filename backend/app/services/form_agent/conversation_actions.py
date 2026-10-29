@@ -580,6 +580,8 @@ def normalize_action_message(
     action: FormAgentAction,
     request: FormAgentRequest,
     turn_intent_override: Optional[TurnIntent] = None,
+    *,
+    preserve_message: bool = False,
 ) -> FormAgentAction:
     if isinstance(action, NextAction):
         if action.field_id is None:
@@ -595,6 +597,8 @@ def normalize_action_message(
         )
 
     if isinstance(action, ProposeAction):
+        if preserve_message:
+            return action
         field = next(
             field for field in request.fields if field.id == action.field_id
         )
@@ -629,6 +633,8 @@ def normalize_action_message(
         return action.model_copy(update={"message": message})
 
     if isinstance(action, ReplacementProposeAction):
+        if preserve_message:
+            return action
         field = next(
             field for field in request.fields if field.id == action.field_id
         )

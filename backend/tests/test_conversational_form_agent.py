@@ -37,6 +37,8 @@ def _turn_interpretation(
     confidence: str = "high",
     needs_clarification: bool = False,
     clarification_reason: str | None = None,
+    candidates: list[dict[str, Any]] | None = None,
+    assistant_reply: str | None = None,
 ) -> str:
     return json.dumps(
         {
@@ -44,10 +46,11 @@ def _turn_interpretation(
             "confidence": confidence,
             "needs_clarification": needs_clarification,
             "clarification_reason": clarification_reason,
-            "candidates": [],
+            "candidates": candidates or [],
             "referenced_field_id": None,
             "assistance_needs": [],
             "interaction_mode": None,
+            "assistant_reply": assistant_reply,
         }
     )
 
@@ -283,9 +286,12 @@ def test_side_question_uses_natural_non_mutating_conversation_action() -> None:
     request = _request("Can I pause for a minute?")
     nemotron = StubNemotronService(
         [
-            _turn_interpretation("unrelated"),
-            '{"action":"conversation","message":"Of course. We can pause '
-            'here, and your form has not changed.","field_id":"move_in_date"}',
+            _turn_interpretation(
+                "unrelated",
+                assistant_reply=(
+                    "Of course. We can pause here, and your form has not changed."
+                ),
+            ),
         ]
     )
     tavily = StubTavilyService()
@@ -295,20 +301,20 @@ def test_side_question_uses_natural_non_mutating_conversation_action() -> None:
     assert response.action.action == "conversation"
     assert response.effect.effect == "none"
     assert response.conversation_state == request.conversation_state
-    assert len(nemotron.calls) == 2
+    assert len(nemotron.calls) == 1
     assert tavily.queries == []
-    context = _prompt_context(nemotron, 1)
-    assert context["conversation"]["turn_objective"] == "natural_conversation"
+    assert "pause here" in response.assistant_message
 
 
 def test_invalid_pause_responses_use_grounded_non_mutating_fallback() -> None:
     request = _request("Can we pause for a minute?")
-    invalid = (
-        '{"action":"explain","message":"We can pause.",'
-        '"field_id":"move_in_date"}'
-    )
     nemotron = StubNemotronService(
-        [_turn_interpretation("unrelated"), invalid, invalid]
+        _turn_interpretation(
+            "unrelated",
+            assistant_reply=(
+                "We can pause here. Nothing on the form has changed."
+            ),
+        )
     )
     tavily = StubTavilyService()
 
@@ -319,7 +325,7 @@ def test_invalid_pause_responses_use_grounded_non_mutating_fallback() -> None:
     assert "nothing on the form has changed" in response.assistant_message.casefold()
     assert response.effect.effect == "none"
     assert response.conversation_state == request.conversation_state
-    assert len(nemotron.calls) == 3
+    assert len(nemotron.calls) == 1
     assert tavily.queries == []
 
 
@@ -552,6 +558,19 @@ def test_explanation_repair_transcript_returns_to_a_field_answer() -> None:
             'moved into their current home on 5 March 2021 would use that as '
             'their move-in date, not yours. Which part is unclear?",'
             '"field_id":"move_in_date"}',
+            _turn_interpretation(
+                "answer_current_field",
+                candidates=[
+                    {
+                        "field_id": "move_in_date",
+                        "value": "12 June 2019",
+                        "evidence": "12 June 2019",
+                    }
+                ],
+                assistant_reply=(
+                    "I understood 12 June 2019. Please review and confirm it."
+                ),
+            ),
         ]
     )
     tavily = StubTavilyService()
@@ -585,7 +604,7 @@ def test_explanation_repair_transcript_returns_to_a_field_answer() -> None:
     assert answer_response.action.action == "propose"
     assert answer_response.action.value == "12 June 2019"  # type: ignore[union-attr]
     assert answer_response.conversation_state.phase == "awaiting_confirmation"
-    assert len(nemotron.calls) == 6
+    assert len(nemotron.calls) == 7
     assert tavily.queries == []
 
 
@@ -615,7 +634,7 @@ def test_wording_clarification_cannot_become_a_field_proposal() -> None:
 
 def test_progress_question_is_deterministic_and_preserves_the_active_field() -> None:
     request = _request("What have we completed so far?")
-    nemotron = StubNemotronService()
+    nemotron = StubNemotronService(_turn_interpretation("ask_progress"))
     tavily = StubTavilyService()
 
     response = _respond(request, nemotron, tavily)
@@ -628,13 +647,13 @@ def test_progress_question_is_deterministic_and_preserves_the_active_field() -> 
     assert "Ada Lovelace" in response.action.message
     assert "date you began living" in response.action.message.casefold()
     assert response.conversation_state == request.conversation_state
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1
     assert tavily.queries == []
 
 
 def test_return_later_question_is_deterministic_navigation_help() -> None:
     request = _request("Can we return to this later?")
-    nemotron = StubNemotronService()
+    nemotron = StubNemotronService(_turn_interpretation("ask_progress"))
     tavily = StubTavilyService()
 
     response = _respond(request, nemotron, tavily)
@@ -642,7 +661,7 @@ def test_return_later_question_is_deterministic_navigation_help() -> None:
     assert response.action.action == "explain"
     assert "skip it for now" in response.action.message
     assert response.conversation_state == request.conversation_state
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1
     assert tavily.queries == []
 
 
@@ -689,7 +708,22 @@ def test_wording_question_can_interrupt_and_preserve_a_pending_proposal() -> Non
 
 def test_clear_conversational_date_becomes_a_proposal_without_services() -> None:
     request = _request("I started living there on 12 June 2019.")
-    nemotron = StubNemotronService()
+    nemotron = StubNemotronService(
+        _turn_interpretation(
+            "answer_current_field",
+            candidates=[
+                {
+                    "field_id": "move_in_date",
+                    "value": "12 June 2019",
+                    "evidence": "12 June 2019",
+                }
+            ],
+            assistant_reply=(
+                "I understood 12 June 2019. Please review and confirm it "
+                "before I add it to the form."
+            ),
+        )
+    )
     tavily = StubTavilyService()
 
     response = _respond(request, nemotron, tavily)
@@ -699,7 +733,7 @@ def test_clear_conversational_date_becomes_a_proposal_without_services() -> None
     assert response.conversation_state.phase == "awaiting_confirmation"
     assert "review and confirm" in response.action.message
     assert "before I add it to the form" in response.action.message
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1
     assert tavily.queries == []
 
 
@@ -711,6 +745,10 @@ def test_partial_date_gets_a_specific_clarification_without_guessing() -> None:
             confidence="low",
             needs_clarification=True,
             clarification_reason="The exact date is missing.",
+            assistant_reply=(
+                "You said summer 2019. Do you know the month and day, or "
+                "would you like to skip this for now?"
+            ),
         )
     )
     tavily = StubTavilyService()
@@ -727,7 +765,7 @@ def test_partial_date_gets_a_specific_clarification_without_guessing() -> None:
 
 def test_evidence_question_uses_tavily_but_not_nemotron_when_no_result_remains() -> None:
     request = _request("Why is this legally required?")
-    nemotron = StubNemotronService()
+    nemotron = StubNemotronService(_turn_interpretation("ask_guidance"))
     tavily = StubTavilyService()
 
     response = _respond(request, nemotron, tavily)
@@ -737,7 +775,7 @@ def test_evidence_question_uses_tavily_but_not_nemotron_when_no_result_remains()
     assert response.web_guidance is not None
     assert response.web_guidance.status == "empty"
     assert len(tavily.queries) == 1
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1
 
 
 def test_acknowledgement_does_not_confirm_a_pending_proposal() -> None:

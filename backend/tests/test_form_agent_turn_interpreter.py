@@ -96,6 +96,7 @@ def _interpretation(
     referenced_field_id: str | None = None,
     assistance_needs: list[str] | None = None,
     interaction_mode: str | None = None,
+    assistant_reply: str | None = None,
 ) -> str:
     return json.dumps(
         {
@@ -107,6 +108,7 @@ def _interpretation(
             "referenced_field_id": referenced_field_id,
             "assistance_needs": assistance_needs or [],
             "interaction_mode": interaction_mode,
+            "assistant_reply": assistant_reply,
         }
     )
 
@@ -132,6 +134,8 @@ def _interpretation(
             clarification_reason="The user did not provide a surname.",
         ),
         _interpretation(intent="ask_explanation"),
+        _interpretation(intent="ask_guidance"),
+        _interpretation(intent="ask_progress"),
         _interpretation(intent="unrelated"),
         _interpretation(intent="skip_current_field"),
         _interpretation(
@@ -142,6 +146,7 @@ def _interpretation(
             intent="assistance_preference",
             assistance_needs=["slower_pace"],
         ),
+        _interpretation(intent="start_form"),
     ],
 )
 def test_parser_accepts_each_bounded_single_field_intent(raw: str) -> None:
@@ -314,7 +319,7 @@ def test_parser_repairs_only_a_grounded_navigation_schema_drift() -> None:
             "That was the seventeenth of October 1986.",
             [_field("date_of_birth", "Date of birth (DD/MM/YYYY)")],
             "date_of_birth",
-            {"field_id": "date_of_birth", "value": "seventeenth of October 1986", "evidence": "seventeenth of October 1986"},
+            {"field_id": "date_of_birth", "value": "17/10/1986", "evidence": "seventeenth of October 1986"},
             "17/10/1986",
         ),
         (
@@ -347,7 +352,7 @@ def test_parser_repairs_only_a_grounded_navigation_schema_drift() -> None:
         ),
     ],
 )
-def test_semantic_candidates_still_pass_through_deterministic_adapters(
+def test_semantic_candidates_pass_structural_field_validation(
     message: str,
     fields: list[dict[str, Any]],
     active: str,
@@ -395,7 +400,99 @@ def test_low_confidence_candidate_cannot_become_a_proposal() -> None:
     assert request.fields[0].status == "unanswered"
 
 
-def test_interpreter_failure_preserves_field_state() -> None:
+def test_medium_confidence_settled_candidate_can_be_reviewed() -> None:
+    model = StubNemotronService(
+        _interpretation(
+            confidence="medium",
+            candidates=[
+                {
+                    "field_id": "full_name",
+                    "value": "Ibrahim Akhoon",
+                    "evidence": "Ibrahim Akhoon",
+                }
+            ],
+            assistant_reply=(
+                "I understood the name as Ibrahim Akhoon. Please check it "
+                "before confirming."
+            ),
+        )
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(  # type: ignore[arg-type]
+            _request("Ibrahim Akhoon")
+        )
+    )
+
+    assert response.effect.effect == "proposal"
+    assert response.effect.prepared_value == "Ibrahim Akhoon"  # type: ignore[union-attr]
+    assert "Please check it" in response.assistant_message
+
+
+def test_model_reply_cannot_claim_an_unconfirmed_value_was_applied() -> None:
+    model = StubNemotronService(
+        _interpretation(
+            candidates=[
+                {
+                    "field_id": "full_name",
+                    "value": "Ibrahim Akhoon",
+                    "evidence": "Ibrahim Akhoon",
+                }
+            ],
+            assistant_reply="I've added Ibrahim Akhoon to the form.",
+        )
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(  # type: ignore[arg-type]
+            _request("Ibrahim Akhoon")
+        )
+    )
+
+    assert response.effect.effect == "proposal"
+    assert "I've added" not in response.assistant_message
+    assert "review and confirm" in response.assistant_message
+    assert response.conversation_state.phase == "awaiting_confirmation"
+
+
+def test_semantic_candidate_outside_dropdown_options_cannot_be_proposed() -> None:
+    fields = [
+        _field(
+            "arrangement",
+            "Living arrangement",
+            field_type="dropdown",
+            options=["Sole tenant", "Joint tenant", "Owner-occupier"],
+        )
+    ]
+    model = StubNemotronService(
+        _interpretation(
+            candidates=[
+                {
+                    "field_id": "arrangement",
+                    "value": "Temporary accommodation",
+                    "evidence": "temporary accommodation",
+                }
+            ],
+            assistant_reply="I understood temporary accommodation.",
+        )
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(  # type: ignore[arg-type]
+            _request(
+                "temporary accommodation",
+                fields=fields,
+                active_field_id="arrangement",
+            )
+        )
+    )
+
+    assert response.effect.effect == "none"
+    assert response.action.action == "clarify"
+    assert response.conversation_state.phase == "awaiting_clarification"
+
+
+def test_interpreter_failure_does_not_guess_through_conversational_framing() -> None:
     model = StubNemotronService(error=NemotronServiceError("provider failed"))
     request = _request("You can put Ibrahim Akhoon down for that.")
 
@@ -468,11 +565,10 @@ def test_known_wording_question_is_semantically_routed_before_response() -> None
 
 def test_side_comment_routes_to_natural_conversation_without_field_effect() -> None:
     model = StubNemotronService(
-        [
-            _interpretation(intent="unrelated"),
-            '{"action":"conversation","message":"Take your time. Tell me '
-            'when you are ready.","field_id":"full_name"}',
-        ]
+        _interpretation(
+            intent="unrelated",
+            assistant_reply="Take your time. Tell me when you are ready.",
+        )
     )
     request = _request("I need a moment to find the right document")
 
@@ -483,7 +579,7 @@ def test_side_comment_routes_to_natural_conversation_without_field_effect() -> N
     assert response.effect.effect == "none"
     assert response.conversation_state == request.conversation_state
     assert "Take your time" in response.assistant_message
-    assert len(model.calls) == 2
+    assert len(model.calls) == 1
     assert model.calls[0]["system_prompt"] == TURN_INTERPRETER_SYSTEM_PROMPT
 
 
@@ -577,13 +673,37 @@ def test_semantic_support_preference_uses_the_closed_setup_policy() -> None:
     assert len(model.calls) == 1
 
 
-def test_ungrounded_model_preferences_do_not_change_preferences() -> None:
-    message = "Give me a second, my doorbell is ringing."
+def test_either_is_a_closed_no_preference_interaction_choice() -> None:
     model = StubNemotronService(
         _interpretation(
             intent="assistance_preference",
-            assistance_needs=["plain_language", "slower_pace"],
-            interaction_mode="voice",
+            interaction_mode="no_preference",
+            assistant_reply="Either works — use whichever feels easiest.",
+        )
+    )
+    request = _request(
+        "Either is fine.",
+        active_field_id=None,
+        phase="support_setup",
+        support_setup_step="interaction",
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "assistance_preferences_updated"
+    assert response.effect.preferences.interaction_mode == "no_preference"
+    assert response.conversation_state.phase == "awaiting_answer"
+    assert response.conversation_state.active_field_id == "full_name"
+
+
+def test_side_comment_cannot_change_assistance_preferences() -> None:
+    message = "Give me a second, my doorbell is ringing."
+    model = StubNemotronService(
+        _interpretation(
+            intent="unrelated",
+            assistant_reply="Of course — take a moment.",
         )
     )
     request = _request(message)
@@ -593,13 +713,19 @@ def test_ungrounded_model_preferences_do_not_change_preferences() -> None:
     )
 
     assert response.effect.effect == "none"
-    assert response.conversation_state.phase == "awaiting_clarification"
+    assert response.conversation_state.phase == "awaiting_answer"
     assert request.assistance_preferences.support_needs == []
     assert request.assistance_preferences.interaction_mode == "no_preference"
 
 
-def test_known_support_preference_stays_on_the_deterministic_fast_path() -> None:
-    model = StubNemotronService("not used")
+def test_natural_support_preference_is_interpreted_by_nemotron_first() -> None:
+    model = StubNemotronService(
+        _interpretation(
+            intent="assistance_preference",
+            assistance_needs=["slower_pace"],
+            assistant_reply="Yes — I'll slow down and take one thing at a time.",
+        )
+    )
     request = _request(
         "I get overwhelmed, so take it slowly.",
         active_field_id=None,
@@ -613,7 +739,8 @@ def test_known_support_preference_stays_on_the_deterministic_fast_path() -> None
 
     assert response.effect.effect == "assistance_preferences_updated"
     assert response.effect.preferences.support_needs == ["slower_pace"]
-    assert model.calls == []
+    assert len(model.calls) == 1
+    assert model.calls[0]["system_prompt"] == TURN_INTERPRETER_SYSTEM_PROMPT
 
 
 def test_multi_field_interpretation_remembers_only_valid_later_candidate() -> None:
@@ -681,8 +808,22 @@ def test_replacement_proposal_preserves_confirmed_value() -> None:
     assert fields[0]["confirmed_value"] == "Ibrahim Khan"
 
 
-def test_exact_adapter_value_stays_on_zero_model_call_fast_path() -> None:
-    model = StubNemotronService("not used")
+def test_exact_value_also_uses_nemotron_first() -> None:
+    model = StubNemotronService(
+        _interpretation(
+            candidates=[
+                {
+                    "field_id": "full_name",
+                    "value": "Ibrahim Akhoon",
+                    "evidence": "Ibrahim Akhoon",
+                }
+            ],
+            assistant_reply=(
+                "I understood your full name as Ibrahim Akhoon. Please "
+                "review and confirm it."
+            ),
+        )
+    )
     request = _request("My full name is Ibrahim Akhoon.")
 
     response = asyncio.run(
@@ -691,4 +832,4 @@ def test_exact_adapter_value_stays_on_zero_model_call_fast_path() -> None:
 
     assert response.effect.effect == "proposal"
     assert response.effect.prepared_value == "Ibrahim Akhoon"  # type: ignore[union-attr]
-    assert model.calls == []
+    assert len(model.calls) == 1

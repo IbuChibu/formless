@@ -162,6 +162,7 @@ def test_optional_live_mode_reports_latency_and_model_calls_per_field() -> None:
         run_transcript_evaluation(  # type: ignore[arg-type]
             live_service=live_service,
             transcripts=(transcript,),
+            turn_interpretation_enabled=False,
         )
     )
 

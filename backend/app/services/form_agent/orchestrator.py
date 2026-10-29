@@ -34,7 +34,7 @@ from .conversation_policy import (
     validate_action_for_turn,
     validate_event_transition,
 )
-from .intent_policy import TurnIntent
+from .intent_policy import TurnIntent, classify_turn_intent
 from .models import (
     AssistancePreferencesUpdatedAction,
     ClarifyAction,
@@ -80,6 +80,7 @@ from .turn_interpreter import (
     should_interpret_turn,
     turn_intent_from_interpretation,
 )
+from .turn_interpretation_grounding import proposal_needs_interpretation
 
 
 class FormAgentService:
@@ -102,10 +103,13 @@ class FormAgentService:
     async def respond(self, request: FormAgentRequest) -> FormAgentResponse:
         validate_event_transition(request)
 
-        if request.conversation_state.phase in {
-            "awaiting_answer",
-            "awaiting_clarification",
-        }:
+        if (
+            not self._turn_interpretation_enabled
+            and request.conversation_state.phase in {
+                "awaiting_answer",
+                "awaiting_clarification",
+            }
+        ):
             message = request_message(request)
             if message:
                 remembered = merge_volunteered_candidates(
@@ -144,65 +148,98 @@ class FormAgentService:
             else None
         )
 
-        policy_action = deterministic_action(
-            request,
-            self._answer_interpreter,
-        )
+        policy_action = None
         turn_intent_override: Optional[TurnIntent] = None
-        if self._turn_interpretation_enabled and should_interpret_turn(
-            request,
-            policy_action,
-        ):
+        if self._turn_interpretation_enabled and should_interpret_turn(request):
             try:
                 interpreted_turn = await interpret_turn(
                     self._nemotron_service,
                     request,
                 )
             except (FormAgentError, NemotronServiceError):
-                if policy_action is not None and not isinstance(
-                    policy_action,
-                    (ProposeAction, ReplacementProposeAction),
-                ):
-                    return response_for_action(policy_action, request)
-                fallback = model_failure_fallback(request)
-                if fallback is not None:
-                    return response_for_action(fallback, request)
+                policy_action = deterministic_action(
+                    request,
+                    self._answer_interpreter,
+                )
+                fallback_intent = classify_turn_intent(request)
+                if fallback_intent == "evidence_question":
+                    turn_intent_override = fallback_intent
+                    policy_action = None
+                elif policy_action is not None:
+                    needs_semantic_recovery = (
+                        isinstance(
+                            policy_action,
+                            (ProposeAction, ReplacementProposeAction),
+                        )
+                        and active_field is not None
+                        and proposal_needs_interpretation(
+                            active_field,
+                            request_message(request),
+                            policy_action.value,
+                        )
+                    )
+                    if not needs_semantic_recovery:
+                        return response_for_action(policy_action, request)
+                    policy_action = None
+                    fallback = model_failure_fallback(request)
+                    if fallback is not None:
+                        return response_for_action(fallback, request)
+                else:
+                    fallback = model_failure_fallback(request)
+                    if fallback is not None:
+                        return response_for_action(fallback, request)
             else:
+                try:
+                    interpreted_action, request = action_from_interpretation(
+                        request,
+                        interpreted_turn,
+                    )
+                    if interpreted_action is not None:
+                        if not isinstance(
+                            interpreted_action,
+                            (
+                                AssistancePreferencesUpdatedAction,
+                                CorrectionStartedAction,
+                                FieldReopenedAction,
+                                FieldSelectedAction,
+                            ),
+                        ):
+                            validate_action_against_request(
+                                interpreted_action,
+                                request,
+                                require_adapter_match=False,
+                            )
+                except FormAgentError:
+                    interpreted_action = None
+                if interpreted_action is not None:
+                    return response_for_action(
+                        normalize_action_message(
+                            interpreted_action,
+                            request,
+                            preserve_message=isinstance(
+                                interpreted_action,
+                                (ProposeAction, ReplacementProposeAction),
+                            ),
+                        ),
+                        request,
+                    )
+                if interpreted_turn.intent == "ask_progress":
+                    policy_action = deterministic_action(
+                        request,
+                        self._answer_interpreter,
+                    )
+                    if policy_action is not None:
+                        return response_for_action(policy_action, request)
                 turn_intent_override = turn_intent_from_interpretation(
                     interpreted_turn,
                     request,
                 )
-                if turn_intent_override is None:
-                    try:
-                        interpreted_action, request = action_from_interpretation(
-                            request,
-                            interpreted_turn,
-                            self._answer_interpreter,
-                        )
-                        if interpreted_action is not None:
-                            if not isinstance(
-                                interpreted_action,
-                                (
-                                    AssistancePreferencesUpdatedAction,
-                                    CorrectionStartedAction,
-                                    FieldReopenedAction,
-                                    FieldSelectedAction,
-                                ),
-                            ):
-                                validate_action_against_request(
-                                    interpreted_action,
-                                    request,
-                                )
-                    except FormAgentError:
-                        interpreted_action = None
-                    if interpreted_action is not None:
-                        return response_for_action(
-                            normalize_action_message(
-                                interpreted_action,
-                                request,
-                            ),
-                            request,
-                        )
+
+        if policy_action is None:
+            policy_action = deterministic_action(
+                request,
+                self._answer_interpreter,
+            )
 
         if (
             turn_intent_override == "uncertain_answer"

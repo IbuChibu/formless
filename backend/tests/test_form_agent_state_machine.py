@@ -81,7 +81,10 @@ def respond(
 ):
     service = nemotron or StubNemotronService()
     response = asyncio.run(
-        FormAgentService(service).respond(  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            service,
+            turn_interpretation_enabled=False,
+        ).respond(
             FormAgentRequest.model_validate(payload)
         )
     )

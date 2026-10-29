@@ -365,7 +365,7 @@ def test_model_cannot_turn_guidance_into_a_personal_answer() -> None:
         )
     )
 
-    assert len(nemotron.calls) == 2
+    assert len(nemotron.calls) == 3
     assert response.effect.effect == "none"
     assert response.conversation_state == request.conversation_state
     assert "Example" not in response.assistant_message

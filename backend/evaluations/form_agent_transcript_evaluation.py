@@ -434,7 +434,7 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     model_response=_uncertain_interpretation_json(
                         "The answer changes from week to week."
                     ),
-                    expected_model_calls=1,
+                    expected_model_calls=0,
                 ),
                 _turn(
                     "cost-sharing-proposal",
@@ -634,7 +634,7 @@ def transcript_fixtures() -> tuple[TranscriptFixture, ...]:
                     model_response=_uncertain_interpretation_json(
                         "The amount is approximate."
                     ),
-                    expected_model_calls=1,
+                    expected_model_calls=0,
                 ),
                 _turn(
                     "actual-cost-proposal",
@@ -832,7 +832,10 @@ async def run_transcript_evaluation(
             try:
                 service = FormAgentService(  # type: ignore[arg-type]
                     turn_service,
-                    turn_interpretation_enabled=turn_interpretation_enabled,
+                    turn_interpretation_enabled=(
+                        turn_interpretation_enabled
+                        and live_service is not None
+                    ),
                     **(
                         {"answer_interpreter": answer_interpreter}
                         if answer_interpreter is not None

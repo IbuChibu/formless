@@ -678,3 +678,43 @@ recognition evidence without creating a second agent or weakening canonical
 state. Temporary credentials keep the long-lived key out of frontend assets,
 and the permanent typed path preserves recoverability when voice configuration,
 permission, or networking fails.
+
+---
+
+## 2026-10-29 — Nemotron owns turn meaning; deterministic code owns effects
+
+Decision:
+Every eligible natural message during support setup, awaiting an answer,
+awaiting clarification, or awaiting a replacement is sent to one bounded
+Nemotron turn decision before deterministic semantic policy. The decision may
+classify the intent, normalize an explicitly supplied candidate, report
+uncertainty, and suggest a concise natural reply. Exact-looking answers,
+progress questions, guidance requests, and support preferences do not bypass
+this semantic boundary.
+
+An interpreted candidate must cite exact evidence from the latest turn and use
+a real supplied field ID. Deterministic code validates the candidate's value
+type, finite options, active phase, and allowed effect, but does not require a
+second regex or field adapter to independently infer the same meaning. The
+focused adapters remain provider-failure fallbacks and isolated deterministic
+test seams. Medium confidence may proceed to review when Nemotron explicitly
+reports that no clarification is needed; ambiguity remains blocked by the
+closed `needs_clarification` result.
+
+Nemotron still cannot apply or confirm a value, change canonical state, select
+tools, search the web, or write a PDF. Proposals are closed review effects and
+must pass the existing separate confirmation event. Proposal wording that
+falsely claims an unconfirmed value was already saved, applied, or confirmed is
+replaced by grounded review wording. Explicit UI events, state transitions,
+guidance lookup, canonical state, and PDF filling remain deterministic.
+
+Reason:
+Requiring deterministic policy to decide the route before Nemotron, then
+requiring a second lexical interpreter to reproduce Nemotron's answer, made the
+assistant understand only phrases that matched its gates. A single bounded
+semantic decision better uses Nemotron's conversational ability while the
+closed effect and confirmation boundary still prevent hallucinated text from
+mutating the form. This supersedes the deterministic fast paths and mandatory
+adapter-agreement portions of the 25 October semantic-first decision; it does
+not weaken provenance, structural validation, explicit confirmation, canonical
+state, guidance, or PDF separation.

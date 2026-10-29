@@ -103,7 +103,10 @@ def test_lowercase_name_returns_original_and_reviewable_capitalization() -> None
     nemotron = StubNemotronService()
 
     response = asyncio.run(
-        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(request)
     )
     effect = response.effect
 
@@ -146,7 +149,10 @@ def test_date_preparation_exposes_requested_format_without_losing_original() -> 
     request = _request(field, "I was born on 17 October 1986")
 
     response = asyncio.run(
-        FormAgentService(StubNemotronService()).respond(  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            StubNemotronService(),
+            turn_interpretation_enabled=False,
+        ).respond(
             request
         )
     )
@@ -244,7 +250,10 @@ def test_explicit_prose_tidy_returns_a_reviewable_model_suggestion() -> None:
     )
 
     response = asyncio.run(
-        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(request)
     )
 
     assert response.effect.effect == "proposal"
@@ -276,7 +285,10 @@ def test_unsafe_prose_tidy_falls_back_to_the_original_wording() -> None:
     nemotron = StubNemotronService(unsafe)
 
     response = asyncio.run(
-        FormAgentService(nemotron).respond(request)  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            nemotron,
+            turn_interpretation_enabled=False,
+        ).respond(request)
     )
 
     assert response.effect.effect == "proposal"
@@ -290,7 +302,10 @@ def test_unsafe_prose_tidy_falls_back_to_the_original_wording() -> None:
 def test_use_original_can_be_confirmed_through_explicit_edit_event() -> None:
     request = _request(_field(), "my name is john smith")
     proposal_response = asyncio.run(
-        FormAgentService(StubNemotronService()).respond(  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            StubNemotronService(),
+            turn_interpretation_enabled=False,
+        ).respond(
             request
         )
     )
@@ -305,7 +320,10 @@ def test_use_original_can_be_confirmed_through_explicit_edit_event() -> None:
     )
 
     confirmed = asyncio.run(
-        FormAgentService(StubNemotronService()).respond(  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            StubNemotronService(),
+            turn_interpretation_enabled=False,
+        ).respond(
             confirm_request
         )
     )

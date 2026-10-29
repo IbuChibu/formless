@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from evaluations.form_agent_conversation_quality import (
@@ -18,17 +19,46 @@ class ScriptedNemotronService:
 
     async def complete(self, **kwargs: Any) -> str:
         self.calls.append(kwargs)
-        if "bounded turn interpreter" in kwargs["system_prompt"]:
+        if "conversational turn interpreter" in kwargs["system_prompt"]:
+            if "my email is jane@example.com" in kwargs["user_prompt"]:
+                return json.dumps(
+                    {
+                        "intent": "answer_current_field",
+                        "confidence": "high",
+                        "needs_clarification": False,
+                        "clarification_reason": None,
+                        "candidates": [
+                            {
+                                "field_id": "active_field",
+                                "value": "jane@example.com",
+                                "evidence": "jane@example.com",
+                            }
+                        ],
+                        "referenced_field_id": None,
+                        "assistance_needs": [],
+                        "interaction_mode": None,
+                        "assistant_reply": (
+                            "I understood jane@example.com. Please review "
+                            "and confirm it."
+                        ),
+                    }
+                )
             intent = (
                 "unrelated"
                 if "Can we pause for a minute?" in kwargs["user_prompt"]
                 else "ask_explanation"
             )
+            assistant_reply = (
+                "Of course. We can pause here and continue whenever you are ready."
+                if intent == "unrelated"
+                else "I'll explain that in simpler words."
+            )
             return (
                 '{"intent":"' + intent + '","confidence":"high",'
                 '"needs_clarification":false,"clarification_reason":null,'
                 '"candidates":[],"referenced_field_id":null,'
-                '"assistance_needs":[],"interaction_mode":null}'
+                '"assistance_needs":[],"interaction_mode":null,'
+                '"assistant_reply":' + json.dumps(assistant_reply) + '}'
             )
         return self.responses.pop(0)
 
@@ -112,6 +142,5 @@ def test_conversation_quality_scenarios_are_small_and_fixed() -> None:
         "initial_paraphrase",
         "simplify_previous_explanation",
         "clarify_what_is_confusing",
-        "natural_conversation",
         None,
     }

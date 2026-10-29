@@ -862,9 +862,9 @@ def test_orchestrator_searches_once_and_returns_attributed_web_guidance() -> Non
     assert response.web_guidance.status == "used"
     assert len(response.web_guidance.sources) == 2
     assert len(tavily.queries) == 1
-    assert len(nemotron.calls) == 1
+    assert len(nemotron.calls) == 2
     prompt_context = json.loads(
-        nemotron.calls[0]["user_prompt"].split(
+        nemotron.calls[1]["user_prompt"].split(
             "UNTRUSTED_AGENT_CONTEXT\n",
             maxsplit=1,
         )[1].split("\nEND_UNTRUSTED_AGENT_CONTEXT", maxsplit=1)[0]
@@ -906,7 +906,7 @@ def test_orchestrator_returns_deterministic_conflict_without_model_call() -> Non
     assert response.web_guidance is not None
     assert response.web_guidance.status == "conflicting"
     assert len(response.web_guidance.sources) == 2
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1
     assert len(tavily.queries) == 1
 
 
@@ -957,7 +957,7 @@ def test_empty_search_returns_explanation_without_model_call() -> None:
     assert response.web_guidance.status == "empty"
     assert "couldn't find relevant verified guidance" in response.action.message
     assert "I won't guess" in response.action.message
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1
     assert len(tavily.queries) == 1
 
 
@@ -997,7 +997,7 @@ def test_irrelevant_results_do_not_reach_nemotron_or_response_citations() -> Non
         "Search current guidance: what does full name mean on this form?"
     ).conversation_state
     assert "couldn't find relevant verified guidance" in response.action.message
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1
     assert len(tavily.queries) == 1
 
 
@@ -1048,7 +1048,7 @@ def test_household_purpose_abstention_is_grounded_and_preserves_phase() -> None:
             "records",
         )
     )
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1
 
 
 def test_local_guidance_is_used_without_tavily_or_nemotron() -> None:
@@ -1065,7 +1065,7 @@ def test_local_guidance_is_used_without_tavily_or_nemotron() -> None:
     assert response.guidance
     assert response.web_guidance is None
     assert tavily.queries == []
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -1113,4 +1113,4 @@ def test_endpoint_returns_typed_unavailable_web_guidance(
     assert "couldn't check live guidance right now" in (
         payload["assistant_message"]
     )
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1

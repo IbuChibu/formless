@@ -79,6 +79,8 @@ def canonicalize_proposal_value(
 def validate_action_against_request(
     action: FormAgentAction,
     request: FormAgentRequest,
+    *,
+    require_adapter_match: bool = True,
 ) -> None:
     fields_by_id = {field.id: field for field in request.fields}
     unanswered_fields = [
@@ -153,27 +155,28 @@ def validate_action_against_request(
             )
         try:
             validate_field_value(field.type, field.options, action.value)
-            adapter_input = (
-                "yes"
-                if action.value is True
-                else "no"
-                if action.value is False
-                else action.value
-            )
-            adapter_result = interpret_answer(field, adapter_input)
-            if not isinstance(adapter_result, MatchedAnswer):
-                if isinstance(adapter_result, ClarificationNeeded):
+            if require_adapter_match:
+                adapter_input = (
+                    "yes"
+                    if action.value is True
+                    else "no"
+                    if action.value is False
+                    else action.value
+                )
+                adapter_result = interpret_answer(field, adapter_input)
+                if not isinstance(adapter_result, MatchedAnswer):
+                    if isinstance(adapter_result, ClarificationNeeded):
+                        raise ValueError(
+                            f"{adapter_result.reason} "
+                            f"{adapter_result.accepted_shape}"
+                        )
                     raise ValueError(
-                        f"{adapter_result.reason} "
-                        f"{adapter_result.accepted_shape}"
+                        "The proposal is not a self-contained field value"
                     )
-                raise ValueError(
-                    "The proposal is not a self-contained field value"
-                )
-            if adapter_result.value != action.value:
-                raise ValueError(
-                    "The proposal was not normalized by its field adapter"
-                )
+                if adapter_result.value != action.value:
+                    raise ValueError(
+                        "The proposal was not normalized by its field adapter"
+                    )
         except ValueError as error:
             raise FormAgentError(
                 "Form Agent returned an invalid proposal value"

@@ -74,7 +74,10 @@ def respond(
 ):
     provider = nemotron or StubNemotronService()
     response = asyncio.run(
-        FormAgentService(provider).respond(agent_request)  # type: ignore[arg-type]
+        FormAgentService(  # type: ignore[arg-type]
+            provider,
+            turn_interpretation_enabled=False,
+        ).respond(agent_request)
     )
     return response, provider
 
@@ -524,4 +527,4 @@ def test_invalid_model_output_during_correction_preserves_previous_value() -> No
     assert response.effect.effect == "none"
     assert response.conversation_state == agent_request.conversation_state
     assert agent_request.fields[0].confirmed_value == "Ada Lovelace"
-    assert len(nemotron.calls) == 1
+    assert len(nemotron.calls) == 2
