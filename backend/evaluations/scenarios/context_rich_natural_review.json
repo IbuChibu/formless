@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "suite_id": "context-rich-natural-review-v1",
+  "description": "Fixed synthetic conversations for Milestone 9.2.2: natural proposal review, constrained-field ambiguity, compatible option mapping, and deliberate name spelling.",
+  "personas": [
+    {
+      "id": "natural_reviewer",
+      "name": "Jordan",
+      "summary": "A synthetic user who reviews answers in ordinary spoken language and expects the assistant to understand context.",
+      "communication_style": "Short conversational replies, corrections, read-back requests, and occasional ambiguous speech-recognition results.",
+      "behaviours": [
+        "does not use button labels as commands",
+        "expects a pending answer to remain visible until clearly accepted",
+        "describes circumstances before knowing the form's official option"
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "natural-confirmation",
+      "title": "Natural confirmation uses the closed confirmation effect",
+      "persona_id": "natural_reviewer",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "A clear conversational review decision should confirm exactly the visible pending value.",
+      "tags": ["proposal_review", "confirmation_boundary"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}},
+        {"id": "answer", "event": {"type": "message", "content": "John Michael"}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "full_name", "prepared_value": "John Michael"}},
+        {"id": "confirm", "event": {"type": "message", "content": "Yes, that's exactly right."}, "tags": ["context_retention", "confirmation_boundary"], "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "full_name"}}
+      ],
+      "expected_final": {"confirmed_values": {"full_name": "John Michael"}, "skipped_field_ids": [], "unanswered_field_ids": []},
+      "allowed_proposals": {"full_name": ["John Michael"]}
+    },
+    {
+      "id": "natural-rejection",
+      "title": "Natural rejection removes only the proposal",
+      "persona_id": "natural_reviewer",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "A clear rejection should return to answering without changing canonical field state.",
+      "tags": ["proposal_review", "recovery"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}},
+        {"id": "answer", "event": {"type": "message", "content": "John Michael"}, "tags": ["confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "full_name", "prepared_value": "John Michael"}},
+        {"id": "reject", "event": {"type": "message", "content": "No, that's wrong."}, "tags": ["recovery", "confirmation_boundary"], "expect": {"effects": ["rejected"], "phase": "awaiting_answer", "field_id": "full_name"}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["full_name"]},
+      "allowed_proposals": {"full_name": ["John Michael"]}
+    },
+    {
+      "id": "read-back-keeps-review",
+      "title": "Read-back request preserves the pending proposal",
+      "persona_id": "natural_reviewer",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "Asking to hear an answer again should be conversational and must not confirm or reject it.",
+      "tags": ["proposal_review", "context_retention"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}},
+        {"id": "answer", "event": {"type": "message", "content": "John Michael"}, "tags": ["confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "full_name", "prepared_value": "John Michael"}},
+        {"id": "repeat", "event": {"type": "message", "content": "Could you read that back?"}, "tags": ["context_retention", "confirmation_boundary"], "expect": {"effects": ["none"], "phase": "awaiting_confirmation", "field_id": "full_name", "state_unchanged": true}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["full_name"]},
+      "allowed_proposals": {"full_name": ["John Michael"]}
+    },
+    {
+      "id": "near-match-permit-does-not-confirm",
+      "title": "Speech near-match cannot confirm",
+      "persona_id": "natural_reviewer",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "A recognition result of permit must leave the visible proposal and canonical value unchanged.",
+      "tags": ["proposal_review", "speech_safety"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}},
+        {"id": "answer", "event": {"type": "message", "content": "John Michael"}, "tags": ["confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "full_name", "prepared_value": "John Michael"}},
+        {"id": "near-match", "event": {"type": "message", "content": "Permit."}, "tags": ["clarification", "confirmation_boundary"], "expect": {"effects": ["none"], "phase": "awaiting_confirmation", "field_id": "full_name", "state_unchanged": true}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["full_name"]},
+      "allowed_proposals": {"full_name": ["John Michael"]}
+    },
+    {
+      "id": "living-alone-needs-tenure",
+      "title": "Living alone does not invent a housing option",
+      "persona_id": "natural_reviewer",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["residency_arrangement"],
+      "purpose": "Related household information should lead to a tenure-focused question rather than an unsupported dropdown guess.",
+      "tags": ["dropdown_safety", "no_invention"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "residency_arrangement"}},
+        {"id": "ambiguous-answer", "event": {"type": "message", "content": "I live by myself."}, "tags": ["clarification", "confirmation_boundary"], "expect": {"effects": ["none"], "phase": "awaiting_clarification", "field_id": "residency_arrangement", "message_includes_any": ["rent", "own", "arrangement"]}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["residency_arrangement"]},
+      "allowed_proposals": {}
+    },
+    {
+      "id": "solo-tenant-selects-real-option",
+      "title": "Clear paraphrase selects a real housing option",
+      "persona_id": "natural_reviewer",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["residency_arrangement"],
+      "purpose": "Solo tenant supplies enough evidence for the exact Sole tenant option while retaining review.",
+      "tags": ["dropdown_mapping", "confirmation_boundary"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "residency_arrangement"}},
+        {"id": "answer", "event": {"type": "message", "content": "Solo tenant."}, "tags": ["latest_answer", "confirmation_boundary"], "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "residency_arrangement", "prepared_value": "Sole tenant"}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["residency_arrangement"]},
+      "allowed_proposals": {"residency_arrangement": ["Sole tenant"]}
+    },
+    {
+      "id": "incompatible-date-order",
+      "title": "Incompatible numeric date order is clarified",
+      "persona_id": "natural_reviewer",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_date_of_birth"],
+      "purpose": "The assistant must not silently reinterpret an American-order numeric date for a day-first field.",
+      "tags": ["date_safety", "no_invention"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_date_of_birth"}},
+        {"id": "answer", "event": {"type": "message", "content": "05/19/2011"}, "tags": ["clarification", "confirmation_boundary"], "expect": {"effects": ["none"], "phase": "awaiting_clarification", "field_id": "applicant_date_of_birth", "message_includes_any": ["day", "month", "DD/MM/YYYY"]}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["applicant_date_of_birth"]},
+      "allowed_proposals": {}
+    },
+    {
+      "id": "mixed-name-versions",
+      "title": "Mixed spoken and spelled name requests a focused repeat",
+      "persona_id": "natural_reviewer",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "Duplicated or conflicting name versions should never be concatenated into a malformed proposal.",
+      "tags": ["name_safety", "speech_safety"],
+      "turns": [
+        {"id": "start", "event": {"type": "advance"}, "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}},
+        {"id": "answer", "event": {"type": "message", "content": "Ebrahim e b r a h i m a k h w o o n."}, "tags": ["clarification", "confirmation_boundary"], "expect": {"effects": ["none"], "phase": "awaiting_clarification", "field_id": "full_name", "message_includes_any": ["repeat", "spell", "name"]}}
+      ],
+      "expected_final": {"confirmed_values": {}, "skipped_field_ids": [], "unanswered_field_ids": ["full_name"]},
+      "allowed_proposals": {}
+    }
+  ]
+}

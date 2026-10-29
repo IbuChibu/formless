@@ -945,20 +945,11 @@ function App() {
           type: activeAgentField.type,
         }
       : null,
-    activeFieldId: agentActiveFieldId,
     activeQuestion: activeAgentQuestion,
     hasPendingProposal: pendingProposal !== null,
     isFormComplete: agentConversationState.phase === "form_complete",
     onAdvance: advanceAgent,
     onSendMessage: sendAgentMessage,
-    onConfirmProposal: () => {
-      if (pendingProposal) {
-        confirmPendingProposal(pendingProposal.value);
-      }
-    },
-    onRejectProposal: rejectPendingProposal,
-    onSkipField: (fieldId) =>
-      sendAgentEvent({ type: "skip", field_id: fieldId }),
   });
 
   return (

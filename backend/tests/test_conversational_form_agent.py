@@ -39,6 +39,7 @@ def _turn_interpretation(
     clarification_reason: str | None = None,
     candidates: list[dict[str, Any]] | None = None,
     assistant_reply: str | None = None,
+    decision_evidence: str | None = None,
 ) -> str:
     return json.dumps(
         {
@@ -51,6 +52,7 @@ def _turn_interpretation(
             "assistance_needs": [],
             "interaction_mode": None,
             "assistant_reply": assistant_reply,
+            "decision_evidence": decision_evidence,
         }
     )
 
@@ -672,7 +674,7 @@ def test_progress_question_preserves_a_pending_proposal() -> None:
         phase="awaiting_confirmation",
         pending_proposal=pending,
     )
-    nemotron = StubNemotronService()
+    nemotron = StubNemotronService(_turn_interpretation("ask_progress"))
     tavily = StubTavilyService()
 
     response = _respond(request, nemotron, tavily)
@@ -680,7 +682,7 @@ def test_progress_question_preserves_a_pending_proposal() -> None:
     assert response.action.action == "explain"
     assert "1 answer awaiting confirmation" in response.action.message
     assert response.conversation_state == request.conversation_state
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1
     assert tavily.queries == []
 
 
@@ -692,9 +694,12 @@ def test_wording_question_can_interrupt_and_preserve_a_pending_proposal() -> Non
         pending_proposal=pending,
     )
     nemotron = StubNemotronService(
-        '{"action":"explain","message":"It asks when your current home '
-        'became the place you normally live. The proposed date is still '
-        'waiting for your review.","field_id":"move_in_date"}'
+        [
+            _turn_interpretation("ask_explanation"),
+            '{"action":"explain","message":"It asks when your current home '
+            'became the place you normally live. The proposed date is still '
+            'waiting for your review.","field_id":"move_in_date"}',
+        ]
     )
     tavily = StubTavilyService()
 
@@ -702,7 +707,7 @@ def test_wording_question_can_interrupt_and_preserve_a_pending_proposal() -> Non
 
     assert response.action.action == "explain"
     assert response.conversation_state == request.conversation_state
-    assert len(nemotron.calls) == 1
+    assert len(nemotron.calls) == 2
     assert tavily.queries == []
 
 
@@ -785,7 +790,15 @@ def test_acknowledgement_does_not_confirm_a_pending_proposal() -> None:
         phase="awaiting_confirmation",
         pending_proposal=pending,
     )
-    nemotron = StubNemotronService()
+    nemotron = StubNemotronService(
+        _turn_interpretation(
+            "unrelated",
+            assistant_reply=(
+                "I'm glad that helped. The proposed answer is still waiting "
+                "for your review."
+            ),
+        )
+    )
     tavily = StubTavilyService()
 
     response = _respond(request, nemotron, tavily)
@@ -793,5 +806,5 @@ def test_acknowledgement_does_not_confirm_a_pending_proposal() -> None:
     assert response.action.action == "conversation"
     assert response.effect.effect == "none"
     assert response.conversation_state == request.conversation_state
-    assert nemotron.calls == []
+    assert len(nemotron.calls) == 1
     assert tavily.queries == []

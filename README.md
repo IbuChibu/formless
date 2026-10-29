@@ -191,3 +191,21 @@ python -m evaluations.conversation_harness run \
 
 The accepted same-digest result is summarized in
 [`docs/milestone-7.4-voice-conversation-reliability-result.md`](docs/milestone-7.4-voice-conversation-reliability-result.md).
+
+Milestone 9.2.2 adds a focused context-rich conversation and natural proposal
+review suite. It covers conversational confirmation, rejection, read-back,
+speech near-matches, housing-option ambiguity, date order, and mixed
+spoken/spelled names. Run the same file before and after a conversational change
+so the reports keep an identical suite digest:
+
+```bash
+cd backend
+source .venv/bin/activate
+set -a
+source .env
+set +a
+python -m evaluations.conversation_harness run \
+  --label context-rich-review \
+  --scenarios evaluations/scenarios/context_rich_natural_review.json \
+  --judge
+```

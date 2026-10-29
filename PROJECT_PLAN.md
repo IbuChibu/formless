@@ -88,9 +88,12 @@ Required technology:
 - Milestone 9.2 Deepgram streaming and Milestone 9.2.1 Nemotron-first
   orchestration are implemented but still require their recorded live/manual
   completion evidence
-- the next planned work is Milestones 9.2.2 through 9.2.5: context-rich
-  conversational control, a continuous hands-free session, a fixed-viewport
-  workspace, and an integrated human-helper validation gate
+- Milestone 9.2.2 context-rich natural conversation and proposal review is
+  implemented with automated regression coverage and a passing configured-model
+  comparison; its browser/Deepgram manual evidence is still pending
+- the immediate remaining work is Milestone 9.2.2 browser/Deepgram evidence,
+  followed by Milestones 9.2.3 through 9.2.5: a continuous hands-free session,
+  a fixed-viewport workspace, and an integrated human-helper gate
 - deployment has not started; persistence remains outside the current plan
 
 ---
@@ -4834,7 +4837,7 @@ Live blocker and remaining completion evidence:
 
 # Milestone 9.2.1 — Nemotron-first conversational orchestration
 
-Status: IMPLEMENTED — LIVE/MANUAL QA PENDING
+Status: IMPLEMENTED — LIVE EVALUATION COMPLETE; BROWSER QA PENDING
 
 Why this is next:
 Milestone 9.1.2 made semantic interpretation the first route for many
@@ -4964,7 +4967,7 @@ Automated implementation outcome recorded 29 October 2026:
 
 # Milestone 9.2.2 — Context-rich Nemotron conversation and natural review
 
-Status: NOT STARTED
+Status: IMPLEMENTED — LIVE/MANUAL QA PENDING
 
 Problem to solve:
 The assistant now asks Nemotron to interpret eligible natural messages, but a
@@ -5222,6 +5225,48 @@ Do not implement:
   authentication, a database, OCR, XFA, or new PDF-format support
 - the continuous microphone lifecycle or fixed workspace planned for the next
   milestones
+
+Automated implementation outcome (2026-10-29):
+- eligible support-setup, answer, clarification, replacement, and pending-review
+  messages now reach one bounded Nemotron turn decision before conversational
+  wording is selected
+- the turn context includes the full active question/help/type/page/section,
+  all schema-bounded finite options, explicit field constraints, pending review,
+  canonical progress, assistance preferences, eight bounded history messages,
+  and an active-first forty-question map
+- natural confirmation, rejection, edit, read-back, skip, and correction
+  requests remain behind exact latest-message evidence, phase/pending-value
+  validation, existing closed effects, and visible proposal review
+- finalized Deepgram speech now follows the same message route instead of a
+  frontend review phrase table; only the local pause command remains local
+- focused constraints reject incompatible numeric date order, unsupported
+  housing inference, and duplicated/conflicting mixed spoken-spelled names while
+  allowing a clean deliberately spelled component and exact finite-option match
+- privacy-safe route diagnostics expose only phase, bounded intent, and route
+  category; provider failure keeps pending/canonical state unchanged
+- the versioned synthetic live suite
+  `evaluations/scenarios/context_rich_natural_review.json` contains eight fixed
+  conversations and has digest `86848eab35b30a83`
+- deterministic backend coverage passes for context bounds, every review
+  operation, `permit`, dropdown inference, date order, name spelling, fallback,
+  and diagnostics; the complete backend and frontend regression results are
+  recorded in the implementation handoff
+- the configured-model suite was rerun against
+  `nvidia/Nemotron-3_5-Lightning` with the unchanged digest
+  `86848eab35b30a83`: all 20 turns completed with exact form state, zero
+  deterministic, invention, contradiction, confirmation-boundary, or
+  qualitative failures, and the correctness gate passed
+- compared with the original live baseline, deterministic failures fell from
+  4 to 0, qualitative failures from 21 to 0, invention failures from 1 to 0,
+  clarification quality rose from 3.75 to 4.25, and average turn latency fell
+  from 496.209 ms to 480.977 ms; no new failures were introduced
+- the comparison is recorded at
+  `backend/evaluations/results/milestone-9-2-2-live-comparison.json`; the
+  focused suite does not contain the explicit long-form human-helper behavior
+  checks, so its separate human-helper gate is intentionally not evidence of
+  browser-session completion
+- the required typed plus Deepgram browser sessions above have not yet been
+  recorded, so this milestone is not marked complete
 
 # Milestone 9.2.3 — Continuous hands-free voice session
 

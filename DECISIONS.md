@@ -718,3 +718,41 @@ mutating the form. This supersedes the deterministic fast paths and mandatory
 adapter-agreement portions of the 25 October semantic-first decision; it does
 not weaken provenance, structural validation, explicit confirmation, canonical
 state, guidance, or PDF separation.
+
+---
+
+## 2026-10-29 — Natural review uses model meaning and closed effects
+
+Decision:
+The bounded Nemotron turn decision now covers natural messages while a proposal
+or replacement is visibly awaiting review. Its context includes the active
+question and help, complete finite option set, explicit field constraints,
+pending review, canonical progress counts, session-only assistance preferences,
+recent history, and a bounded active-first question map. Finalized voice speech
+uses this same message route instead of a frontend phrase table.
+
+Nemotron may classify a clear confirmation, rejection, edit, or read-back and
+write the conversational reply, but it must cite an exact excerpt from the
+latest message. Backend code separately checks the pending phase and value,
+evidence grounding, decision confidence, explicit review meaning, candidate
+shape, and allowed state transition before using an existing closed effect.
+Vague acknowledgement, stale state, malformed output, provider failure, or a
+near-match such as `permit` cannot change canonical state. A correction only
+creates another visible proposal.
+
+Small deterministic constraints remain for facts the schema makes objectively
+unsafe: incompatible displayed numeric date order, a dropdown inference that
+requires an unstated fact, and duplicated or conflicting mixed spoken/spelled
+identity input. These checks request focused clarification; they do not select
+an alternative meaning. Privacy-safe route diagnostics contain phase, intent,
+and route category only—not user text, field IDs, values, PDF content, or
+credentials.
+
+Reason:
+Frontend phrase matching and pending-review templates made speaking feel like
+issuing commands to a form editor. Giving the same bounded conversational model
+the real review context supports natural dialogue without granting it direct
+state authority. Exact evidence and closed-effect validation preserve explicit
+confirmation and no-invention guarantees while avoiding a second broad
+semantic gate. This extends the preceding turn-meaning decision and supersedes
+its pending-review deterministic exception and separate-event-only wording.

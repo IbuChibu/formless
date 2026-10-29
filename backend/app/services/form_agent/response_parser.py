@@ -142,7 +142,11 @@ def validate_action_against_request(
     if isinstance(action, (ProposeAction, ReplacementProposeAction)):
         if isinstance(action, ReplacementProposeAction):
             if (
-                request.conversation_state.phase != "awaiting_replacement"
+                request.conversation_state.phase
+                not in {
+                    "awaiting_replacement",
+                    "awaiting_replacement_confirmation",
+                }
                 or field.status != "confirmed"
                 or action.previous_confirmed_value != field.confirmed_value
             ):

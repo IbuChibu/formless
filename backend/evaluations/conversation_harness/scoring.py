@@ -38,6 +38,11 @@ _HELPFUL_CLARIFICATION_TERMS = (
     "when did",
     "what date",
 )
+_READ_BACK_REQUEST = re.compile(
+    r"\b(?:repeat|say\s+(?:that|it)\s+again|read\s+(?:that|it)\s+back|"
+    r"what\s+did\s+you\s+hear)\b",
+    re.IGNORECASE,
+)
 
 
 def score_scenario(
@@ -50,6 +55,7 @@ def score_scenario(
         for turn in transcript
         for failure in turn.expectation_failures + turn.behavior_failures
     ]
+    failures.extend(_implicit_review_failures(transcript))
     expected_turn_count = len(scenario.turns)
     if len(transcript) != expected_turn_count:
         failures.append(
@@ -292,6 +298,41 @@ def score_scenario(
     )
 
 
+def _implicit_review_failures(transcript: list[RecordedTurn]) -> list[str]:
+    """Apply stable review invariants without changing versioned scenarios."""
+
+    failures: list[str] = []
+    for turn in transcript:
+        message = turn.visible_user_message or ""
+        if _READ_BACK_REQUEST.search(message) is None:
+            continue
+        if turn.request_state.get("phase") not in {
+            "awaiting_confirmation",
+            "awaiting_replacement_confirmation",
+        }:
+            continue
+        pending = turn.request_state.get("pending_proposal")
+        if not isinstance(pending, dict) or "value" not in pending:
+            continue
+        value = pending["value"]
+        expected = (
+            "yes"
+            if value is True
+            else "no"
+            if value is False
+            else " ".join(str(value).casefold().split())
+        )
+        assistant = " ".join(
+            (turn.assistant_message or "").casefold().split()
+        )
+        if expected and expected not in assistant:
+            failures.append(
+                f"turn {turn.index} ({turn.id}): assistant did not read back "
+                "the visibly pending value"
+            )
+    return failures
+
+
 def _naturalness_score(
     turn: RecordedTurn,
     transcript: list[RecordedTurn],
@@ -374,10 +415,9 @@ def _confirmation_boundary_failures(turn: RecordedTurn) -> int:
     effect = turn.response_effect or {}
     event_type = turn.user_event.get("type")
     failures = 0
-    if effect.get("effect") == "confirmed" and event_type not in {
-        "confirm",
-        "confirm_edit",
-    }:
+    if effect.get("effect") == "confirmed" and not _used_closed_confirmation_route(
+        turn
+    ):
         failures += 1
 
     changed_to_confirmed = [
@@ -392,6 +432,26 @@ def _confirmation_boundary_failures(turn: RecordedTurn) -> int:
         if turn.fields_after != turn.fields_before:
             failures += 1
     return failures
+
+
+def _used_closed_confirmation_route(turn: RecordedTurn) -> bool:
+    event_type = turn.user_event.get("type")
+    if event_type in {"confirm", "confirm_edit"}:
+        return True
+    if event_type != "message":
+        return False
+    if turn.request_state.get("phase") not in {
+        "awaiting_confirmation",
+        "awaiting_replacement_confirmation",
+    }:
+        return False
+    if not turn.request_state.get("pending_proposal"):
+        return False
+    return any(
+        diagnostic.get("route") == "interpreted_action_accepted"
+        and diagnostic.get("intent") == "confirm_proposal"
+        for diagnostic in turn.route_diagnostics
+    )
 
 
 def _clarification_score(

@@ -9,6 +9,7 @@ from app.services.form_agent import (
     FormAgentResponse,
     FormAgentService,
 )
+from app.services.form_agent.orchestrator import consume_turn_route_diagnostics
 
 
 class ConversationTarget(Protocol):
@@ -19,6 +20,8 @@ class ConversationTarget(Protocol):
     def model(self) -> str: ...
 
     async def respond(self, request: FormAgentRequest) -> FormAgentResponse: ...
+
+    def take_route_diagnostics(self) -> list[dict[str, str]]: ...
 
 
 class ServiceConversationTarget:
@@ -32,6 +35,7 @@ class ServiceConversationTarget:
         self._service = service
         self._model = model
         self._name = name
+        self._route_diagnostics: list[dict[str, str]] = []
 
     @property
     def name(self) -> str:
@@ -42,7 +46,15 @@ class ServiceConversationTarget:
         return self._model
 
     async def respond(self, request: FormAgentRequest) -> FormAgentResponse:
-        return await self._service.respond(request)
+        try:
+            return await self._service.respond(request)
+        finally:
+            self._route_diagnostics = consume_turn_route_diagnostics()
+
+    def take_route_diagnostics(self) -> list[dict[str, str]]:
+        diagnostics = [dict(item) for item in self._route_diagnostics]
+        self._route_diagnostics = []
+        return diagnostics
 
 
 class HttpConversationTarget:
@@ -78,3 +90,7 @@ class HttpConversationTarget:
             )
         response.raise_for_status()
         return FormAgentResponse.model_validate(response.json())
+
+    def take_route_diagnostics(self) -> list[dict[str, str]]:
+        # Remote route details are intentionally absent from the public API.
+        return []

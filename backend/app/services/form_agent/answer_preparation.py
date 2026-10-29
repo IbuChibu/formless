@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import re
 
 from .answer_adapters.common import semantic_text
+from .candidate_constraints import enforce_candidate_constraints
 from .models import (
     AgentFieldValue,
     FormAgentError,
@@ -169,6 +170,15 @@ def prepare_proposal_action(
         raise FormAgentError(
             "Form Agent returned an invalid proposal value"
         ) from error
+    enforce_candidate_constraints(
+        field,
+        prepared.prepared_value,
+        (
+            prepared.original_value
+            if isinstance(prepared.original_value, str)
+            else str(prepared.original_value)
+        ),
+    )
 
     return action.model_copy(
         update={

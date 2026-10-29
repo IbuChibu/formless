@@ -220,8 +220,9 @@ export default function VoiceAssistantPanel({
         <div className="voice-confirmation-note">
           <strong>Confirmation needed</strong>
           <span>
-            Say “confirm that”, “put that in”, “no”, or “skip this”. The
-            visible proposal controls remain available.
+            Tell the assistant naturally whether the answer is right, wrong,
+            needs changing, or should be read back. The visible proposal
+            controls remain available.
           </span>
         </div>
       ) : (

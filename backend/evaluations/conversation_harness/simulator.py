@@ -71,6 +71,7 @@ class ConversationSimulator:
                 response = await self._target.respond(request)
             # The artifact must retain provider/API failures.
             except Exception as error:
+                route_diagnostics = self._target.take_route_diagnostics()
                 transcript.append(
                     RecordedTurn(
                         id=turn.id,
@@ -88,6 +89,7 @@ class ConversationSimulator:
                         expectation_failures=[
                             "The application interface did not return a response"
                         ],
+                        route_diagnostics=route_diagnostics,
                         selected_branch_id=(
                             selected_branch.id if selected_branch else None
                         ),
@@ -96,6 +98,7 @@ class ConversationSimulator:
                 )
                 break
 
+            route_diagnostics = self._target.take_route_diagnostics()
             latency_ms = round((perf_counter() - started_at) * 1000, 3)
             expectation_failures = _check_turn_expectation(
                 turn.expect,
@@ -134,6 +137,7 @@ class ConversationSimulator:
                     expectation_failures=expectation_failures,
                     behavior_results=behavior_results,
                     behavior_failures=behavior_failures,
+                    route_diagnostics=route_diagnostics,
                     selected_branch_id=(
                         selected_branch.id if selected_branch else None
                     ),

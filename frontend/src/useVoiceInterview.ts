@@ -34,15 +34,11 @@ type VoiceInterviewOptions = {
   needsAdvance: boolean;
   latestAssistantTurn: AssistantTurn | null;
   activeField: VoiceRecognitionField | null;
-  activeFieldId: string | null;
   activeQuestion: string | null;
   hasPendingProposal: boolean;
   isFormComplete: boolean;
   onAdvance: () => void;
   onSendMessage: (message: string) => void;
-  onConfirmProposal: () => void;
-  onRejectProposal: () => void;
-  onSkipField: (fieldId: string) => void;
 };
 
 export type VoiceInterviewControls = {
@@ -63,44 +59,7 @@ type SessionMode = "inactive" | "active" | "paused";
 
 type VoiceTurnIntent =
   | { type: "message"; message: string }
-  | { type: "confirm" }
-  | { type: "reject" }
-  | { type: "skip" }
-  | { type: "pause" }
-  | { type: "correction"; value: string };
-
-const confirmationPhrases = new Set([
-  "confirm",
-  "confirm that",
-  "correct",
-  "put that in",
-  "that's right",
-  "thats right",
-  "use that answer",
-  "yes",
-  "yes that's right",
-  "yes thats right",
-]);
-
-const rejectionPhrases = new Set([
-  "don't use that",
-  "do not use that",
-  "no",
-  "no that's wrong",
-  "no thats wrong",
-  "reject",
-  "reject that",
-  "that's wrong",
-  "thats wrong",
-]);
-
-const skipPhrases = new Set([
-  "skip",
-  "skip for now",
-  "skip it",
-  "skip this",
-  "skip this question",
-]);
+  | { type: "pause" };
 
 const pausePhrases = new Set([
   "pause",
@@ -122,7 +81,6 @@ export default function useVoiceInterview(
     useState<VoiceInterviewStatus>("inactive");
   const sessionModeRef = useRef<SessionMode>("inactive");
   const lastHandledAssistantIdRef = useRef<number | null>(null);
-  const queuedCorrectionRef = useRef<string | null>(null);
   const submitTranscriptRef = useRef<(transcript: string) => void>(() => {});
   const assistantSpeechSessionRef = useRef(0);
 
@@ -136,7 +94,6 @@ export default function useVoiceInterview(
     assistantSpeechSessionRef.current += 1;
     voice.cancelListening();
     voice.stopSpeaking();
-    queuedCorrectionRef.current = null;
     setMode("paused");
     setBaseStatus("paused");
   }, [setMode]);
@@ -146,7 +103,6 @@ export default function useVoiceInterview(
     assistantSpeechSessionRef.current += 1;
     voice.cancelListening();
     voice.stopSpeaking();
-    queuedCorrectionRef.current = null;
     lastHandledAssistantIdRef.current = null;
     setMode("inactive");
     setBaseStatus("inactive");
@@ -192,14 +148,6 @@ export default function useVoiceInterview(
     }
 
     const current = optionsRef.current;
-    const queuedCorrection = queuedCorrectionRef.current;
-    if (queuedCorrection && !current.agentIsBusy) {
-      queuedCorrectionRef.current = null;
-      setBaseStatus("waiting_agent");
-      current.onSendMessage(queuedCorrection);
-      return;
-    }
-
     if (current.isFormComplete) {
       setBaseStatus("complete");
       return;
@@ -299,32 +247,14 @@ export default function useVoiceInterview(
       return;
     }
 
-    const intent = classifyVoiceTurn(
-      transcript,
-      current.hasPendingProposal,
-    );
+    const intent = classifyVoiceTurn(transcript);
     if (intent.type === "pause") {
       pauseInterview();
       return;
     }
 
     setBaseStatus("waiting_agent");
-    if (intent.type === "confirm") {
-      current.onConfirmProposal();
-    } else if (intent.type === "reject") {
-      current.onRejectProposal();
-    } else if (intent.type === "skip") {
-      if (current.activeFieldId) {
-        current.onSkipField(current.activeFieldId);
-      } else {
-        current.onSendMessage(transcript.trim());
-      }
-    } else if (intent.type === "correction") {
-      queuedCorrectionRef.current = intent.value;
-      current.onRejectProposal();
-    } else {
-      current.onSendMessage(intent.message);
-    }
+    current.onSendMessage(intent.message);
   };
 
   const submitEditedTranscript = useCallback((asCorrection: boolean) => {
@@ -333,12 +263,7 @@ export default function useVoiceInterview(
     if (!transcript || current.agentIsBusy) {
       return;
     }
-    if (asCorrection && current.hasPendingProposal) {
-      queuedCorrectionRef.current = transcript;
-      setBaseStatus("waiting_agent");
-      current.onRejectProposal();
-      return;
-    }
+    void asCorrection;
     submitTranscriptRef.current(transcript);
   }, []);
 
@@ -365,7 +290,6 @@ export default function useVoiceInterview(
       return;
     }
     if (options.agentHasError) {
-      queuedCorrectionRef.current = null;
       setBaseStatus("error");
     }
   }, [options.agentHasError, sessionMode]);
@@ -438,34 +362,13 @@ function resolveInterviewStatus(
   return baseStatus;
 }
 
-function classifyVoiceTurn(
-  transcript: string,
-  hasPendingProposal: boolean,
-): VoiceTurnIntent {
+function classifyVoiceTurn(transcript: string): VoiceTurnIntent {
   const trimmedTranscript = transcript.trim();
   const normalized = normalizeVoiceCommand(trimmedTranscript);
 
   if (pausePhrases.has(normalized)) {
     return { type: "pause" };
   }
-  if (hasPendingProposal) {
-    if (confirmationPhrases.has(normalized)) {
-      return { type: "confirm" };
-    }
-    if (rejectionPhrases.has(normalized)) {
-      return { type: "reject" };
-    }
-    if (skipPhrases.has(normalized)) {
-      return { type: "skip" };
-    }
-    const correction = extractSpokenCorrection(trimmedTranscript);
-    if (correction) {
-      return { type: "correction", value: correction };
-    }
-  } else if (skipPhrases.has(normalized)) {
-    return { type: "skip" };
-  }
-
   return { type: "message", message: trimmedTranscript };
 }
 
@@ -475,12 +378,4 @@ function normalizeVoiceCommand(value: string): string {
     .replace(/[,.!?;:]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function extractSpokenCorrection(value: string): string | null {
-  const match = value.match(
-    /^(?:no[\s,.-]*)?(?:actually[\s,]*|i\s+(?:said|meant)[\s,]*|it\s+should\s+be[\s,]*|change\s+(?:it|that)\s+to[\s,]*)(.+)$/i,
-  );
-  const candidate = match?.[1]?.trim();
-  return candidate ? candidate : null;
 }

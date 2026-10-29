@@ -176,6 +176,7 @@ class RecordedTurn(HarnessModel):
     expectation_failures: list[str] = Field(default_factory=list)
     behavior_results: dict[str, bool] = Field(default_factory=dict)
     behavior_failures: list[str] = Field(default_factory=list)
+    route_diagnostics: list[dict[str, str]] = Field(default_factory=list)
     selected_branch_id: Optional[str] = None
     error: Optional[str] = None
 
@@ -278,7 +279,7 @@ class SuiteMetrics(HarnessModel):
 
 
 class SuiteReport(HarnessModel):
-    report_schema_version: int = 2
+    report_schema_version: int = 3
     run_id: str
     label: str
     created_at: str

@@ -9,6 +9,7 @@ import httpx
 
 from app.services.form_agent import FormAgentRequest, FormAgentService
 from evaluations.conversation_harness.judge import (
+    _JUDGE_SYSTEM_PROMPT,
     NemotronPairwiseJudge,
     NemotronQualitativeJudge,
 )
@@ -29,6 +30,10 @@ from evaluations.conversation_harness.reporting import (
     save_suite_report,
 )
 from evaluations.conversation_harness.runner import run_suite
+from evaluations.conversation_harness.scoring import (
+    _confirmation_boundary_failures,
+    _implicit_review_failures,
+)
 from evaluations.conversation_harness.scenarios import load_scenario_suite
 from evaluations.conversation_harness.simulator import ConversationSimulator
 from evaluations.conversation_harness.targets import (
@@ -58,6 +63,32 @@ class NeverCalledNemotron:
         raise AssertionError("This deterministic scenario should not call Nemotron")
 
 
+class SemanticNameNemotron:
+    model = "test-semantic-name"
+
+    async def complete(self, **kwargs: Any) -> str:
+        return json.dumps(
+            {
+                "intent": "answer_current_field",
+                "confidence": "high",
+                "needs_clarification": False,
+                "clarification_reason": None,
+                "candidates": [
+                    {
+                        "field_id": "full_name",
+                        "value": "Ada Example",
+                        "evidence": "ada example",
+                    }
+                ],
+                "referenced_field_id": None,
+                "assistance_needs": [],
+                "interaction_mode": None,
+                "assistant_reply": "Ada Example — is that exactly right?",
+                "decision_evidence": None,
+            }
+        )
+
+
 class StubJudgeService:
     model = "test-judge"
 
@@ -84,6 +115,24 @@ class RetryJudgeService(StubJudgeService):
         if self.calls == 1:
             return '{"naturalness": 0}'
         return await super().complete(**kwargs)
+
+
+class UnsafeThenGroundedHousingJudgeService(StubJudgeService):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def complete(self, **kwargs: Any) -> str:
+        self.calls += 1
+        payload = json.loads(await super().complete(**kwargs))
+        payload["failure_reasons"] = (
+            [
+                "The assistant did not explore whether living alone might "
+                "indicate sole tenancy."
+            ]
+            if self.calls == 1
+            else []
+        )
+        return json.dumps(payload)
 
 
 class StubPairwiseJudgeService:
@@ -190,6 +239,12 @@ def _target() -> ServiceConversationTarget:
     return ServiceConversationTarget(service, model=provider.model)
 
 
+def _semantic_target() -> ServiceConversationTarget:
+    provider = SemanticNameNemotron()
+    service = FormAgentService(provider)  # type: ignore[arg-type]
+    return ServiceConversationTarget(service, model=provider.model)
+
+
 def test_default_suite_covers_required_conversation_behaviours() -> None:
     suite = load_scenario_suite()
     tags = {tag for scenario in suite.scenarios for tag in scenario.tags}
@@ -290,6 +345,105 @@ def test_simulator_drives_real_service_and_records_canonical_state() -> None:
     assert report.scores.human_helper_behavior_rate == 1.0
     assert report.scores.turns_per_confirmed_field == 3.0
     assert report.transcript[2].selected_branch_id == "proposal-was-clear"
+
+
+def test_read_back_is_a_deterministic_harness_invariant() -> None:
+    turn = report_turn = asyncio.run(
+        ConversationSimulator(_target()).run(_scenario(), _persona())
+    ).transcript[1]
+    broken_read_back = report_turn.model_copy(
+        update={
+            "id": "read-back",
+            "index": 3,
+            "visible_user_message": "Could you read that back?",
+            "request_state": {
+                "phase": "awaiting_confirmation",
+                "active_field_id": "full_name",
+                "pending_proposal": {
+                    "field_id": "full_name",
+                    "value": "Ada Example",
+                },
+            },
+            "assistant_message": "Full name. What should be entered here?",
+        }
+    )
+
+    assert _implicit_review_failures([broken_read_back]) == [
+        "turn 3 (read-back): assistant did not read back the visibly pending value"
+    ]
+    assert turn.response_effect is not None
+
+
+def test_judge_cannot_infer_tenancy_from_living_alone() -> None:
+    assert "living alone does not establish sole tenancy" in (
+        _JUDGE_SYSTEM_PROMPT.casefold()
+    )
+    assert "evaluate only this scenario and transcript" in (
+        _JUDGE_SYSTEM_PROMPT.casefold()
+    )
+
+
+def test_local_harness_stores_only_privacy_safe_route_diagnostics() -> None:
+    report = asyncio.run(
+        ConversationSimulator(_semantic_target()).run(_scenario(), _persona())
+    )
+
+    diagnostics = report.transcript[1].route_diagnostics
+    assert diagnostics == [
+        {
+            "route": "nemotron_requested",
+            "phase": "awaiting_answer",
+            "intent": "none",
+        },
+        {
+            "route": "nemotron_interpreted",
+            "phase": "awaiting_answer",
+            "intent": "answer_current_field",
+        },
+        {
+            "route": "interpreted_action_accepted",
+            "phase": "awaiting_answer",
+            "intent": "answer_current_field",
+        },
+    ]
+    serialized = json.dumps(diagnostics)
+    assert "Ada Example" not in serialized
+    assert "full_name" not in serialized
+
+
+def test_natural_confirmation_counts_only_through_closed_semantic_route() -> None:
+    report = asyncio.run(
+        ConversationSimulator(_target()).run(_scenario(), _persona())
+    )
+    explicit_confirmation = report.transcript[2]
+    natural_confirmation = explicit_confirmation.model_copy(
+        update={
+            "user_event": {
+                "type": "message",
+                "content": "Yes, that's exactly right.",
+            },
+            "request_state": {
+                "phase": "awaiting_confirmation",
+                "active_field_id": "full_name",
+                "pending_proposal": {
+                    "field_id": "full_name",
+                    "value": "Ada Example",
+                },
+            },
+            "route_diagnostics": [
+                {
+                    "route": "interpreted_action_accepted",
+                    "phase": "awaiting_confirmation",
+                    "intent": "confirm_proposal",
+                }
+            ],
+        }
+    )
+
+    assert _confirmation_boundary_failures(natural_confirmation) == 0
+    assert _confirmation_boundary_failures(
+        natural_confirmation.model_copy(update={"route_diagnostics": []})
+    ) == 1
 
 
 def test_suite_report_saves_full_transcript_and_qualitative_scores(
@@ -393,6 +547,32 @@ def test_qualitative_judge_retries_one_invalid_rubric() -> None:
 
     assert service.calls == 2
     assert assessment.naturalness == 4
+
+
+def test_qualitative_judge_retries_unsafe_tenancy_inference() -> None:
+    service = UnsafeThenGroundedHousingJudgeService()
+    scenario_report = asyncio.run(
+        ConversationSimulator(_target()).run(_scenario(), _persona())
+    )
+    living_alone_turn = scenario_report.transcript[1].model_copy(
+        update={"visible_user_message": "I live by myself."}
+    )
+    scenario_report = scenario_report.model_copy(
+        update={
+            "transcript": [
+                scenario_report.transcript[0],
+                living_alone_turn,
+                scenario_report.transcript[2],
+            ]
+        }
+    )
+
+    assessment = asyncio.run(
+        NemotronQualitativeJudge(service).assess(scenario_report)
+    )
+
+    assert service.calls == 2
+    assert assessment.failure_reasons == []
 
 
 def test_pairwise_judge_blinds_labels_and_normalizes_winner() -> None:

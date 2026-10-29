@@ -291,6 +291,18 @@ def _suite_markdown(report: SuiteReport) -> str:
                 lines.extend(
                     [f"Script branch: `{turn.selected_branch_id}`", ""]
                 )
+            if turn.route_diagnostics:
+                lines.extend(
+                    [
+                        "Route diagnostics: `"
+                        + json.dumps(
+                            turn.route_diagnostics,
+                            ensure_ascii=False,
+                        )
+                        + "`",
+                        "",
+                    ]
+                )
             if turn.behavior_results:
                 lines.extend(
                     [

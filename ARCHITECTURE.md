@@ -142,13 +142,12 @@ explicit start
     -> next spoken response
 ```
 
-The voice interview does not parse form values or update fields. Ordinary
-speech is sent as the existing `message` event. A field-scoped skip uses the
-existing `skip` event. A bounded affirmative phrase becomes the existing
-`confirm` event only while canonical conversation state contains a visible
-pending proposal. A spoken correction first rejects that proposal, then sends
-the user-stated replacement through the ordinary answer path; the replacement
-creates a new proposal and still requires confirmation.
+The voice interview does not parse form values, review decisions, or update
+fields. Apart from the local pause command, finalized speech is sent as the
+existing `message` event so the same context-rich turn interpretation handles
+answers, explanations, review decisions, and corrections. A correction creates
+a new visible proposal and still requires separate confirmation. Proposal-card
+buttons remain a deterministic accessibility fallback.
 
 The long-lived `DEEPGRAM_API_KEY` is loaded only by FastAPI. The browser asks
 `POST /voice/deepgram/token` for a temporary credential immediately before a
@@ -280,11 +279,16 @@ The Form Agent is one service boundary with small internal modules:
   depth without producing a form effect
 - `turn_interpreter` asks the existing Nemotron Service for one bounded turn
   decision before semantic deterministic policy for every eligible natural
-  message; its result includes intent, candidates, uncertainty, exact source
+  message, including natural review replies while a proposal is pending; its
+  result includes intent, candidates, uncertainty, exact source or review
   evidence, and a natural reply, but never a public effect
 - `turn_interpretation_grounding` owns pure evidence and field-reference checks
   plus conservative provider-fallback helpers; it no longer re-interprets a
   structurally valid Nemotron candidate through a parallel semantic regex gate
+- `candidate_constraints` enforces explicit high-risk schema constraints after
+  semantic interpretation, including displayed numeric date order, complete
+  finite-choice evidence, and mixed spoken/spelled identity ambiguity; it does
+  not perform a second general-purpose interpretation
 - `action_validation` checks model-authored actions and explanations against
   the active turn, field context, and approved guidance before they can proceed
 - `state_machine` validates allowed events, owns conversation-phase changes,
@@ -319,19 +323,30 @@ multiple agents or allow any module to bypass the Nemotron Service.
 Natural-language turn interpretation is a semantic boundary inside that same
 agent. Its closed result distinguishes answer, correction, explanation,
 guidance, progress, uncertainty, multiple supplied facts, unrelated
-conversation, assistance, setup completion, skip, and return-to-field intent.
+conversation, assistance, setup completion, skip, return-to-field, proposal
+confirmation, rejection, edit, and read-back intent.
 Candidate field IDs must come from the request; checkbox values must be boolean,
 numbers must be structurally numeric, and dropdown values must be one supplied
 option. Malformed, unknown-field, wrong-type, out-of-option, or ungrounded
 results fall back to clarification or the established provider-failure path.
 
-Explicit non-message UI/state events and pending-proposal review retain
-deterministic routes. Every eligible natural message during support setup,
-answering, clarification, or replacement reaches the bounded Nemotron decision
+Explicit non-message UI/state events retain deterministic routes. Every
+eligible natural message during support setup, answering, clarification,
+replacement, or pending-proposal review reaches the bounded Nemotron decision
 before deterministic semantic policy, including exact-looking values, progress
-questions, and guidance requests. The earlier phrase classifier and focused
-field adapters remain provider-failure fallbacks and isolated deterministic
-test seams, not parallel authorities that must agree with the model's meaning.
+questions, guidance requests, and natural review language. The earlier phrase
+classifier and focused field adapters remain provider-failure fallbacks and
+isolated deterministic test seams, not parallel authorities that must agree
+with the model's meaning.
+
+The turn prompt carries a bounded current-turn snapshot: the active field's
+real question, help, type, page and section; every schema-approved finite
+option and explicit value-format constraint; pending proposal or replacement;
+canonical progress counts; session-only assistance preferences; up to eight
+recent messages; and an active-first compact map of up to forty supported
+questions. It never includes PDF bytes, rendered pages, audio, credentials, or
+an unbounded history. Only the active correction field may expose its existing
+confirmed value to this prompt.
 
 Candidate evidence must be a contiguous excerpt of the latest user turn.
 Nemotron may remove conversational framing and normalize an unambiguous date,
@@ -345,12 +360,17 @@ For non-navigation intent, a provider-populated `referenced_field_id` has no
 operational meaning and is normalized to `null`; candidate field grounding and
 actual return-to-field references remain strict.
 
-The interpreter cannot return a frontend effect, confirm a proposal, change a
-field status, select a Tavily query, or call the PDF Service. The orchestrator
-may turn a validated candidate into an existing proposal action, while the
-state machine continues to own every public effect and transition. Model
-interpretation can therefore reduce literal phrasing requirements without
-moving the explicit-confirmation or canonical-state boundary.
+The interpreter cannot return a frontend effect, change a field status, select
+a Tavily query, or call the PDF Service. While a proposal is pending it may
+request a review operation only with an exact excerpt from the latest message.
+The orchestrator separately verifies the current phase and proposal plus a
+small explicit-decision safety predicate before using the existing closed
+confirm, reject, replacement, read-back, or skip path. Near-matches such as
+`permit`, vague acknowledgements, stale reviews, malformed output, and provider
+failure remain no-ops. The state machine continues to own every public effect
+and transition, so model interpretation can reduce literal phrasing
+requirements without moving the explicit-confirmation or canonical-state
+boundary.
 
 A settled semantic explanation request is likewise routing data, not a
 clarification action. The orchestrator forwards that intent to the existing
@@ -564,8 +584,12 @@ is in either replacement phase. Conversation state may also contain at most
 five uniquely keyed remembered candidates for real unanswered fields. Each
 candidate retains the user's original wording and one adapter-valid prepared
 value, but it is neither confirmed nor canonical form data. Confirmation,
-edited confirmation, rejection, skip, and correction cancellation are explicit
-events; ordinary message events cannot confirm a proposal.
+edited confirmation, rejection, skip, and correction cancellation are closed
+operations. Proposal-card controls send explicit events directly. A natural
+message may request the same operation only through bounded interpretation and
+exact latest-message review evidence; backend code independently validates the
+phase, pending field and value, decision, and allowed effect before canonical
+state changes.
 Every Form Agent response contains a primary `assistant_message`, one closed
 typed `effect`, and the resulting state, so the frontend does not infer
 progression from assistant wording. A `none` effect represents successful
@@ -716,10 +740,12 @@ For agent or voice input:
 8. The frontend shows original and prepared values together when they differ,
    then asks the user to confirm, edit, use the original when valid, reject, or
    skip the proposal.
-9. A separate confirmation event is validated before the value enters shared
-   field state exactly once. Rejection keeps the same field active. For a
-   replacement proposal, rejection or cancellation preserves the previous
-   confirmed value and the frontend does not update the PDF preview.
+9. An explicit confirmation—either a proposal-card event or a natural message
+   that passes bounded review interpretation and deterministic decision
+   validation—is required before the value enters shared field state exactly
+   once. Rejection keeps the same field active. For a replacement proposal,
+   rejection or cancellation preserves the previous confirmed value and the
+   frontend does not update the PDF preview.
 10. Confirmation, edited confirmation, and skip deterministically transition to
    the next unanswered field, or to form complete, without another model call.
 11. The frontend sends confirmed values to the existing PDF filling endpoint.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextvars import ContextVar
+import logging
 from typing import Optional
 
 from app.services.nemotron_service import NemotronService, NemotronServiceError
@@ -38,6 +40,7 @@ from .intent_policy import TurnIntent, classify_turn_intent
 from .models import (
     AssistancePreferencesUpdatedAction,
     ClarifyAction,
+    ConversationAction,
     CorrectionStartedAction,
     ExplainAction,
     FieldReopenedAction,
@@ -77,10 +80,18 @@ from .web_guidance import (
 from .turn_interpreter import (
     action_from_interpretation,
     interpret_turn,
+    pending_review_fallback_action,
     should_interpret_turn,
     turn_intent_from_interpretation,
 )
 from .turn_interpretation_grounding import proposal_needs_interpretation
+
+
+_LOGGER = logging.getLogger(__name__)
+_TURN_ROUTE_TRACE: ContextVar[tuple[dict[str, str], ...]] = ContextVar(
+    "form_agent_turn_route_trace",
+    default=(),
+)
 
 
 class FormAgentService:
@@ -101,6 +112,7 @@ class FormAgentService:
         self._turn_interpretation_enabled = turn_interpretation_enabled
 
     async def respond(self, request: FormAgentRequest) -> FormAgentResponse:
+        _TURN_ROUTE_TRACE.set(())
         validate_event_transition(request)
 
         if (
@@ -151,12 +163,17 @@ class FormAgentService:
         policy_action = None
         turn_intent_override: Optional[TurnIntent] = None
         if self._turn_interpretation_enabled and should_interpret_turn(request):
+            _log_turn_route(request, "nemotron_requested")
             try:
                 interpreted_turn = await interpret_turn(
                     self._nemotron_service,
                     request,
                 )
             except (FormAgentError, NemotronServiceError):
+                _log_turn_route(request, "provider_or_interpretation_fallback")
+                pending_review_fallback = pending_review_fallback_action(request)
+                if pending_review_fallback is not None:
+                    return response_for_action(pending_review_fallback, request)
                 policy_action = deterministic_action(
                     request,
                     self._answer_interpreter,
@@ -189,6 +206,11 @@ class FormAgentService:
                     if fallback is not None:
                         return response_for_action(fallback, request)
             else:
+                _log_turn_route(
+                    request,
+                    "nemotron_interpreted",
+                    intent=interpreted_turn.intent,
+                )
                 try:
                     interpreted_action, request = action_from_interpretation(
                         request,
@@ -210,8 +232,18 @@ class FormAgentService:
                                 require_adapter_match=False,
                             )
                 except FormAgentError:
+                    _log_turn_route(
+                        request,
+                        "interpreted_action_rejected",
+                        intent=interpreted_turn.intent,
+                    )
                     interpreted_action = None
                 if interpreted_action is not None:
+                    _log_turn_route(
+                        request,
+                        "interpreted_action_accepted",
+                        intent=interpreted_turn.intent,
+                    )
                     return response_for_action(
                         normalize_action_message(
                             interpreted_action,
@@ -248,6 +280,7 @@ class FormAgentService:
             return response_for_action(policy_action, request)
 
         if policy_action is not None and turn_intent_override is None:
+            _log_turn_route(request, "deterministic_policy_action")
             return response_for_action(policy_action, request)
 
         guidance = select_official_guidance(request)
@@ -315,6 +348,11 @@ class FormAgentService:
         )
         validation_error: Optional[FormAgentError] = None
         attempt_user_prompt = user_prompt
+        _log_turn_route(
+            request,
+            "legacy_model_requested",
+            intent=turn_intent_override,
+        )
 
         for attempt in range(2):
             raw_action = await self._nemotron_service.complete(
@@ -406,6 +444,11 @@ class FormAgentService:
                     )
                 validate_action_against_request(action, request)
             except FormAgentError as error:
+                _log_turn_route(
+                    request,
+                    "legacy_model_action_rejected",
+                    intent=turn_intent_override,
+                )
                 validation_error = error
                 if attempt == 0:
                     attempt_user_prompt = build_correction_user_prompt(
@@ -419,6 +462,22 @@ class FormAgentService:
                 action,
                 request,
                 turn_intent_override,
+            )
+            if (
+                isinstance(normalized_action, ConversationAction)
+                and turn_intent_override
+                in {"wording_clarification", "uncertain_answer"}
+                and "?" in normalized_action.message
+            ):
+                normalized_action = ClarifyAction(
+                    action="clarify",
+                    message=normalized_action.message,
+                    field_id=normalized_action.field_id,
+                )
+            _log_turn_route(
+                request,
+                "legacy_model_action_accepted",
+                intent=turn_intent_override,
             )
             if (
                 isinstance(normalized_action, ExplainAction)
@@ -497,3 +556,33 @@ class FormAgentService:
         if fallback is not None:
             return response_for_action(fallback, request)
         raise validation_error
+
+
+def _log_turn_route(
+    request: FormAgentRequest,
+    route: str,
+    *,
+    intent: Optional[str] = None,
+) -> None:
+    """Log route metadata without user text, field values, or identifiers."""
+
+    diagnostic = {
+        "route": route,
+        "phase": request.conversation_state.phase,
+        "intent": intent or "none",
+    }
+    _TURN_ROUTE_TRACE.set((*_TURN_ROUTE_TRACE.get(), diagnostic))
+    _LOGGER.info(
+        "form_agent_turn route=%s phase=%s intent=%s",
+        route,
+        request.conversation_state.phase,
+        intent or "none",
+    )
+
+
+def consume_turn_route_diagnostics() -> list[dict[str, str]]:
+    """Return and clear the current request's privacy-safe route trace."""
+
+    diagnostics = [dict(item) for item in _TURN_ROUTE_TRACE.get()]
+    _TURN_ROUTE_TRACE.set(())
+    return diagnostics

@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Optional
 
 from .answer_preparation import prepare_proposal_action
+from .candidate_constraints import CandidateConstraintViolation
 from .assistance_policy import assistance_preference_action
 from .answer_adapters import (
     AnswerAdapterResult,
@@ -448,16 +449,25 @@ def deterministic_action(
     if not isinstance(adapter_result, MatchedAnswer):
         return None
 
-    proposal = prepare_proposal_action(
-        ProposeAction(
-            action="propose",
-            message="Proposal awaiting confirmation.",
-            field_id=active_field.id,
-            value=adapter_result.value,
-            original_value=adapter_result.original_value,
-        ),
-        request,
-    )
+    try:
+        proposal = prepare_proposal_action(
+            ProposeAction(
+                action="propose",
+                message="Proposal awaiting confirmation.",
+                field_id=active_field.id,
+                value=adapter_result.value,
+                original_value=adapter_result.original_value,
+            ),
+            request,
+        )
+    except CandidateConstraintViolation as error:
+        return _adapter_clarification(
+            active_field,
+            ClarificationNeeded(
+                reason=error.failure.reason,
+                accepted_shape=error.failure.accepted_shape,
+            ),
+        )
     if is_replacement:
         replacement = ReplacementProposeAction(
             action="replacement_propose",
@@ -540,7 +550,9 @@ def invalid_value_clarification(
     error: FormAgentError,
     request: FormAgentRequest,
 ) -> Optional[ClarifyAction]:
-    if str(error) != "Form Agent returned an invalid proposal value":
+    if not isinstance(error, CandidateConstraintViolation) and str(error) != (
+        "Form Agent returned an invalid proposal value"
+    ):
         return None
     active_field_id = request_active_field_id(request)
     if active_field_id is None:
@@ -553,6 +565,14 @@ def invalid_value_clarification(
     if field is None:
         return None
 
+    if isinstance(error, CandidateConstraintViolation):
+        return _adapter_clarification(
+            field,
+            ClarificationNeeded(
+                reason=error.failure.reason,
+                accepted_shape=error.failure.accepted_shape,
+            ),
+        )
     return _build_field_clarification(field)
 
 

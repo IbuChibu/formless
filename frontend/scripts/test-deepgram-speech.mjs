@@ -8,6 +8,10 @@ const sourceUrl = new URL(
   import.meta.url,
 );
 const source = await readFile(sourceUrl, "utf8");
+const interviewSource = await readFile(
+  new URL("../src/useVoiceInterview.ts", import.meta.url),
+  "utf8",
+);
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.ES2020,
@@ -25,6 +29,17 @@ const {
   parseDeepgramMessage,
   recognitionKeyterms,
 } = await import(moduleUrl);
+
+assert.doesNotMatch(
+  interviewSource,
+  /confirmationPhrases|rejectionPhrases|extractSpokenCorrection/,
+  "finalized review speech must not be reduced to a frontend phrase table",
+);
+assert.match(
+  interviewSource,
+  /submitTranscriptRef\.current = \(transcript: string\)[\s\S]*current\.onSendMessage\(intent\.message\)/,
+  "finalized speech must use the shared Form Agent message route",
+);
 
 class FakeSocket {
   readyState = 0;

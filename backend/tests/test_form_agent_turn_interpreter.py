@@ -44,11 +44,15 @@ def _field(
     options: list[str] | None = None,
     status: str = "unanswered",
     confirmed_value: str | bool | None = None,
+    question: str | None = None,
+    help_text: str | None = None,
+    section: str | None = None,
+    page: int | None = None,
 ) -> dict[str, Any]:
     field: dict[str, Any] = {
         "id": field_id,
         "label": label,
-        "question": label,
+        "question": question or label,
         "type": field_type,
         "status": status,
     }
@@ -56,6 +60,12 @@ def _field(
         field["options"] = options
     if confirmed_value is not None:
         field["confirmed_value"] = confirmed_value
+    if help_text is not None:
+        field["help_text"] = help_text
+    if section is not None:
+        field["section"] = section
+    if page is not None:
+        field["page"] = page
     return field
 
 
@@ -66,11 +76,13 @@ def _request(
     active_field_id: str | None = "full_name",
     phase: str = "awaiting_answer",
     support_setup_step: str | None = None,
+    pending_proposal: dict[str, Any] | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> FormAgentRequest:
     conversation_state: dict[str, Any] = {
         "phase": phase,
         "active_field_id": active_field_id,
-        "pending_proposal": None,
+        "pending_proposal": pending_proposal,
     }
     if support_setup_step is not None:
         conversation_state["support_setup_step"] = support_setup_step
@@ -81,7 +93,7 @@ def _request(
             or [_field("full_name", "Full name")],
             "conversation_state": conversation_state,
             "event": {"type": "message", "content": message},
-            "history": [],
+            "history": history or [],
         }
     )
 
@@ -97,6 +109,7 @@ def _interpretation(
     assistance_needs: list[str] | None = None,
     interaction_mode: str | None = None,
     assistant_reply: str | None = None,
+    decision_evidence: str | None = None,
 ) -> str:
     return json.dumps(
         {
@@ -109,6 +122,7 @@ def _interpretation(
             "assistance_needs": assistance_needs or [],
             "interaction_mode": interaction_mode,
             "assistant_reply": assistant_reply,
+            "decision_evidence": decision_evidence,
         }
     )
 
@@ -153,6 +167,29 @@ def test_parser_accepts_each_bounded_single_field_intent(raw: str) -> None:
     parsed = parse_turn_interpretation(raw, _request("Ibrahim Akhoon"))
 
     assert isinstance(parsed, TurnInterpretation)
+
+
+@pytest.mark.parametrize(
+    ("intent", "message"),
+    [
+        ("confirm_proposal", "Yes, confirm that."),
+        ("reject_proposal", "No, reject that."),
+        ("repeat_proposal", "Please say it again."),
+    ],
+)
+def test_parser_accepts_grounded_review_intents(
+    intent: str,
+    message: str,
+) -> None:
+    parsed = parse_turn_interpretation(
+        _interpretation(
+            intent=intent,
+            decision_evidence=message.rstrip("."),
+        ),
+        _request(message),
+    )
+
+    assert parsed.intent == intent
 
 
 def test_parser_accepts_bounded_multiple_answers() -> None:
@@ -832,4 +869,605 @@ def test_exact_value_also_uses_nemotron_first() -> None:
 
     assert response.effect.effect == "proposal"
     assert response.effect.prepared_value == "Ibrahim Akhoon"  # type: ignore[union-attr]
+    assert len(model.calls) == 1
+
+
+def test_interpreter_prompt_contains_active_constraints_pending_review_and_history() -> None:
+    fields = [
+        _field(f"field_{index}", f"Question {index}")
+        for index in range(44)
+    ]
+    fields.append(
+        _field(
+            "housing",
+            "Housing arrangement",
+            field_type="dropdown",
+            options=["Sole tenant", "Joint tenant", "Owner-occupier"],
+            question="Capacity in which you occupy the premises",
+            help_text="Choose the arrangement that applies to your usual home.",
+            section="Ordinary residence",
+            page=2,
+        )
+    )
+    history = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": f"Turn {index}"}
+        for index in range(8)
+    ]
+    model = StubNemotronService(
+        _interpretation(
+            intent="unrelated",
+            assistant_reply="I can stay on this review while we talk it through.",
+        )
+    )
+    request = _request(
+        "Give me a moment.",
+        fields=fields,
+        active_field_id="housing",
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "housing", "value": "Sole tenant"},
+        history=history,
+    )
+
+    asyncio.run(FormAgentService(model).respond(request))  # type: ignore[arg-type]
+
+    raw_context = model.calls[0]["user_prompt"].split(
+        "UNTRUSTED_TURN_CONTEXT\n",
+        maxsplit=1,
+    )[1].split("\nEND_UNTRUSTED_TURN_CONTEXT", maxsplit=1)[0]
+    context = json.loads(raw_context)
+    assert context["active_field"] == {
+        "id": "housing",
+        "label": "Housing arrangement",
+        "question": "Capacity in which you occupy the premises",
+        "help_text": "Choose the arrangement that applies to your usual home.",
+        "section": "Ordinary residence",
+        "page": 2,
+        "page_context": None,
+        "type": "dropdown",
+        "options": ["Sole tenant", "Joint tenant", "Owner-occupier"],
+        "status": "unanswered",
+        "constraints": ["value_must_equal_one_supplied_option"],
+    }
+    assert context["conversation"]["pending_review"] == {
+        "field_id": "housing",
+        "value": "Sole tenant",
+    }
+    assert context["conversation"]["progress"] == {
+        "total": 45,
+        "confirmed": 0,
+        "skipped": 0,
+        "proposed": 1,
+        "unanswered": 44,
+    }
+    assert len(context["conversation"]["recent_history"]) == 8
+    assert context["supported_question_map"][0]["id"] == "housing"
+    assert "options" not in context["supported_question_map"][0]
+    assert "help_text" not in context["supported_question_map"][0]
+    assert context["omitted_field_count"] == 5
+
+
+def test_natural_review_confirmation_becomes_the_existing_closed_effect() -> None:
+    message = "Yes, that is correct."
+    model = StubNemotronService(
+        _interpretation(
+            intent="confirm_proposal",
+            assistant_reply="Thanks — that's confirmed.",
+            decision_evidence="Yes, that is correct",
+        )
+    )
+    request = _request(
+        message,
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "full_name", "value": "John Michael"},
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "confirmed"
+    assert response.effect.value == "John Michael"  # type: ignore[union-attr]
+    assert response.conversation_state.phase == "form_complete"
+    assert response.assistant_message == "Thanks — that's confirmed."
+    assert request.fields[0].status == "unanswered"
+
+
+def test_natural_review_rejection_keeps_the_field_unanswered() -> None:
+    message = "No, that is wrong."
+    model = StubNemotronService(
+        _interpretation(
+            intent="reject_proposal",
+            assistant_reply="No problem — what should I use instead?",
+            decision_evidence="No, that is wrong",
+        )
+    )
+    request = _request(
+        message,
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "full_name", "value": "John Michael"},
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "rejected"
+    assert response.conversation_state.phase == "awaiting_answer"
+    assert response.conversation_state.pending_proposal is None
+    assert request.fields[0].status == "unanswered"
+    assert response.assistant_message == "No problem — what should I use instead?"
+
+
+def test_natural_read_back_request_keeps_the_proposal_pending() -> None:
+    message = "Could you read that back?"
+    model = StubNemotronService(
+        _interpretation(
+            intent="repeat_proposal",
+            assistant_reply="Of course — I heard John Michael.",
+            decision_evidence="read that back",
+        )
+    )
+    request = _request(
+        message,
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "full_name", "value": "John Michael"},
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert response.assistant_message == "Of course — I heard John Michael."
+
+
+def test_near_match_review_language_cannot_confirm_even_if_model_requests_it() -> None:
+    model = StubNemotronService(
+        _interpretation(
+            intent="confirm_proposal",
+            assistant_reply="Thanks — that's confirmed.",
+            decision_evidence="Permit",
+        )
+    )
+    request = _request(
+        "Permit.",
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "full_name", "value": "John Michael"},
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "none"
+    assert response.action.action == "clarify"
+    assert response.conversation_state == request.conversation_state
+    assert "confirm, change, reject, or hear" in response.assistant_message
+
+
+def test_natural_review_edit_replaces_only_the_pending_proposal() -> None:
+    message = "No, use Jane Doe instead."
+    model = StubNemotronService(
+        _interpretation(
+            intent="edit_proposal",
+            candidates=[
+                {
+                    "field_id": "full_name",
+                    "value": "Jane Doe",
+                    "evidence": "Jane Doe",
+                }
+            ],
+            assistant_reply="Okay — Jane Doe is ready for you to check.",
+            decision_evidence="No, use Jane Doe instead",
+        )
+    )
+    request = _request(
+        message,
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "full_name", "value": "John Michael"},
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "proposal"
+    assert response.effect.prepared_value == "Jane Doe"  # type: ignore[union-attr]
+    assert response.conversation_state.phase == "awaiting_confirmation"
+    assert response.conversation_state.pending_proposal is not None
+    assert response.conversation_state.pending_proposal.value == "Jane Doe"
+    assert request.conversation_state.pending_proposal is not None
+    assert request.conversation_state.pending_proposal.value == "John Michael"
+
+
+def test_living_alone_never_invents_a_housing_dropdown_option() -> None:
+    fields = [
+        _field(
+            "housing",
+            "Housing arrangement",
+            field_type="dropdown",
+            options=[
+                "Sole tenant",
+                "Joint tenant",
+                "Owner-occupier",
+                "Living with family or friends",
+                "Temporary accommodation",
+                "No fixed address",
+            ],
+            question="Capacity in which you occupy the premises",
+        )
+    ]
+    model = StubNemotronService(
+        _interpretation(
+            candidates=[
+                {
+                    "field_id": "housing",
+                    "value": "Living with family or friends",
+                    "evidence": "I live by myself",
+                }
+            ],
+            assistant_reply=(
+                "Living with family or friends sounds closest. Shall I use that?"
+            ),
+        )
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(  # type: ignore[arg-type]
+            _request(
+                "I live by myself.",
+                fields=fields,
+                active_field_id="housing",
+            )
+        )
+    )
+
+    assert response.effect.effect == "none"
+    assert response.action.action == "clarify"
+    assert "does not tell me whether you rent, own" in response.assistant_message
+    assert "Living with family or friends sounds closest" not in response.assistant_message
+
+
+def test_solo_tenant_can_still_map_to_the_exact_available_option() -> None:
+    fields = [
+        _field(
+            "housing",
+            "Housing arrangement",
+            field_type="dropdown",
+            options=["Sole tenant", "Joint tenant", "Owner-occupier"],
+            question="Capacity in which you occupy the premises",
+        )
+    ]
+    model = StubNemotronService(
+        _interpretation(
+            candidates=[
+                {
+                    "field_id": "housing",
+                    "value": "Sole tenant",
+                    "evidence": "Solo tenant",
+                }
+            ],
+            assistant_reply="Sole tenant — is that right?",
+        )
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(  # type: ignore[arg-type]
+            _request(
+                "Solo tenant.",
+                fields=fields,
+                active_field_id="housing",
+            )
+        )
+    )
+
+    assert response.effect.effect == "proposal"
+    assert response.effect.prepared_value == "Sole tenant"  # type: ignore[union-attr]
+
+
+def test_incompatible_numeric_date_order_requires_clarification() -> None:
+    fields = [
+        _field(
+            "date_of_birth",
+            "Date of birth (DD/MM/YYYY)",
+            question="Your date of birth in DD/MM/YYYY format",
+        )
+    ]
+    model = StubNemotronService(
+        _interpretation(
+            candidates=[
+                {
+                    "field_id": "date_of_birth",
+                    "value": "19/05/2011",
+                    "evidence": "05/19/2011",
+                }
+            ],
+            assistant_reply="I understood that as 19 May 2011.",
+        )
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(  # type: ignore[arg-type]
+            _request(
+                "05/19/2011",
+                fields=fields,
+                active_field_id="date_of_birth",
+            )
+        )
+    )
+
+    assert response.effect.effect == "none"
+    assert response.action.action == "clarify"
+    assert "do not want to swap the day and month" in response.assistant_message
+
+
+def test_month_year_constraint_rejects_year_first_numeric_input() -> None:
+    fields = [
+        _field(
+            "reporting_month",
+            "Reporting month (MM/YYYY)",
+            question="The reporting month in MM/YYYY format",
+        )
+    ]
+    model = StubNemotronService(
+        _interpretation(
+            candidates=[
+                {
+                    "field_id": "reporting_month",
+                    "value": "05/2011",
+                    "evidence": "2011/05",
+                }
+            ],
+            assistant_reply="I understood May 2011.",
+        )
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(  # type: ignore[arg-type]
+            _request(
+                "2011/05",
+                fields=fields,
+                active_field_id="reporting_month",
+            )
+        )
+    )
+
+    assert response.effect.effect == "none"
+    assert response.action.action == "clarify"
+    assert "year first" in response.assistant_message
+
+
+def test_mixed_duplicate_spoken_and_spelled_name_requires_targeted_repeat() -> None:
+    message = "Ebrahim e b r a h i m a k h w o o n."
+    model = StubNemotronService(
+        _interpretation(
+            candidates=[
+                {
+                    "field_id": "full_name",
+                    "value": "Ebrahim Ebrahimakhwoon",
+                    "evidence": message,
+                }
+            ],
+            assistant_reply="I heard Ebrahim Ebrahimakhwoon.",
+        )
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(  # type: ignore[arg-type]
+            _request(message)
+        )
+    )
+
+    assert response.effect.effect == "none"
+    assert response.action.action == "clarify"
+    assert "spoken name" in response.assistant_message
+    assert "spell only the uncertain part" in response.assistant_message
+
+
+def test_clean_letter_by_letter_name_remains_reviewable() -> None:
+    message = "My surname is A K H O O N."
+    model = StubNemotronService(
+        _interpretation(
+            candidates=[
+                {
+                    "field_id": "full_name",
+                    "value": "Akhoon",
+                    "evidence": message,
+                }
+            ],
+            assistant_reply="I heard Akhoon. Is that spelling right?",
+        )
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(  # type: ignore[arg-type]
+            _request(message)
+        )
+    )
+
+    assert response.effect.effect == "proposal"
+    assert response.effect.prepared_value == "Akhoon"  # type: ignore[union-attr]
+    assert response.conversation_state.phase == "awaiting_confirmation"
+
+
+def test_active_dropdown_context_includes_every_bounded_option() -> None:
+    options = [f"Option {index}" for index in range(100)]
+    model = StubNemotronService(
+        _interpretation(
+            intent="unrelated",
+            assistant_reply="Take your time.",
+        )
+    )
+    request = _request(
+        "Give me a moment.",
+        fields=[
+            _field(
+                "choice",
+                "Choose one",
+                field_type="dropdown",
+                options=options,
+            )
+        ],
+        active_field_id="choice",
+    )
+
+    asyncio.run(FormAgentService(model).respond(request))  # type: ignore[arg-type]
+
+    raw_context = model.calls[0]["user_prompt"].split(
+        "UNTRUSTED_TURN_CONTEXT\n",
+        maxsplit=1,
+    )[1].split("\nEND_UNTRUSTED_TURN_CONTEXT", maxsplit=1)[0]
+    context = json.loads(raw_context)
+    assert context["active_field"]["options"] == options
+
+
+def test_route_diagnostics_never_log_user_text_or_candidate_values(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    message = "My name is Sensitive Synthetic Name."
+    model = StubNemotronService(
+        _interpretation(
+            candidates=[
+                {
+                    "field_id": "full_name",
+                    "value": "Sensitive Synthetic Name",
+                    "evidence": "Sensitive Synthetic Name",
+                }
+            ],
+        )
+    )
+
+    with caplog.at_level("INFO", logger="app.services.form_agent.orchestrator"):
+        asyncio.run(
+            FormAgentService(model).respond(  # type: ignore[arg-type]
+                _request(message)
+            )
+        )
+
+    logs = caplog.text
+    assert "route=nemotron_requested" in logs
+    assert "route=interpreted_action_accepted" in logs
+    assert "Sensitive" not in logs
+    assert "full_name" not in logs
+
+
+def test_pending_review_provider_failure_preserves_the_proposal_naturally() -> None:
+    request = _request(
+        "Could you do that?",
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "full_name", "value": "John Michael"},
+    )
+    model = StubNemotronService(error=NemotronServiceError("provider failed"))
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert "not changed the form" in response.assistant_message
+    assert "Use Confirm, Edit" not in response.assistant_message
+
+
+def test_pending_read_back_survives_turn_interpreter_failure() -> None:
+    request = _request(
+        "Could you read that back?",
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "full_name", "value": "John Michael"},
+    )
+    model = StubNemotronService(error=NemotronServiceError("provider failed"))
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert "John Michael" in response.assistant_message
+    assert "answer you want me to use" in response.assistant_message
+
+
+def test_deterministic_fallback_cannot_propose_a_mixed_spoken_spelled_name() -> None:
+    message = "Ebrahim e b r a h i m a k h w o o n."
+    request = _request(message)
+    model = StubNemotronService(error=NemotronServiceError("provider failed"))
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "none"
+    assert response.action.action == "clarify"
+    assert response.conversation_state.phase == "awaiting_clarification"
+    assert "spoken name" in response.assistant_message
+    assert request.fields[0].status == "unanswered"
+
+
+def test_model_clarification_reply_uses_the_clarification_phase() -> None:
+    model = StubNemotronService(
+        _interpretation(
+            intent="unrelated",
+            confidence="medium",
+            needs_clarification=True,
+            clarification_reason="The answer does not establish tenure.",
+            assistant_reply="Do you rent, own, or have another arrangement?",
+        )
+    )
+    fields = [
+        _field(
+            "housing",
+            "Housing arrangement",
+            field_type="dropdown",
+            options=["Sole tenant", "Joint tenant", "Owner-occupier"],
+            question="Capacity in which you occupy the premises",
+        )
+    ]
+
+    response = asyncio.run(
+        FormAgentService(model).respond(  # type: ignore[arg-type]
+            _request(
+                "I live by myself.",
+                fields=fields,
+                active_field_id="housing",
+            )
+        )
+    )
+
+    assert response.effect.effect == "none"
+    assert response.action.action == "clarify"
+    assert response.conversation_state.phase == "awaiting_clarification"
+    assert "rent, own" in response.assistant_message
+
+
+def test_housing_constraint_overrides_misclassified_explanation_intent() -> None:
+    model = StubNemotronService(
+        _interpretation(
+            intent="ask_explanation",
+            assistant_reply="Let me explain the available options.",
+        )
+    )
+    fields = [
+        _field(
+            "housing",
+            "Housing arrangement",
+            field_type="dropdown",
+            options=["Sole tenant", "Joint tenant", "Owner-occupier"],
+            question="Capacity in which you occupy the premises",
+        )
+    ]
+
+    response = asyncio.run(
+        FormAgentService(model).respond(  # type: ignore[arg-type]
+            _request(
+                "I live by myself.",
+                fields=fields,
+                active_field_id="housing",
+            )
+        )
+    )
+
+    assert response.action.action == "clarify"
+    assert response.conversation_state.phase == "awaiting_clarification"
+    assert "does not tell me whether you rent, own" in response.assistant_message
     assert len(model.calls) == 1
