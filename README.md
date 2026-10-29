@@ -52,17 +52,23 @@ Voice input uses Deepgram Nova-3 streaming and requires a browser with
 After uploading a form, select **Start conversation** once. The assistant reads
 the visible question and temporarily analyses local microphone levels while
 speaking. Start talking to interrupt it hands-free, or use **Answer now**;
-either route opens the same one-turn recognizer. Interim words remain visibly
-labelled, and only one finalized utterance enters the same Form Agent path as
-typed text. `window.SpeechRecognition` is not required.
+either route opens the same bounded recognizer. After each response, listening
+reopens automatically. Capture begins while the short-lived credential and
+Deepgram connection are being prepared, with only a bounded in-memory opening
+buffer, so speaking naturally after the assistant stops does not discard the
+start of the answer. Silence sends nothing and reopens listening with bounded
+backoff; one transient provider failure is retried automatically. Interim words
+remain visibly labelled, and only one finalized utterance enters the same Form
+Agent path as typed text. `window.SpeechRecognition` is not required.
 
 Formless does not retain audio, temporary tokens, or word-confidence metadata.
 Streaming requests set `mip_opt_out=true`; according to Deepgram's
 [data-handling documentation](https://developers.deepgram.com/trust-security/your-data),
 opted-out audio and transcripts are retained only as needed to process the
 request, while non-content request metadata and usage logs are still recorded.
-A proposal still changes nothing until explicitly confirmed. **Pause** and
-**End** release microphone and socket resources without changing the form.
+A proposal still changes nothing until explicitly confirmed. **Mute**,
+**Pause**, and **End** release microphone and socket resources without changing
+the form.
 Typing and visible proposal controls remain available when voice is
 unconfigured, unsupported, denied, disconnected, or uncertain.
 
@@ -78,6 +84,7 @@ cd ../frontend
 npm run test:workspace-layout
 npm run test:voice-interruption
 npm run test:deepgram-speech
+npm run test:continuous-voice
 npm run build
 ```
 

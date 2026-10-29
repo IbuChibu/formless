@@ -943,6 +943,7 @@ function App() {
           label: activeAgentField.label,
           question: activeAgentField.question,
           type: activeAgentField.type,
+          options: activeAgentField.options,
         }
       : null,
     activeQuestion: activeAgentQuestion,

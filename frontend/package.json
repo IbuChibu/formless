@@ -12,6 +12,7 @@
     "test:pdf-workflow": "node scripts/test-pdf-workflow.mjs",
     "test:workspace-layout": "node scripts/test-workspace-layout.mjs",
     "test:voice-interruption": "node scripts/test-voice-interruption.mjs",
+    "test:continuous-voice": "node scripts/test-continuous-voice-session.mjs",
     "test:deepgram-speech": "node scripts/test-deepgram-speech.mjs",
     "test:milestone9-reliability": "node scripts/test-milestone9-reliability.mjs",
     "test:support-preferences": "node scripts/test-support-preferences.mjs",

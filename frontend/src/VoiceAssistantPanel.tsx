@@ -77,7 +77,7 @@ export default function VoiceAssistantPanel({
       </p>
 
       <div className="voice-conversation-actions">
-        {interview.status === "inactive" ? (
+        {["inactive", "ended"].includes(interview.status) ? (
           <button
             className="voice-primary-button"
             type="button"
@@ -85,17 +85,25 @@ export default function VoiceAssistantPanel({
             onClick={interview.startInterview}
           >
             <span aria-hidden="true">●</span>
-            Start conversation
+            {interview.status === "ended"
+              ? "Start another conversation"
+              : "Start conversation"}
           </button>
-        ) : interview.status === "paused" ? (
+        ) : ["paused", "muted"].includes(interview.status) ? (
           <>
             <button
               className="voice-primary-button"
               type="button"
               disabled={agentIsBusy || !voice.inputSupported}
-              onClick={interview.resumeInterview}
+              onClick={
+                interview.status === "muted"
+                  ? interview.unmuteInterview
+                  : interview.resumeInterview
+              }
             >
-              Resume conversation
+              {interview.status === "muted"
+                ? "Unmute and continue"
+                : "Resume conversation"}
             </button>
             <button
               className="voice-secondary-button"
@@ -227,10 +235,11 @@ export default function VoiceAssistantPanel({
         </div>
       ) : (
         <small className="voice-confirmation-note">
-          During assistant speech, temporary local sound detection lets you
-          interrupt by talking. Transcription still runs for one visible turn
-          at a time through Deepgram Nova-3; typing and Answer now remain
-          available. Formless does not retain audio or speech metadata.
+          After you start, Formless automatically listens again after each
+          reply and keeps the microphone available only for this visible
+          session. You can interrupt by talking, or use Mute, Pause, End,
+          Answer now, and typing at any time. Formless does not retain audio or
+          speech metadata.
         </small>
       )}
 
@@ -255,6 +264,15 @@ function SessionStopButtons({
 }) {
   return (
     <>
+      {interview.isActive ? (
+        <button
+          className="voice-secondary-button"
+          type="button"
+          onClick={interview.muteInterview}
+        >
+          Mute
+        </button>
+      ) : null}
       <button
         className="voice-secondary-button"
         type="button"
@@ -282,6 +300,12 @@ function getBusyButtonLabel(
   }
   if (status === "processing") {
     return "Preparing your words";
+  }
+  if (status === "recovering") {
+    return "Reopening listening";
+  }
+  if (status === "interrupted") {
+    return "Opening your turn";
   }
   if (status === "waiting_agent") {
     return "Thinking about your answer";
@@ -329,6 +353,11 @@ function getInterviewStatusCopy(
                 ? "Hands-free interruption is unavailable here. Use Answer now or type your reply."
                 : "Listen to the question, or choose Answer now to interrupt and start your turn.",
     },
+    interrupted: {
+      label: "Listening to you",
+      detail:
+        "The assistant stopped. Your microphone is moving directly into the same Deepgram turn so you can continue speaking.",
+    },
     requesting_permission: {
       label: "Microphone permission",
       detail:
@@ -355,6 +384,16 @@ function getInterviewStatusCopy(
       detail:
         "The proposal is visible and still has not changed the PDF. Say a clear decision or use the buttons.",
     },
+    recovering: {
+      label: "Still listening",
+      detail:
+        "No answer was sent. Formless is reopening the microphone automatically and your form is unchanged.",
+    },
+    muted: {
+      label: "Muted",
+      detail:
+        "The microphone and spoken reply are off. Your form and conversation are unchanged.",
+    },
     paused: {
       label: "Paused",
       detail:
@@ -364,6 +403,11 @@ function getInterviewStatusCopy(
       label: "Interview complete",
       detail:
         "The supported questions are reviewed. You can ask a review question, keep typing, or end the conversation.",
+    },
+    ended: {
+      label: "Conversation ended",
+      detail:
+        "Microphone access and spoken replies are off. You can keep typing or start another voice conversation.",
     },
     error: {
       label: "Needs attention",

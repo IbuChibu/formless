@@ -43,6 +43,9 @@ export type VoiceAssistantControls = {
   startListening: (
     onComplete?: (utterance: DeepgramUtterance) => void,
     keyterms?: string[],
+    onNoSpeech?: () => void,
+    initialStream?: MediaStream,
+    choiceKeyterms?: string[],
   ) => void;
   stopListening: () => void;
   cancelListening: () => void;
@@ -56,7 +59,9 @@ export type VoiceAssistantControls = {
   interruptionSupported: boolean;
   interruptionStatus: VoiceInterruptionStatus;
   interruptionError: string | null;
-  startInterruptionDetection: (onInterrupt: () => void) => void;
+  startInterruptionDetection: (
+    onInterrupt: (stream: MediaStream) => void,
+  ) => void;
   stopInterruptionDetection: () => void;
   speakAssistantMessage: (
     message: string,
@@ -109,6 +114,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
   const recognitionCompleteRef = useRef<
     ((utterance: DeepgramUtterance) => void) | null
   >(null);
+  const recognitionNoSpeechRef = useRef<(() => void) | null>(null);
   const spokenRepliesEnabledRef = useRef(false);
   const speechSessionRef = useRef(0);
   const interruptionDetectorRef = useRef<VoiceInterruptionDetector | null>(
@@ -132,7 +138,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
   }, [interruptionSupported]);
 
   const startInterruptionDetection = useCallback(
-    (onInterrupt: () => void) => {
+    (onInterrupt: (stream: MediaStream) => void) => {
       interruptionSessionRef.current += 1;
       const interruptionSession = interruptionSessionRef.current;
       interruptionDetectorRef.current?.stop();
@@ -151,14 +157,15 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
             setInterruptionStatus("armed");
           }
         },
-        onVoice: () => {
+        onVoice: (stream) => {
           if (interruptionSessionRef.current !== interruptionSession) {
+            stream.getTracks().forEach((track) => track.stop());
             return;
           }
           interruptionSessionRef.current += 1;
           interruptionDetectorRef.current = null;
           setInterruptionStatus("idle");
-          onInterrupt();
+          onInterrupt(stream);
         },
         onError: (message) => {
           if (interruptionSessionRef.current !== interruptionSession) {
@@ -252,6 +259,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
     recognitionRef.current?.cancel();
     recognitionRef.current = null;
     recognitionCompleteRef.current = null;
+    recognitionNoSpeechRef.current = null;
     setInputError(null);
     setTranscriptState("");
     setTranscriptFinality("none");
@@ -263,8 +271,12 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
     (
       onComplete?: (utterance: DeepgramUtterance) => void,
       keyterms: string[] = [],
+      onNoSpeech?: () => void,
+      initialStream?: MediaStream,
+      choiceKeyterms: string[] = [],
     ) => {
       if (!inputSupported) {
+        initialStream?.getTracks().forEach((track) => track.stop());
         setInputStatus("unsupported");
         return;
       }
@@ -274,6 +286,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
       recognitionRef.current?.cancel();
       stopSpeaking();
       recognitionCompleteRef.current = onComplete ?? null;
+      recognitionNoSpeechRef.current = onNoSpeech ?? null;
       setInputError(null);
       setTranscriptState("");
       setTranscriptFinality("none");
@@ -282,6 +295,8 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
         {
           tokenUrl: `${apiBaseUrl}/voice/deepgram/token`,
           keyterms,
+          choiceKeyterms,
+          initialStream,
         },
         {
           onConnected: () => {
@@ -307,7 +322,19 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
             setInputStatus("review");
             const complete = recognitionCompleteRef.current;
             recognitionCompleteRef.current = null;
+            recognitionNoSpeechRef.current = null;
             complete?.(utterance);
+          },
+          onNoSpeech: () => {
+            if (recognitionSessionRef.current !== recognitionSession) {
+              return;
+            }
+            recognitionRef.current = null;
+            recognitionCompleteRef.current = null;
+            setInputStatus(inputSupported ? "idle" : "unsupported");
+            const noSpeech = recognitionNoSpeechRef.current;
+            recognitionNoSpeechRef.current = null;
+            noSpeech?.();
           },
           onError: (message) => {
             if (recognitionSessionRef.current !== recognitionSession) {
@@ -315,6 +342,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
             }
             recognitionRef.current = null;
             recognitionCompleteRef.current = null;
+            recognitionNoSpeechRef.current = null;
             setInputError(message);
             setInputStatus("error");
           },
@@ -337,6 +365,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
 
   const clearTranscript = useCallback(() => {
     recognitionCompleteRef.current = null;
+    recognitionNoSpeechRef.current = null;
     setInputError(null);
     setTranscriptState("");
     setTranscriptFinality("none");
@@ -346,6 +375,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
 
   const reportInputConcern = useCallback((message: string) => {
     recognitionCompleteRef.current = null;
+    recognitionNoSpeechRef.current = null;
     setInputError(message);
     setInputStatus("error");
   }, []);
@@ -365,6 +395,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
       interruptionDetectorRef.current?.stop();
       interruptionDetectorRef.current = null;
       recognitionCompleteRef.current = null;
+      recognitionNoSpeechRef.current = null;
       if (outputSupported) {
         window.speechSynthesis.cancel();
       }

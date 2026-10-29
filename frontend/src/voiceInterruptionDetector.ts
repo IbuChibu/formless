@@ -28,7 +28,7 @@ type VoiceActivityGateResult = {
 
 type VoiceInterruptionDetectorOptions = {
   onArmed: () => void;
-  onVoice: () => void;
+  onVoice: (stream: MediaStream) => void;
   onError: (message: string) => void;
 };
 
@@ -186,9 +186,9 @@ export function startVoiceInterruptionDetector(
   let audioContext: AudioContext | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
 
-  const stop = () => {
+  const release = (preserveStream = false): MediaStream | null => {
     if (stopped) {
-      return;
+      return null;
     }
     stopped = true;
     if (animationFrame !== null) {
@@ -197,12 +197,20 @@ export function startVoiceInterruptionDetector(
     }
     source?.disconnect();
     source = null;
-    stream?.getTracks().forEach((track) => track.stop());
+    const releasedStream = preserveStream ? stream : null;
+    if (!preserveStream) {
+      stream?.getTracks().forEach((track) => track.stop());
+    }
     stream = null;
     if (audioContext && audioContext.state !== "closed") {
       void audioContext.close().catch(() => undefined);
     }
     audioContext = null;
+    return releasedStream;
+  };
+
+  const stop = () => {
+    release();
   };
 
   const fail = (error: unknown) => {
@@ -281,8 +289,10 @@ export function startVoiceInterruptionDetector(
           options.onArmed();
         }
         if (result.detected) {
-          stop();
-          options.onVoice();
+          const recognitionStream = release(true);
+          if (recognitionStream) {
+            options.onVoice(recognitionStream);
+          }
           return;
         }
         animationFrame = window.requestAnimationFrame(sample);

@@ -1517,7 +1517,8 @@ h1 {
 }
 
 .voice-assistant-panel.listening,
-.voice-assistant-panel.assistant_speaking {
+.voice-assistant-panel.assistant_speaking,
+.voice-assistant-panel.interrupted {
   border-color: #d19083;
   background: #fff9f7;
   box-shadow: 0 0 0 3px rgb(172 73 55 / 8%);
@@ -1526,6 +1527,7 @@ h1 {
 .voice-assistant-panel.requesting_permission,
 .voice-assistant-panel.processing,
 .voice-assistant-panel.waiting_agent,
+.voice-assistant-panel.recovering,
 .voice-assistant-panel.starting {
   border-color: #d7bf86;
   background: #fffdf7;
@@ -1542,6 +1544,8 @@ h1 {
 }
 
 .voice-assistant-panel.paused,
+.voice-assistant-panel.muted,
+.voice-assistant-panel.ended,
 .voice-assistant-panel.unsupported {
   border-color: #d6ddd8;
   background: #f7f9f7;
@@ -1614,7 +1618,8 @@ h1 {
 }
 
 .voice-assistant-panel.listening .voice-mark,
-.voice-assistant-panel.assistant_speaking .voice-mark {
+.voice-assistant-panel.assistant_speaking .voice-mark,
+.voice-assistant-panel.interrupted .voice-mark {
   background: #a44737;
   animation: voice-listening-pulse 1.4s ease-in-out infinite;
 }
@@ -1631,6 +1636,7 @@ h1 {
 
 .voice-assistant-panel.listening .voice-status-label,
 .voice-assistant-panel.assistant_speaking .voice-status-label,
+.voice-assistant-panel.interrupted .voice-status-label,
 .voice-assistant-panel.error .voice-status-label {
   color: #8e3c30;
   background: #f9e8e4;
@@ -1639,6 +1645,7 @@ h1 {
 .voice-assistant-panel.requesting_permission .voice-status-label,
 .voice-assistant-panel.processing .voice-status-label,
 .voice-assistant-panel.waiting_agent .voice-status-label,
+.voice-assistant-panel.recovering .voice-status-label,
 .voice-assistant-panel.starting .voice-status-label {
   color: #7b5d1d;
   background: #fff0cc;
@@ -3035,7 +3042,8 @@ a {
 }
 
 .voice-assistant-panel.listening,
-.voice-assistant-panel.assistant_speaking {
+.voice-assistant-panel.assistant_speaking,
+.voice-assistant-panel.interrupted {
   border-color: #d49b8f;
   background: #fffaf7;
   box-shadow: 0 0 0 3px rgb(172 73 55 / 7%);

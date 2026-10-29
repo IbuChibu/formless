@@ -91,9 +91,12 @@ Required technology:
 - Milestone 9.2.2 context-rich natural conversation and proposal review is
   implemented with automated regression coverage and a passing configured-model
   comparison; its browser/Deepgram manual evidence is still pending
-- the immediate remaining work is Milestone 9.2.2 browser/Deepgram evidence,
-  followed by Milestones 9.2.3 through 9.2.5: a continuous hands-free session,
-  a fixed-viewport workspace, and an integrated human-helper gate
+- Milestone 9.2.3 continuous hands-free voice is implemented with automated
+  session, silence, recovery, interruption-transfer, cleanup, and regression
+  coverage; its real-browser acoustic and ten-turn evidence is still pending
+- the immediate remaining work is Milestone 9.2.3 live/manual evidence,
+  followed by Milestones 9.2.4 and 9.2.5: a fixed-viewport workspace and an
+  integrated human-helper gate
 - deployment has not started; persistence remains outside the current plan
 
 ---
@@ -5270,7 +5273,7 @@ Automated implementation outcome (2026-10-29):
 
 # Milestone 9.2.3 — Continuous hands-free voice session
 
-Status: NOT STARTED
+Status: IMPLEMENTED — LIVE/MANUAL QA PENDING
 
 Problem to solve:
 Deepgram now provides a controlled one-utterance transcript, and the existing
@@ -5432,6 +5435,38 @@ Do not implement:
   or direct voice-to-PDF writes
 - automatic confirmation from noise, vague acknowledgement, or model prose
 - the fixed workspace or release work planned for later milestones
+
+Automated implementation outcome (2026-10-29):
+- one explicit start now maintains the frontend-owned session across assistant
+  speech, bounded Deepgram turns, Form Agent thinking, proposals, and subsequent
+  questions without another record or retry action
+- silence produces no message or form effect and reopens listening with bounded
+  exponential backoff; one transient Deepgram failure retries automatically,
+  while repeated or non-recoverable failure pauses voice with typing intact
+- low-confidence name speech speaks the targeted repeat-or-spell prompt and
+  automatically listens again rather than requiring a retry button
+- mute, pause, end, form replacement, page backgrounding, and unmount invalidate
+  stale callbacks and release recognition, speech, interruption, timer, socket,
+  recorder, audio-context, and microphone resources
+- barge-in transfers the detector's already-open microphone stream into the
+  same Deepgram recognizer, reducing the handoff gap without creating a second
+  audio or conversation path
+- active-turn capture now starts before the temporary-token and WebSocket
+  handshake finishes; a bounded memory-only queue flushes those opening audio
+  chunks in order once connected so immediate hands-free answers do not lose
+  their first words
+- direct recognition requests automatic gain control and mono input where the
+  browser supports them, while the playback-leakage detector keeps its separate
+  conservative capture settings; bounded finite dropdown options are supplied
+  as schema-owned Nova-3 keyterms to improve recognition of valid choices
+- explicit session transitions now cover inactive, active, muted, paused, and
+  ended modes, with visible interruption and recovery states and permanent
+  keyboard-operable Mute, Pause, End, Answer now, and typed fallbacks
+- focused Deepgram, acoustic interruption, continuous-session, existing PDF,
+  workspace, reliability, preference, and production-build checks pass; live
+  ten-turn, opening-word accuracy, room-noise, interruption-timing, permission,
+  and network evidence remains required before this milestone can be marked
+  complete
 
 # Milestone 9.2.4 — Fixed-viewport conversational workspace
 

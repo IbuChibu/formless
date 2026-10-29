@@ -140,13 +140,15 @@ function calibratedGate() {
   const browser = installFakeBrowser();
   let armedCount = 0;
   let voiceCount = 0;
+  let transferredStream = null;
   const errors = [];
   startVoiceInterruptionDetector({
     onArmed: () => {
       armedCount += 1;
     },
-    onVoice: () => {
+    onVoice: (stream) => {
       voiceCount += 1;
+      transferredStream = stream;
     },
     onError: (message) => errors.push(message),
   });
@@ -177,6 +179,12 @@ function calibratedGate() {
 
   assert.equal(voiceCount, 1);
   assert.deepEqual(errors, []);
+  assert.equal(
+    browser.trackStops(),
+    0,
+    "detected speech must transfer the live stream to recognition",
+  );
+  transferredStream.getTracks().forEach((track) => track.stop());
   assert.equal(browser.trackStops(), 1);
   assert.equal(browser.contextCloses(), 1);
   assert.equal(browser.pendingFrames(), 0);

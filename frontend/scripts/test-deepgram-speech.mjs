@@ -23,10 +23,12 @@ const moduleUrl = `data:text/javascript;base64,${Buffer.from(compiled).toString(
 const {
   DeepgramSpeechRecognizer,
   buildDeepgramStreamingUrl,
+  boundedChoiceKeyterms,
   boundedKeyterms,
   lowConfidenceNameWord,
   nameConfidenceConcern,
   parseDeepgramMessage,
+  recognitionChoiceKeyterms,
   recognitionKeyterms,
 } = await import(moduleUrl);
 
@@ -92,6 +94,10 @@ class FakeRecorder {
     this.stopCount += 1;
     this.state = "inactive";
   }
+
+  emit(data) {
+    this.ondataavailable?.({ data });
+  }
 }
 
 {
@@ -116,6 +122,27 @@ class FakeRecorder {
     "postcode",
   ]);
   assert.deepEqual(boundedKeyterms(["Unknown Person"]), []);
+  assert.deepEqual(
+    boundedChoiceKeyterms([
+      "Sole tenant",
+      "Owner-occupier",
+      "Please select",
+      "person@example.com",
+      "Sole tenant",
+    ]),
+    ["Sole tenant", "Owner-occupier"],
+  );
+  const choiceUrl = new URL(
+    buildDeepgramStreamingUrl(
+      ["surname"],
+      ["Sole tenant", "Owner-occupier", "person@example.com"],
+    ),
+  );
+  assert.deepEqual(choiceUrl.searchParams.getAll("keyterm"), [
+    "surname",
+    "Sole tenant",
+    "Owner-occupier",
+  ]);
 }
 
 {
@@ -183,6 +210,15 @@ class FakeRecorder {
     finalTranscriptLatencyMs: 420,
   };
   assert.deepEqual(recognitionKeyterms(nameField), ["surname"]);
+  assert.deepEqual(
+    recognitionChoiceKeyterms({
+      id: "housing",
+      label: "Housing arrangement",
+      type: "dropdown",
+      options: ["Sole tenant", "Owner-occupier"],
+    }),
+    ["Sole tenant", "Owner-occupier"],
+  );
   assert.match(nameConfidenceConcern(nameField, utterance), /Akhoon/);
   assert.equal(
     nameConfidenceConcern(nameField, {
@@ -230,15 +266,28 @@ class FakeRecorder {
   await recognizer.start();
   assert.deepEqual(harness.requestedConstraints, {
     audio: {
-      autoGainControl: false,
+      autoGainControl: true,
+      channelCount: { ideal: 1 },
       echoCancellation: true,
       noiseSuppression: true,
     },
   });
   assert.equal(harness.fetchCount, 1);
   assert.deepEqual(harness.socket.protocols, ["bearer", "temporary-jwt"]);
+  assert.equal(
+    harness.recorder.startTimeslice,
+    250,
+    "capture must begin before the Deepgram socket opens",
+  );
+  const bufferedAudio = new Blob(["answer beginning"]);
+  harness.recorder.emit(bufferedAudio);
+  assert.equal(harness.socket.sent.length, 0);
   harness.socket.open();
-  assert.equal(harness.recorder.startTimeslice, 250);
+  assert.equal(
+    harness.socket.sent[0],
+    bufferedAudio,
+    "audio captured during connection setup must be flushed in order",
+  );
   assert.deepEqual(events, [{ type: "connected" }]);
 
   harness.socket.message(resultMessage("Ibrahim", { isFinal: false }));
@@ -373,9 +422,31 @@ class FakeRecorder {
     resultMessage("", { isFinal: true, speechFinal: true }),
   );
   harness.socket.message(JSON.stringify({ type: "UtteranceEnd" }));
-  assert.equal(events.at(-1).type, "error");
-  assert.match(events.at(-1).message, /didn't hear any speech/);
+  assert.equal(events.at(-1).type, "silence");
   assert.equal(events.some((event) => event.type === "complete"), false);
+  assert.equal(events.some((event) => event.type === "error"), false);
+}
+
+{
+  const harness = createHarness();
+  const events = [];
+  const recognizer = new DeepgramSpeechRecognizer(
+    {
+      tokenUrl: "/voice/deepgram/token",
+      initialStream: harness.stream,
+    },
+    callbacks(events),
+    harness.dependencies,
+  );
+  await recognizer.start();
+  assert.equal(
+    harness.requestedConstraints,
+    null,
+    "barge-in must transfer its live microphone stream without reopening it",
+  );
+  harness.socket.open();
+  recognizer.cancel();
+  assert.equal(harness.trackStops, 1);
 }
 
 {
@@ -444,6 +515,7 @@ function callbacks(events) {
       events.push({ type: "transcript", transcript }),
     onComplete: (utterance) =>
       events.push({ type: "complete", utterance }),
+    onNoSpeech: () => events.push({ type: "silence" }),
     onError: (message) => events.push({ type: "error", message }),
   };
 }
@@ -542,6 +614,7 @@ function createHarness({ tokenStatus = 200, permissionError = false } = {}) {
   };
   return {
     dependencies,
+    stream,
     socket,
     recorder,
     get fetchCount() {

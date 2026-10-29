@@ -756,3 +756,35 @@ state authority. Exact evidence and closed-effect validation preserve explicit
 confirmation and no-invention guarantees while avoiding a second broad
 semantic gate. This extends the preceding turn-meaning decision and supersedes
 its pending-review deterministic exception and separate-event-only wording.
+
+---
+
+## 2026-10-29 — Continuous voice is a session of bounded Deepgram turns
+
+Decision:
+One explicit `Start conversation` action opens a frontend-owned voice session.
+After each already-visible assistant reply, Formless automatically opens a new
+bounded Nova-3 recognition turn; only one finalized transcript enters the
+existing Form Agent message route. Empty speech reopens listening with bounded
+backoff and no form request. One transient provider failure may reconnect once;
+repeated or non-recoverable failure pauses voice while typing remains available.
+
+Mute, pause, end, form replacement, page backgrounding, and unmount cancel
+recognition, speech, detectors, timers, sockets, recorders, audio contexts, and
+media tracks without changing canonical form state. Barge-in keeps the
+conservative local activity gate but transfers its already-open microphone
+stream into Deepgram recognition instead of releasing and reacquiring it. The
+stream still carries no recognized words until Deepgram owns the bounded turn.
+For both ordinary answers and transferred streams, capture starts before the
+temporary-token and WebSocket handshake completes. A strictly bounded,
+active-turn-only browser queue is flushed to Deepgram in order after connection
+and is cleared on completion, cancellation, or failure. This protects the start
+of an immediate answer without persisting audio or introducing another path.
+
+Reason:
+Requiring a recording or retry button on every turn did not resemble a person
+helping beside the user. Keeping each provider request bounded preserves the
+existing privacy, exactly-once dispatch, explicit-confirmation, and single-state
+architecture while a session-level loop supplies natural turn-taking. Stream
+transfer reduces the handoff gap during interruption without creating an
+always-on recorder, a voice agent, stored audio, or a second conversation path.

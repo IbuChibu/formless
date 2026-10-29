@@ -2,22 +2,37 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   nameConfidenceConcern,
+  recognitionChoiceKeyterms,
   recognitionKeyterms,
   type VoiceRecognitionField,
 } from "./deepgramSpeechRecognition";
 import type { VoiceAssistantControls } from "./useVoiceAssistant";
+import {
+  isRecoverableVoiceInputError,
+  nextAutomaticRecoveryAttempt,
+  transitionVoiceSessionMode,
+  VOICE_RECOVERY_DELAY_MS,
+  VOICE_SILENCE_REOPEN_DELAY_MS,
+  voiceSilenceReopenDelay,
+  type VoiceSessionControlEvent,
+  type VoiceSessionMode,
+} from "./voiceSessionPolicy";
 
 export type VoiceInterviewStatus =
   | "inactive"
   | "starting"
   | "assistant_speaking"
+  | "interrupted"
   | "requesting_permission"
   | "listening"
   | "processing"
   | "waiting_agent"
   | "awaiting_confirmation"
+  | "recovering"
+  | "muted"
   | "paused"
   | "complete"
+  | "ended"
   | "error"
   | "unsupported";
 
@@ -44,18 +59,19 @@ type VoiceInterviewOptions = {
 export type VoiceInterviewControls = {
   isActive: boolean;
   isPaused: boolean;
+  isMuted: boolean;
   status: VoiceInterviewStatus;
   startInterview: () => void;
   pauseInterview: () => void;
   resumeInterview: () => void;
+  muteInterview: () => void;
+  unmuteInterview: () => void;
   endInterview: () => void;
   resetInterview: () => void;
   interruptAndListen: () => void;
   retryListening: () => void;
   submitEditedTranscript: (asCorrection: boolean) => void;
 };
-
-type SessionMode = "inactive" | "active" | "paused";
 
 type VoiceTurnIntent =
   | { type: "message"; message: string }
@@ -76,79 +92,186 @@ export default function useVoiceInterview(
   optionsRef.current = options;
 
   const [sessionMode, setSessionMode] =
-    useState<SessionMode>("inactive");
+    useState<VoiceSessionMode>("inactive");
   const [baseStatus, setBaseStatus] =
     useState<VoiceInterviewStatus>("inactive");
-  const sessionModeRef = useRef<SessionMode>("inactive");
+  const sessionModeRef = useRef<VoiceSessionMode>("inactive");
   const lastHandledAssistantIdRef = useRef<number | null>(null);
   const submitTranscriptRef = useRef<(transcript: string) => void>(() => {});
+  const beginListeningRef = useRef<(stream?: MediaStream) => void>(() => {});
   const assistantSpeechSessionRef = useRef(0);
+  const listeningTurnRef = useRef(0);
+  const recoveryAttemptsRef = useRef(0);
+  const consecutiveSilencesRef = useRef(0);
+  const recoveryTimerRef = useRef<number | null>(null);
+  const localConcernRef = useRef(false);
 
-  const setMode = useCallback((mode: SessionMode) => {
-    sessionModeRef.current = mode;
-    setSessionMode(mode);
+  const clearRecoveryTimer = useCallback(() => {
+    if (recoveryTimerRef.current !== null) {
+      window.clearTimeout(recoveryTimerRef.current);
+      recoveryTimerRef.current = null;
+    }
   }, []);
+
+  const applyMode = useCallback((event: VoiceSessionControlEvent) => {
+    const next = transitionVoiceSessionMode(sessionModeRef.current, event);
+    sessionModeRef.current = next;
+    setSessionMode(next);
+  }, []);
+
+  const stopActiveAudio = useCallback(() => {
+    const { voice } = optionsRef.current;
+    listeningTurnRef.current += 1;
+    assistantSpeechSessionRef.current += 1;
+    clearRecoveryTimer();
+    voice.cancelListening();
+    voice.stopSpeaking();
+  }, [clearRecoveryTimer]);
 
   const pauseInterview = useCallback(() => {
-    const { voice } = optionsRef.current;
-    assistantSpeechSessionRef.current += 1;
-    voice.cancelListening();
-    voice.stopSpeaking();
-    setMode("paused");
+    stopActiveAudio();
+    applyMode("pause");
     setBaseStatus("paused");
-  }, [setMode]);
+  }, [applyMode, stopActiveAudio]);
+
+  const muteInterview = useCallback(() => {
+    stopActiveAudio();
+    applyMode("mute");
+    setBaseStatus("muted");
+  }, [applyMode, stopActiveAudio]);
 
   const endInterview = useCallback(() => {
-    const { voice } = optionsRef.current;
-    assistantSpeechSessionRef.current += 1;
-    voice.cancelListening();
-    voice.stopSpeaking();
+    stopActiveAudio();
     lastHandledAssistantIdRef.current = null;
-    setMode("inactive");
-    setBaseStatus("inactive");
-  }, [setMode]);
+    recoveryAttemptsRef.current = 0;
+    consecutiveSilencesRef.current = 0;
+    applyMode("end");
+    setBaseStatus("ended");
+  }, [applyMode, stopActiveAudio]);
 
   const resetInterview = useCallback(() => {
-    endInterview();
+    stopActiveAudio();
+    lastHandledAssistantIdRef.current = null;
+    recoveryAttemptsRef.current = 0;
+    consecutiveSilencesRef.current = 0;
+    localConcernRef.current = false;
     optionsRef.current.voice.resetVoiceSession();
-  }, [endInterview]);
+    applyMode("reset");
+    setBaseStatus("inactive");
+  }, [applyMode, stopActiveAudio]);
 
-  const beginListening = useCallback(() => {
-    const current = optionsRef.current;
-    if (
-      sessionModeRef.current !== "active" ||
-      current.agentIsBusy ||
-      !current.canSendMessage
-    ) {
-      return;
-    }
-    if (!current.voice.inputSupported) {
-      setBaseStatus("unsupported");
-      return;
-    }
-
-    setBaseStatus(
-      current.hasPendingProposal ? "awaiting_confirmation" : "starting",
-    );
-    const keyterms = recognitionKeyterms(current.activeField);
-    current.voice.startListening((utterance) => {
-      const concern = nameConfidenceConcern(current.activeField, utterance);
-      if (concern) {
-        current.voice.reportInputConcern(concern);
-        setBaseStatus("error");
+  const scheduleListening = useCallback(
+    (delayMs: number) => {
+      clearRecoveryTimer();
+      if (sessionModeRef.current !== "active") {
         return;
       }
-      submitTranscriptRef.current(utterance.transcript);
-    }, keyterms);
-  }, []);
+      setBaseStatus("recovering");
+      recoveryTimerRef.current = window.setTimeout(() => {
+        recoveryTimerRef.current = null;
+        if (sessionModeRef.current === "active") {
+          beginListeningRef.current();
+        }
+      }, delayMs);
+    },
+    [clearRecoveryTimer],
+  );
+
+  const beginListening = useCallback(
+    (initialStream?: MediaStream) => {
+      const current = optionsRef.current;
+      if (
+        sessionModeRef.current !== "active" ||
+        current.agentIsBusy ||
+        !current.canSendMessage
+      ) {
+        initialStream?.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      if (!current.voice.inputSupported) {
+        initialStream?.getTracks().forEach((track) => track.stop());
+        setBaseStatus("unsupported");
+        return;
+      }
+
+      clearRecoveryTimer();
+      listeningTurnRef.current += 1;
+      const listeningTurn = listeningTurnRef.current;
+      setBaseStatus(
+        initialStream
+          ? "interrupted"
+          : current.hasPendingProposal
+            ? "awaiting_confirmation"
+            : "starting",
+      );
+      const keyterms = recognitionKeyterms(current.activeField);
+      const choiceKeyterms = recognitionChoiceKeyterms(current.activeField);
+      current.voice.startListening(
+        (utterance) => {
+          if (
+            sessionModeRef.current !== "active" ||
+            listeningTurnRef.current !== listeningTurn
+          ) {
+            return;
+          }
+          listeningTurnRef.current += 1;
+          recoveryAttemptsRef.current = 0;
+          consecutiveSilencesRef.current = 0;
+          const latest = optionsRef.current;
+          const concern = nameConfidenceConcern(
+            latest.activeField,
+            utterance,
+          );
+          if (concern) {
+            localConcernRef.current = true;
+            latest.voice.reportInputConcern(concern);
+            setBaseStatus("recovering");
+            const reopen = () => {
+              localConcernRef.current = false;
+              latest.voice.clearTranscript();
+              scheduleListening(VOICE_SILENCE_REOPEN_DELAY_MS);
+            };
+            const started = latest.voice.speakAssistantMessage(concern, {
+              force: true,
+              onEnd: reopen,
+              onError: reopen,
+            });
+            if (!started) {
+              reopen();
+            }
+            return;
+          }
+          submitTranscriptRef.current(utterance.transcript);
+        },
+        keyterms,
+        () => {
+          if (
+            sessionModeRef.current !== "active" ||
+            listeningTurnRef.current !== listeningTurn
+          ) {
+            return;
+          }
+          listeningTurnRef.current += 1;
+          current.voice.clearTranscript();
+          const delay = voiceSilenceReopenDelay(
+            consecutiveSilencesRef.current,
+          );
+          consecutiveSilencesRef.current += 1;
+          scheduleListening(delay);
+        },
+        initialStream,
+        choiceKeyterms,
+      );
+    },
+    [clearRecoveryTimer, scheduleListening],
+  );
+  beginListeningRef.current = beginListening;
 
   const continueAfterSpeech = useCallback(() => {
     if (sessionModeRef.current !== "active") {
       return;
     }
-
-    const current = optionsRef.current;
-    if (current.isFormComplete) {
+    if (optionsRef.current.isFormComplete) {
       setBaseStatus("complete");
       return;
     }
@@ -167,9 +290,7 @@ export default function useVoiceInterview(
       assistantSpeechSessionRef.current += 1;
       const assistantSpeechSession = assistantSpeechSessionRef.current;
       const finishSpeechTurn = () => {
-        if (
-          assistantSpeechSessionRef.current !== assistantSpeechSession
-        ) {
+        if (assistantSpeechSessionRef.current !== assistantSpeechSession) {
           return;
         }
         assistantSpeechSessionRef.current += 1;
@@ -185,16 +306,18 @@ export default function useVoiceInterview(
         finishSpeechTurn();
         return;
       }
-      voice.startInterruptionDetection(() => {
+      voice.startInterruptionDetection((stream) => {
         if (
           sessionModeRef.current !== "active" ||
           assistantSpeechSessionRef.current !== assistantSpeechSession
         ) {
+          stream.getTracks().forEach((track) => track.stop());
           return;
         }
         assistantSpeechSessionRef.current += 1;
+        setBaseStatus("interrupted");
         voice.stopSpeaking();
-        beginListening();
+        beginListening(stream);
       });
     },
     [beginListening, continueAfterSpeech],
@@ -202,7 +325,16 @@ export default function useVoiceInterview(
 
   const startOrResume = useCallback(() => {
     const current = optionsRef.current;
-    setMode("active");
+    clearRecoveryTimer();
+    recoveryAttemptsRef.current = 0;
+    consecutiveSilencesRef.current = 0;
+    current.voice.clearTranscript();
+    applyMode(
+      sessionModeRef.current === "inactive" ||
+        sessionModeRef.current === "ended"
+        ? "start"
+        : "resume",
+    );
     setBaseStatus("starting");
 
     if (current.agentIsBusy) {
@@ -214,32 +346,39 @@ export default function useVoiceInterview(
       setBaseStatus("waiting_agent");
       return;
     }
-    if (current.latestAssistantTurn) {
+    if (
+      current.latestAssistantTurn &&
+      current.latestAssistantTurn.id !== lastHandledAssistantIdRef.current
+    ) {
       speakTurn(current.latestAssistantTurn);
       return;
     }
-    if (current.activeQuestion) {
+    if (
+      current.activeQuestion &&
+      lastHandledAssistantIdRef.current === null
+    ) {
       speakTurn({ id: -Date.now(), message: current.activeQuestion });
       return;
     }
     beginListening();
-  }, [beginListening, setMode, speakTurn]);
+  }, [applyMode, beginListening, clearRecoveryTimer, speakTurn]);
 
   const interruptAndListen = useCallback(() => {
     if (sessionModeRef.current !== "active") {
       return;
     }
     assistantSpeechSessionRef.current += 1;
+    setBaseStatus("interrupted");
     optionsRef.current.voice.stopSpeaking();
     beginListening();
   }, [beginListening]);
 
   const retryListening = useCallback(() => {
-    if (sessionModeRef.current !== "active") {
-      setMode("active");
-    }
+    recoveryAttemptsRef.current = 0;
+    optionsRef.current.voice.clearTranscript();
+    applyMode("resume");
     beginListening();
-  }, [beginListening, setMode]);
+  }, [applyMode, beginListening]);
 
   submitTranscriptRef.current = (transcript: string) => {
     const current = optionsRef.current;
@@ -286,13 +425,70 @@ export default function useVoiceInterview(
   ]);
 
   useEffect(() => {
-    if (sessionMode !== "active") {
+    if (sessionMode !== "active" || !options.agentHasError) {
       return;
     }
-    if (options.agentHasError) {
-      setBaseStatus("error");
+    stopActiveAudio();
+    applyMode("pause");
+    setBaseStatus("error");
+  }, [applyMode, options.agentHasError, sessionMode, stopActiveAudio]);
+
+  useEffect(() => {
+    if (
+      sessionMode !== "active" ||
+      options.voice.inputStatus !== "error" ||
+      localConcernRef.current
+    ) {
+      return;
     }
-  }, [options.agentHasError, sessionMode]);
+    const message = options.voice.inputError ?? "";
+    const nextAttempt = isRecoverableVoiceInputError(message)
+      ? nextAutomaticRecoveryAttempt(recoveryAttemptsRef.current)
+      : null;
+    if (nextAttempt !== null) {
+      recoveryAttemptsRef.current = nextAttempt;
+      options.voice.clearTranscript();
+      scheduleListening(VOICE_RECOVERY_DELAY_MS);
+      return;
+    }
+    listeningTurnRef.current += 1;
+    assistantSpeechSessionRef.current += 1;
+    clearRecoveryTimer();
+    options.voice.stopSpeaking();
+    applyMode("pause");
+    setBaseStatus("error");
+  }, [
+    applyMode,
+    options.voice,
+    options.voice.inputError,
+    options.voice.inputStatus,
+    clearRecoveryTimer,
+    scheduleListening,
+    sessionMode,
+    stopActiveAudio,
+  ]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && sessionModeRef.current === "active") {
+        pauseInterview();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [pauseInterview]);
+
+  useEffect(() => {
+    return () => {
+      listeningTurnRef.current += 1;
+      assistantSpeechSessionRef.current += 1;
+      clearRecoveryTimer();
+      optionsRef.current.voice.cancelListening();
+      optionsRef.current.voice.stopSpeaking();
+    };
+  }, [clearRecoveryTimer]);
 
   const status = resolveInterviewStatus(
     sessionMode,
@@ -306,10 +502,13 @@ export default function useVoiceInterview(
   return {
     isActive: sessionMode === "active",
     isPaused: sessionMode === "paused",
+    isMuted: sessionMode === "muted",
     status,
     startInterview: startOrResume,
     pauseInterview,
     resumeInterview: startOrResume,
+    muteInterview,
+    unmuteInterview: startOrResume,
     endInterview,
     resetInterview,
     interruptAndListen,
@@ -319,7 +518,7 @@ export default function useVoiceInterview(
 }
 
 function resolveInterviewStatus(
-  sessionMode: SessionMode,
+  sessionMode: VoiceSessionMode,
   baseStatus: VoiceInterviewStatus,
   voice: VoiceAssistantControls,
   agentIsBusy: boolean,
@@ -329,17 +528,26 @@ function resolveInterviewStatus(
   if (sessionMode === "inactive") {
     return voice.inputSupported ? "inactive" : "unsupported";
   }
+  if (sessionMode === "ended") {
+    return "ended";
+  }
+  if (sessionMode === "muted") {
+    return "muted";
+  }
   if (sessionMode === "paused") {
-    return "paused";
+    return baseStatus === "error" ? "error" : "paused";
+  }
+  if (voice.outputStatus === "speaking") {
+    return "assistant_speaking";
+  }
+  if (baseStatus === "recovering" || baseStatus === "interrupted") {
+    return baseStatus;
   }
   if (voice.inputStatus === "error" || baseStatus === "error") {
     return "error";
   }
   if (agentIsBusy) {
     return "waiting_agent";
-  }
-  if (voice.outputStatus === "speaking") {
-    return "assistant_speaking";
   }
   if (!voice.inputSupported) {
     return "unsupported";

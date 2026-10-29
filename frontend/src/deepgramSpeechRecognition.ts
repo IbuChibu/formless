@@ -17,12 +17,15 @@ export type DeepgramRecognitionCallbacks = {
   onConnected: () => void;
   onTranscript: (transcript: string) => void;
   onComplete: (utterance: DeepgramUtterance) => void;
+  onNoSpeech: () => void;
   onError: (message: string) => void;
 };
 
 export type DeepgramRecognitionOptions = {
   tokenUrl: string;
   keyterms?: string[];
+  choiceKeyterms?: string[];
+  initialStream?: MediaStream;
 };
 
 export type VoiceRecognitionField = {
@@ -30,6 +33,7 @@ export type VoiceRecognitionField = {
   label: string;
   question?: string;
   type: string;
+  options?: string[];
 };
 
 type DeepgramResultEvent = {
@@ -91,6 +95,7 @@ export type DeepgramRecognitionDependencies = {
 
 const DEEPGRAM_SOCKET_OPEN = 1;
 const AUDIO_TIMESLICE_MS = 250;
+const MAX_BUFFERED_AUDIO_CHUNKS = 48;
 const SPEECH_FINAL_SETTLE_MS = 850;
 const MANUAL_FINALIZE_TIMEOUT_MS = 1800;
 const CONNECTION_TIMEOUT_MS = 10000;
@@ -104,6 +109,11 @@ const ALLOWED_KEYTERMS = new Set([
   "reference number",
   "surname",
 ]);
+const PLACEHOLDER_OPTION = /^(?:choose|none|please select|select|select one)$/i;
+const SAFE_OPTION_KEYTERM = /^[\p{L}\p{N}][\p{L}\p{N}\s'()&+,.\-/]*$/u;
+const MAX_OPTION_KEYTERMS = 12;
+const MAX_OPTION_KEYTERM_CHARACTERS = 64;
+const MAX_OPTION_KEYTERM_WORDS = 8;
 const NAME_FRAMING_WORDS = new Set([
   "forename",
   "full",
@@ -140,6 +150,7 @@ export class DeepgramSpeechRecognizer {
   private segmentKeys = new Set<string>();
   private confidences: number[] = [];
   private speechFinalAt: number | null = null;
+  private bufferedAudio: Blob[] = [];
 
   constructor(
     options: DeepgramRecognitionOptions,
@@ -154,22 +165,16 @@ export class DeepgramSpeechRecognizer {
   async start(): Promise<void> {
     this.cancelled = false;
     try {
-      this.stream = await this.dependencies.getUserMedia({
-        audio: {
-          autoGainControl: false,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      });
-      if (this.cancelled) {
-        this.releaseMedia();
-        return;
-      }
-
-      const token = await requestTemporaryToken(
-        this.options.tokenUrl,
-        this.dependencies.fetch,
-      );
+      this.stream =
+        this.options.initialStream ??
+        (await this.dependencies.getUserMedia({
+          audio: {
+            autoGainControl: true,
+            channelCount: { ideal: 1 },
+            echoCancellation: true,
+            noiseSuppression: true,
+          },
+        }));
       if (this.cancelled) {
         this.releaseMedia();
         return;
@@ -178,13 +183,27 @@ export class DeepgramSpeechRecognizer {
       const mimeType = selectAudioType(
         this.dependencies.isMediaTypeSupported,
       );
+      this.startRecorder(mimeType);
+
+      const token = await requestTemporaryToken(
+        this.options.tokenUrl,
+        this.dependencies.fetch,
+      );
+      if (this.cancelled || this.completed) {
+        this.releaseMedia();
+        return;
+      }
+
       const socket = this.dependencies.createWebSocket(
-        buildDeepgramStreamingUrl(this.options.keyterms),
+        buildDeepgramStreamingUrl(
+          this.options.keyterms,
+          this.options.choiceKeyterms,
+        ),
         ["bearer", token.access_token],
       );
       socket.binaryType = "arraybuffer";
       this.socket = socket;
-      this.bindSocket(socket, mimeType);
+      this.bindSocket(socket);
       this.connectionTimer = this.dependencies.setTimeout(() => {
         this.fail(
           "Deepgram voice input did not connect in time. Try again or keep typing.",
@@ -225,31 +244,44 @@ export class DeepgramSpeechRecognizer {
     this.clearTurnData();
   }
 
-  private bindSocket(socket: WebSocketLike, mimeType: string): void {
+  private startRecorder(mimeType: string): void {
+    const stream = this.stream;
+    if (!stream) {
+      throw new Error("Microphone audio was unavailable.");
+    }
+    const recorder = this.dependencies.createMediaRecorder(stream, { mimeType });
+    recorder.ondataavailable = (event) => {
+      if (this.cancelled || this.completed || event.data.size === 0) {
+        return;
+      }
+      const socket = this.socket;
+      if (socket?.readyState === DEEPGRAM_SOCKET_OPEN) {
+        socket.send(event.data);
+        return;
+      }
+      this.bufferedAudio.push(event.data);
+      if (this.bufferedAudio.length > MAX_BUFFERED_AUDIO_CHUNKS) {
+        this.fail(
+          "Deepgram voice input took too long to connect. Try again or keep typing.",
+        );
+      }
+    };
+    recorder.onerror = () => {
+      this.fail("Microphone audio could not be streamed. Keep typing instead.");
+    };
+    this.recorder = recorder;
+    recorder.start(AUDIO_TIMESLICE_MS);
+  }
+
+  private bindSocket(socket: WebSocketLike): void {
     socket.onopen = () => {
       if (this.cancelled || socket !== this.socket || !this.stream) {
         return;
       }
       this.clearConnectionTimer();
       try {
-        const recorder = this.dependencies.createMediaRecorder(
-          this.stream,
-          { mimeType },
-        );
-        recorder.ondataavailable = (event) => {
-          if (
-            event.data.size > 0 &&
-            this.socket === socket &&
-            socket.readyState === DEEPGRAM_SOCKET_OPEN
-          ) {
-            socket.send(event.data);
-          }
-        };
-        recorder.onerror = () => {
-          this.fail("Microphone audio could not be streamed. Keep typing instead.");
-        };
-        this.recorder = recorder;
-        recorder.start(AUDIO_TIMESLICE_MS);
+        this.bufferedAudio.forEach((chunk) => socket.send(chunk));
+        this.bufferedAudio = [];
         this.keepAliveTimer = this.dependencies.setInterval(() => {
           if (socket.readyState === DEEPGRAM_SOCKET_OPEN) {
             socket.send(JSON.stringify({ type: "KeepAlive" }));
@@ -336,24 +368,24 @@ export class DeepgramSpeechRecognizer {
         ? 0
         : this.confidences.reduce((sum, value) => sum + value, 0) /
           this.confidences.length;
-
-    this.clearTimers();
-    this.stopRecorderAndMedia();
-    this.closeSocket();
-    if (!transcript) {
-      this.callbacks.onError(
-        "I didn't hear any speech. Try again when you are ready, or type your answer.",
-      );
-      return;
-    }
-    this.callbacks.onTranscript(transcript);
-    this.callbacks.onComplete({
+    const utterance: DeepgramUtterance = {
       transcript,
       confidence,
       words: [...this.finalWords],
       provider: "deepgram",
       finalTranscriptLatencyMs: latency,
-    });
+    };
+
+    this.clearTimers();
+    this.stopRecorderAndMedia();
+    this.closeSocket();
+    this.clearTurnData();
+    if (!transcript) {
+      this.callbacks.onNoSpeech();
+      return;
+    }
+    this.callbacks.onTranscript(transcript);
+    this.callbacks.onComplete(utterance);
   }
 
   private fail(message: string): void {
@@ -364,6 +396,7 @@ export class DeepgramSpeechRecognizer {
     this.clearTimers();
     this.stopRecorderAndMedia();
     this.closeSocket();
+    this.clearTurnData();
     this.callbacks.onError(message);
   }
 
@@ -444,6 +477,7 @@ export class DeepgramSpeechRecognizer {
   }
 
   private clearTurnData(): void {
+    this.bufferedAudio = [];
     this.finalSegments = [];
     this.finalWords = [];
     this.segmentKeys.clear();
@@ -461,7 +495,10 @@ export function browserSupportsDeepgramSpeech(): boolean {
   );
 }
 
-export function buildDeepgramStreamingUrl(keyterms: string[] = []): string {
+export function buildDeepgramStreamingUrl(
+  keyterms: string[] = [],
+  choiceKeyterms: string[] = [],
+): string {
   const parameters = new URLSearchParams({
     model: "nova-3",
     language: ENGLISH_LOCALE,
@@ -473,7 +510,10 @@ export function buildDeepgramStreamingUrl(keyterms: string[] = []): string {
     vad_events: "true",
     mip_opt_out: "true",
   });
-  boundedKeyterms(keyterms).forEach((keyterm) => {
+  [
+    ...boundedKeyterms(keyterms),
+    ...boundedChoiceKeyterms(choiceKeyterms),
+  ].forEach((keyterm) => {
     parameters.append("keyterm", keyterm);
   });
   return `wss://api.deepgram.com/v1/listen?${parameters.toString()}`;
@@ -483,6 +523,21 @@ export function boundedKeyterms(keyterms: string[]): string[] {
   return [...new Set(keyterms.map((value) => value.trim().toLocaleLowerCase()))]
     .filter((value) => ALLOWED_KEYTERMS.has(value))
     .slice(0, 4);
+}
+
+export function boundedChoiceKeyterms(options: string[] = []): string[] {
+  const normalized = options
+    .map((value) => value.trim().replace(/\s+/g, " "))
+    .filter(
+      (value) =>
+        value.length > 1 &&
+        value.length <= MAX_OPTION_KEYTERM_CHARACTERS &&
+        !PLACEHOLDER_OPTION.test(value) &&
+        SAFE_OPTION_KEYTERM.test(value) &&
+        value.split(/\s+/).length <= MAX_OPTION_KEYTERM_WORDS,
+    );
+  return [...new Map(normalized.map((value) => [value.toLocaleLowerCase(), value])).values()]
+    .slice(0, MAX_OPTION_KEYTERMS);
 }
 
 export function parseDeepgramMessage(data: unknown): ParsedDeepgramEvent {
@@ -590,6 +645,12 @@ export function recognitionKeyterms(
     /\baddress\b/.test(metadata) ? "address" : "",
     /\breference\s+number\b/.test(metadata) ? "reference number" : "",
   ]);
+}
+
+export function recognitionChoiceKeyterms(
+  field: VoiceRecognitionField | null,
+): string[] {
+  return field ? boundedChoiceKeyterms(field.options) : [];
 }
 
 export function nameConfidenceConcern(
