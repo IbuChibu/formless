@@ -9,6 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from app.services.deepgram_service import (
+    DeepgramConfigurationError,
+    DeepgramService,
+    DeepgramServiceError,
+)
 from app.services.form_agent import (
     FormAgentError,
     FormAgentRequest,
@@ -40,6 +45,11 @@ PdfFieldValue = Union[str, bool]
 class HealthResponse(BaseModel):
     status: str
     service: str
+
+
+class DeepgramTokenResponse(BaseModel):
+    access_token: str
+    expires_in: int = Field(gt=0, le=3600)
 
 
 class PdfWidgetGeometryResponse(BaseModel):
@@ -122,6 +132,19 @@ def get_nemotron_service() -> NemotronService:
         ) from error
 
 
+def get_deepgram_service() -> DeepgramService:
+    try:
+        return DeepgramService.from_environment()
+    except DeepgramConfigurationError as error:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Deepgram voice input is not configured. Add the server-side "
+                "credential to backend/.env, or continue by typing."
+            ),
+        ) from error
+
+
 def get_tavily_service() -> TavilyService:
     return TavilyService.from_optional_environment()
 
@@ -131,6 +154,20 @@ def get_form_agent_service(
     tavily_service: TavilyService = Depends(get_tavily_service),
 ) -> FormAgentService:
     return FormAgentService(nemotron_service, tavily_service)
+
+
+@app.post("/voice/deepgram/token", response_model=DeepgramTokenResponse)
+async def create_deepgram_token(
+    service: DeepgramService = Depends(get_deepgram_service),
+) -> DeepgramTokenResponse:
+    try:
+        token = await service.issue_temporary_token()
+    except DeepgramServiceError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return DeepgramTokenResponse(
+        access_token=token.access_token,
+        expires_in=token.expires_in,
+    )
 
 
 @app.post("/ai/explain", response_model=FieldExplanationResponse)

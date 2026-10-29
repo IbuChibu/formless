@@ -4480,7 +4480,7 @@ Do not implement:
 
 # Milestone 9.1.2 — Semantic-first conversational routing
 
-Status: IMPLEMENTED — MANUAL QA PENDING
+Status: COMPLETE
 
 Why this is next:
 Milestone 9.1.1 added bounded semantic interpretation, but deterministic phrase
@@ -4590,21 +4590,25 @@ Automated implementation outcome recorded 25 October 2026:
 - No frontend workflow, PDF, voice-provider, Tavily, persistence, or later-
   milestone functionality was changed.
 
-Manual QA still required before marking complete:
-- In the browser, try natural explanation requests such as `what do you mean`
-  and `I am not sure what they want from me here` on text, date, and dropdown
-  fields, and verify the assistant explains instead of issuing a format error.
-- Say or type a side comment such as `I need a moment to find the right
-  document`; verify no proposal is created and the current question remains
-  ready for an answer.
-- Give one natural valid answer and verify it still becomes a reviewable
-  proposal that requires explicit confirmation before updating the form.
-- Repeat the explanation and pause checks through finalized voice transcripts
-  to verify the shared typed/voice turn path in the browser.
+Completion disposition recorded 29 October 2026:
+- The user elected to accept the passing automated A/B, regression, evaluation,
+  frontend, and build evidence and mark this milestone complete for now.
+- No additional browser or voice manual-QA result is claimed. The following
+  checks remain useful regression probes during normal testing of later work:
+  - In the browser, try natural explanation requests such as `what do you mean`
+    and `I am not sure what they want from me here` on text, date, and dropdown
+    fields, and verify the assistant explains instead of issuing a format error.
+  - Say or type a side comment such as `I need a moment to find the right
+    document`; verify no proposal is created and the current question remains
+    ready for an answer.
+  - Give one natural valid answer and verify it still becomes a reviewable
+    proposal that requires explicit confirmation before updating the form.
+  - Repeat the explanation and pause checks through finalized voice transcripts
+    to verify the shared typed/voice turn path in the browser.
 
 # Milestone 9.2 — Deepgram streaming speech and identity-field handling
 
-Status: NOT STARTED
+Status: IMPLEMENTED — LIVE TOKEN PERMISSION AND MANUAL QA PENDING
 
 Why this is next:
 The current voice path relies on the browser's `SpeechRecognition` service,
@@ -4773,6 +4777,51 @@ Do not implement:
 - PDF extraction or filling changes unrelated to preserving the existing safe
   voice-to-confirmation path
 - deployment, submission, or later milestone work
+
+Automated implementation outcome recorded 29 October 2026:
+- The primary input adapter now uses Deepgram Nova-3 on `/v1/listen` with the
+  fixed `en-GB` locale. It requests a backend-issued temporary bearer token;
+  the long-lived API key remains server-side.
+- Native browser `MediaRecorder` and WebSocket APIs stream one microphone turn
+  directly to Deepgram. No Deepgram SDK, Voice Agent, LLM, or TTS dependency
+  was added, and `window.SpeechRecognition` is no longer required or used.
+- Interim text is visibly labelled, finalized segments are deduplicated and
+  buffered, and only one complete utterance callback can reach the existing
+  Form Agent turn path.
+- Endpointing is configured at 700 ms with a 1,500 ms utterance-end window and
+  an 850 ms client settle guard after `speech_final`. Automated pause tests
+  prove continued speech cancels the pending completion; live latency remains
+  to be measured.
+- Word confidence and timing remain in active frontend memory only. The
+  provisional name threshold is 0.82: a lower-confidence token produces a
+  targeted repeat-or-spell message and no Form Agent message. The threshold
+  must be confirmed or adjusted from the required synthetic live voice set.
+- The deterministic name adapter joins explicit runs such as `A-K-H-O-O-N`
+  while preserving the raw recognized form for review. Hyphens, apostrophes,
+  multiple name components, capitalization, and letter order are otherwise
+  preserved; every accepted name still becomes an unconfirmed proposal.
+- Recognition keyterms are limited to a small non-personal allowlist. Every
+  Deepgram streaming URL sets `mip_opt_out=true`; Formless stores no audio,
+  temporary token, transcript confidence, or timing metadata after the active
+  browser turn.
+- Mocked backend tests cover configuration, temporary tokens, timeout,
+  malformed responses, provider rejection, missing configuration, secret
+  redaction, and the public API response. Frontend tests cover parsing,
+  interim/final/duplicate/empty/malformed/error events, exactly-once dispatch,
+  endpointing, permission denial, retry, stop, cancel, socket failure, and
+  release of media and WebSocket resources.
+- The complete backend suite passes with 449 tests. All established frontend
+  workflow, layout, interruption, reliability, support-preference, and new
+  Deepgram checks pass, and the production frontend build succeeds.
+
+Live blocker and remaining completion evidence:
+- The first live `/v1/auth/grant` request reached Deepgram but returned HTTP
+  403. The configured key must be replaced with one carrying Deepgram Member
+  permission before live browser transcription can be evaluated.
+- No live critical-entity accuracy, duplicate/drop rate, clarification rate,
+  final-transcript latency, browser/OS matrix, or complete fixture transcript
+  is claimed yet. The required live/manual steps above remain open, so this
+  milestone is not complete.
 
 # Milestone 9.3 — One-language bilingual assistance pilot
 

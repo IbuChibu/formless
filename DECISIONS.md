@@ -646,3 +646,35 @@ latency increase is acceptable because model authority remains bounded to
 interpretation and all effects remain deterministic and validated. This
 supersedes the trigger order in the 18 October semantic-interpretation decision
 without changing its safety boundary.
+
+---
+
+## 2026-10-29 — Deepgram is a transcript-evidence adapter, not a voice agent
+
+Decision:
+Deepgram Nova-3 becomes the primary speech-to-text input through one-turn
+browser WebSocket streams. FastAPI exchanges the server-only long-lived key for
+a temporary bearer token; the browser sends microphone audio directly to
+Deepgram. Formless uses native microphone, recorder, and WebSocket APIs and does
+not add Deepgram's SDK, Voice Agent, LLM, or text-to-speech products.
+
+Interim hypotheses are display-only. Final segments are deduplicated and
+buffered until one guarded utterance boundary, after which exactly one transcript
+uses the existing Form Agent message path. Confidence can only block an
+uncertain identity transcript and request repetition or spelling. It cannot
+confirm, correct, or write a value. Explicit spelling is reconstructed by a
+deterministic name adapter and still requires visible proposal confirmation.
+
+Every stream is fixed to Nova-3 and `en-GB`, uses only allowlisted non-personal
+form keyterms, and includes `mip_opt_out=true`. Audio, temporary credentials,
+confidence, and timing are not persisted by Formless. Browser speech synthesis
+and the existing local barge-in detector remain separate output/interruption
+adapters.
+
+Reason:
+Browser Web Speech recognition did not expose stable word confidence and often
+misheard unfamiliar names. A controllable transcript boundary improves
+recognition evidence without creating a second agent or weakening canonical
+state. Temporary credentials keep the long-lived key out of frontend assets,
+and the permanent typed path preserves recoverability when voice configuration,
+permission, or networking fails.

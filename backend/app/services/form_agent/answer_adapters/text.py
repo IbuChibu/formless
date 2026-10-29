@@ -25,7 +25,8 @@ _GENERAL_FRAMES = (
 _NAME_FRAMES = (
     re.compile(
         r"^(?:(?:okay|ok|sure|well)[,!.]?\s+)?"
-        r"(?:my\s+)?(?:full\s+legal|full|legal|family|first|last|middle)?"
+        r"(?:my\s+)?(?:full\s+legal|full|legal|family|given|first|last|"
+        r"middle|surname|forename)?"
         r"\s*name\s+is\s+(?P<value>.+?),\s+(?:and\s+)?"
         r"(?:i\s+was\s+born|call\s+me|my\s+(?:date\s+of\s+birth|"
         r"birth\s+date)\s+is)\b.*$",
@@ -33,7 +34,8 @@ _NAME_FRAMES = (
     ),
     re.compile(
         r"^(?:(?:okay|ok|sure|well)[,!.]?\s+)?"
-        r"(?:my\s+)?(?:full\s+legal|full|legal|family|first|last|middle)?"
+        r"(?:my\s+)?(?:full\s+legal|full|legal|family|given|first|last|"
+        r"middle|surname|forename)?"
         r"\s*name\s+is\s+(?P<value>.+?),\s+(?:and\s+)?"
         r"(?:please\s+)?call\s+me\b.*$",
         re.IGNORECASE,
@@ -53,8 +55,14 @@ _NAME_FRAMES = (
         re.IGNORECASE,
     ),
     re.compile(
+        r"^(?:(?:okay|ok|sure|well)[,!.]?\s+)?(?:my\s+)?"
+        r"(?:surname|forename)\s+is\s+(?P<value>.+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(
         r"^(?:(?:okay|ok|sure|well)[,!.]?\s+)?"
-        r"(?:my\s+)?(?:full\s+legal|full|legal|family|first|last|middle)?"
+        r"(?:my\s+)?(?:full\s+legal|full|legal|family|given|first|last|"
+        r"middle|surname|forename)?"
         r"\s*name\s+is\s+(?P<value>.+)$",
         re.IGNORECASE,
     ),
@@ -187,6 +195,10 @@ _EMAIL_PATTERN = re.compile(
 _IDENTIFIER_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9 ./_-]{0,98}[A-Za-z0-9]$|^[A-Za-z0-9]$"
 )
+_SPELLED_LETTER_RUN = re.compile(
+    r"(?<![A-Za-z])(?:[A-Za-z](?:\s*[.\-]\s*|\s+)){2,}"
+    r"[A-Za-z](?:\.)?(?![A-Za-z])"
+)
 _STREET_CUE_PATTERN = re.compile(
     r"\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|court|ct|"
     r"place|pl|way|close|crescent|terrace|boulevard|blvd|flat|apartment|"
@@ -207,6 +219,7 @@ def adapt_name(field: FormAgentField, message: str) -> AnswerAdapterResult:
         )
     original_candidate = _framed_original(candidate, _NAME_FRAMES)
     candidate = strip_framing(candidate, _NAME_FRAMES)
+    candidate = _join_spelled_name_letters(candidate)
     candidate = _strip_name_sentence_punctuation(field, candidate)
     if (
         not candidate
@@ -219,6 +232,15 @@ def adapt_name(field: FormAgentField, message: str) -> AnswerAdapterResult:
             accepted_shape=accepted_shape,
         )
     return MatchedAnswer(candidate, original_value=original_candidate)
+
+
+def _join_spelled_name_letters(value: str) -> str:
+    """Join only explicit runs of three or more individually spoken letters."""
+
+    return _SPELLED_LETTER_RUN.sub(
+        lambda match: re.sub(r"[^A-Za-z]", "", match.group(0)),
+        value,
+    )
 
 
 def adapt_free_text(field: FormAgentField, message: str) -> AnswerAdapterResult:

@@ -120,19 +120,23 @@ Must not:
 ## Voice interview
 
 The browser voice layer has two focused responsibilities. `useVoiceAssistant`
-owns the Web Speech API lifecycle, including one-shot recognition, editable
-transcript state, speech synthesis, cancellation, unsupported capability, and
-stale-callback guards. Its small `voiceInterruptionDetector` dependency uses
-Web Audio only while assistant speech is active: it calibrates to local noise,
-requires sustained activity, and releases the microphone before recognition
-starts. `useVoiceInterview` owns the frontend-only turn loop:
+owns provider-neutral one-turn input state, editable transcript state, browser
+speech synthesis, cancellation, unsupported capability, and stale-callback
+guards. `deepgramSpeechRecognition` owns the Nova-3 WebSocket transport,
+temporary credential request, microphone recorder, interim/final event parsing,
+word-confidence evidence, endpointing, deduplication, and resource cleanup. Its
+small `voiceInterruptionDetector` dependency uses Web Audio only while assistant
+speech is active: it calibrates to local noise, requires sustained activity,
+and releases that microphone before recognition starts. `useVoiceInterview`
+owns the frontend-only turn loop:
 
 ```text
 explicit start
     -> visible assistant response is spoken and local interruption arms
     -> user speech may stop the response
-    -> one listening turn
-    -> visible completed transcript
+    -> backend issues a short-lived Deepgram bearer token
+    -> one Nova-3 listening turn with visible interim text
+    -> one deduplicated completed transcript
     -> existing Form Agent message or closed event
     -> validated response and effect
     -> next spoken response
@@ -146,6 +150,24 @@ pending proposal. A spoken correction first rejects that proposal, then sends
 the user-stated replacement through the ordinary answer path; the replacement
 creates a new proposal and still requires confirmation.
 
+The long-lived `DEEPGRAM_API_KEY` is loaded only by FastAPI. The browser asks
+`POST /voice/deepgram/token` for a temporary credential immediately before a
+connection and then streams audio directly to Deepgram; neither audio nor the
+temporary credential passes through the Form Agent or PDF Service. Streaming
+uses Nova-3, one fixed English locale, bounded non-personal keyterms,
+`mip_opt_out=true`, visible interim results, and a guarded utterance boundary.
+Only the finalized transcript enters the existing typed message path exactly
+once. Word confidence and timing exist only for the active turn and are cleared
+with the session.
+
+Name-field recognition is selected from deterministic field metadata. A
+low-confidence name token stops before Form Agent dispatch and asks the user to
+repeat or spell that part. High confidence is never confirmation: accepted
+speech still passes through deterministic name handling, visible proposal
+review, and the existing explicit-confirmation effect. Explicit runs of three
+or more spoken letters may be joined deterministically, while spelling and
+letter order are never guessed.
+
 The activity detector is not a recognizer: it observes no words, buffers no
 audio, and dispatches no form action. At the start of each spoken response it
 briefly calibrates against ambient sound and speaker-to-microphone leakage. The
@@ -158,9 +180,12 @@ the permanent `Answer now` and typed controls.
 The detector stops on speech completion, manual interruption, recognition
 start, pause, end, error, form change, or unmount.
 The interview loop stops on pause, end, microphone failure, provider failure,
-or form change. Audio is never uploaded or stored. Typed conversation,
-`Answer now`, proposal buttons, and the manual drawer remain available
-throughout and operate on the same state.
+or form change. Formless never stores audio or speech metadata. Deepgram
+receives active-turn audio directly and is asked not to retain it for model
+improvement; provider request metadata and usage logs remain subject to
+Deepgram's service policy. Typed conversation, `Answer now`, proposal buttons,
+and the manual drawer remain available throughout and operate on the same
+state.
 
 ## FastAPI
 

@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { apiBaseUrl } from "./api";
+import {
+  browserSupportsDeepgramSpeech,
+  DeepgramSpeechRecognizer,
+  type DeepgramUtterance,
+} from "./deepgramSpeechRecognition";
 import {
   browserSupportsVoiceInterruption,
   startVoiceInterruptionDetector,
@@ -24,63 +30,24 @@ export type VoiceInterruptionStatus =
   | "error"
   | "unsupported";
 
-interface SpeechRecognitionAlternativeLike {
-  transcript: string;
-}
-
-interface SpeechRecognitionResultLike {
-  readonly isFinal: boolean;
-  readonly length: number;
-  readonly [index: number]: SpeechRecognitionAlternativeLike;
-}
-
-interface SpeechRecognitionResultListLike {
-  readonly length: number;
-  readonly [index: number]: SpeechRecognitionResultLike;
-}
-
-interface SpeechRecognitionEventLike extends Event {
-  readonly results: SpeechRecognitionResultListLike;
-}
-
-interface SpeechRecognitionErrorEventLike extends Event {
-  readonly error: string;
-  readonly message?: string;
-}
-
-interface SpeechRecognitionLike {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  maxAlternatives: number;
-  onstart: (() => void) | null;
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
-  onend: (() => void) | null;
-  start(): void;
-  stop(): void;
-  abort(): void;
-}
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
-
-declare global {
-  interface Window {
-    SpeechRecognition?: SpeechRecognitionConstructor;
-    webkitSpeechRecognition?: SpeechRecognitionConstructor;
-  }
-}
+export type VoiceTranscriptFinality = "none" | "interim" | "final";
 
 export type VoiceAssistantControls = {
   inputSupported: boolean;
   inputStatus: VoiceInputStatus;
   inputError: string | null;
   transcript: string;
+  transcriptFinality: VoiceTranscriptFinality;
+  lastUtterance: DeepgramUtterance | null;
   setTranscript: (value: string) => void;
-  startListening: (onComplete?: (transcript: string) => void) => void;
+  startListening: (
+    onComplete?: (utterance: DeepgramUtterance) => void,
+    keyterms?: string[],
+  ) => void;
   stopListening: () => void;
   cancelListening: () => void;
   clearTranscript: () => void;
+  reportInputConcern: (message: string) => void;
   outputSupported: boolean;
   outputStatus: VoiceOutputStatus;
   outputError: string | null;
@@ -103,16 +70,6 @@ export type VoiceAssistantControls = {
   resetVoiceSession: () => void;
 };
 
-function getSpeechRecognitionConstructor():
-  | SpeechRecognitionConstructor
-  | undefined {
-  return window.SpeechRecognition ?? window.webkitSpeechRecognition;
-}
-
-function browserSupportsVoiceInput(): boolean {
-  return window.isSecureContext && Boolean(getSpeechRecognitionConstructor());
-}
-
 function browserSupportsVoiceOutput(): boolean {
   return (
     "speechSynthesis" in window &&
@@ -120,41 +77,9 @@ function browserSupportsVoiceOutput(): boolean {
   );
 }
 
-function recognitionErrorMessage(error: string): string {
-  const messages: Record<string, string> = {
-    "not-allowed":
-      "Microphone access was denied. Allow microphone access for this site, then try again.",
-    "service-not-allowed":
-      "Speech recognition is blocked by this browser. Check the site permissions or keep typing.",
-    "audio-capture":
-      "No working microphone was found. Check your microphone and try again.",
-    network:
-      "The browser speech service could not be reached. Try again or keep typing.",
-    "no-speech":
-      "I didn't hear any speech. Try again when you are ready, or type your answer.",
-    "language-not-supported":
-      "Speech recognition does not support your browser language. You can keep typing instead.",
-  };
-
-  return (
-    messages[error] ??
-    "Voice input could not be completed. Try again or keep typing your answer."
-  );
-}
-
-function transcriptFromResults(results: SpeechRecognitionResultListLike): string {
-  const segments: string[] = [];
-  for (let index = 0; index < results.length; index += 1) {
-    const transcript = results[index][0]?.transcript.trim();
-    if (transcript) {
-      segments.push(transcript);
-    }
-  }
-  return segments.join(" ").trim();
-}
 
 export default function useVoiceAssistant(): VoiceAssistantControls {
-  const inputSupported = browserSupportsVoiceInput();
+  const inputSupported = browserSupportsDeepgramSpeech();
   const outputSupported = browserSupportsVoiceOutput();
   const interruptionSupported = browserSupportsVoiceInterruption();
   const [inputStatus, setInputStatus] = useState<VoiceInputStatus>(
@@ -162,6 +87,10 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
   );
   const [inputError, setInputError] = useState<string | null>(null);
   const [transcript, setTranscriptState] = useState("");
+  const [transcriptFinality, setTranscriptFinality] =
+    useState<VoiceTranscriptFinality>("none");
+  const [lastUtterance, setLastUtterance] =
+    useState<DeepgramUtterance | null>(null);
   const [outputStatus, setOutputStatus] = useState<VoiceOutputStatus>(
     outputSupported ? "idle" : "unsupported",
   );
@@ -175,13 +104,10 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
     null,
   );
 
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const recognitionRef = useRef<DeepgramSpeechRecognizer | null>(null);
   const recognitionSessionRef = useRef(0);
-  const recognitionTranscriptRef = useRef("");
-  const cancelRequestedRef = useRef(false);
-  const recognitionFailedRef = useRef(false);
   const recognitionCompleteRef = useRef<
-    ((transcript: string) => void) | null
+    ((utterance: DeepgramUtterance) => void) | null
   >(null);
   const spokenRepliesEnabledRef = useRef(false);
   const speechSessionRef = useRef(0);
@@ -192,6 +118,8 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
 
   const setTranscript = useCallback((value: string) => {
     setTranscriptState(value);
+    setTranscriptFinality(value.trim() ? "final" : "none");
+    setLastUtterance(null);
   }, []);
 
   const stopInterruptionDetection = useCallback(() => {
@@ -320,109 +248,83 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
   );
 
   const cancelListening = useCallback(() => {
-    cancelRequestedRef.current = true;
     recognitionSessionRef.current += 1;
-    recognitionRef.current?.abort();
+    recognitionRef.current?.cancel();
     recognitionRef.current = null;
-    recognitionFailedRef.current = false;
     recognitionCompleteRef.current = null;
-    recognitionTranscriptRef.current = "";
     setInputError(null);
-    setTranscript("");
+    setTranscriptState("");
+    setTranscriptFinality("none");
+    setLastUtterance(null);
     setInputStatus(inputSupported ? "idle" : "unsupported");
-  }, [inputSupported, setTranscript]);
+  }, [inputSupported]);
 
   const startListening = useCallback(
-    (onComplete?: (transcript: string) => void) => {
-      const SpeechRecognition = getSpeechRecognitionConstructor();
-      if (!inputSupported || !SpeechRecognition) {
+    (
+      onComplete?: (utterance: DeepgramUtterance) => void,
+      keyterms: string[] = [],
+    ) => {
+      if (!inputSupported) {
         setInputStatus("unsupported");
         return;
       }
 
       recognitionSessionRef.current += 1;
       const recognitionSession = recognitionSessionRef.current;
-      recognitionRef.current?.abort();
+      recognitionRef.current?.cancel();
       stopSpeaking();
-      cancelRequestedRef.current = false;
-      recognitionFailedRef.current = false;
       recognitionCompleteRef.current = onComplete ?? null;
-      recognitionTranscriptRef.current = "";
       setInputError(null);
-
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = window.navigator.language || "en-GB";
-      recognition.maxAlternatives = 1;
-      recognition.onstart = () => {
-        if (recognitionSessionRef.current === recognitionSession) {
-          setInputStatus("listening");
-        }
-      };
-      recognition.onresult = (event) => {
-        if (recognitionSessionRef.current !== recognitionSession) {
-          return;
-        }
-        const nextTranscript = transcriptFromResults(event.results);
-        if (nextTranscript) {
-          recognitionTranscriptRef.current = nextTranscript;
-          setTranscript(nextTranscript);
-        }
-      };
-      recognition.onerror = (event) => {
-        if (recognitionSessionRef.current !== recognitionSession) {
-          return;
-        }
-        if (event.error === "aborted" && cancelRequestedRef.current) {
-          return;
-        }
-        recognitionFailedRef.current = true;
-        setInputError(recognitionErrorMessage(event.error));
-        setInputStatus("error");
-      };
-      recognition.onend = () => {
-        if (recognitionSessionRef.current !== recognitionSession) {
-          return;
-        }
-        if (recognitionRef.current === recognition) {
-          recognitionRef.current = null;
-        }
-        if (cancelRequestedRef.current) {
-          cancelRequestedRef.current = false;
-          return;
-        }
-        if (recognitionFailedRef.current) {
-          return;
-        }
-        const completedTranscript = recognitionTranscriptRef.current.trim();
-        if (completedTranscript) {
-          setInputStatus("review");
-          const complete = recognitionCompleteRef.current;
-          recognitionCompleteRef.current = null;
-          complete?.(completedTranscript);
-          return;
-        }
-        setInputError(
-          "I didn't hear any speech. Try again when you are ready, or type your answer.",
-        );
-        setInputStatus("error");
-      };
-
+      setTranscriptState("");
+      setTranscriptFinality("none");
+      setLastUtterance(null);
+      const recognition = new DeepgramSpeechRecognizer(
+        {
+          tokenUrl: `${apiBaseUrl}/voice/deepgram/token`,
+          keyterms,
+        },
+        {
+          onConnected: () => {
+            if (recognitionSessionRef.current === recognitionSession) {
+              setInputStatus("listening");
+            }
+          },
+          onTranscript: (nextTranscript) => {
+            if (recognitionSessionRef.current !== recognitionSession) {
+              return;
+            }
+            setTranscriptState(nextTranscript);
+            setTranscriptFinality("interim");
+          },
+          onComplete: (utterance) => {
+            if (recognitionSessionRef.current !== recognitionSession) {
+              return;
+            }
+            recognitionRef.current = null;
+            setTranscriptState(utterance.transcript);
+            setTranscriptFinality("final");
+            setLastUtterance(utterance);
+            setInputStatus("review");
+            const complete = recognitionCompleteRef.current;
+            recognitionCompleteRef.current = null;
+            complete?.(utterance);
+          },
+          onError: (message) => {
+            if (recognitionSessionRef.current !== recognitionSession) {
+              return;
+            }
+            recognitionRef.current = null;
+            recognitionCompleteRef.current = null;
+            setInputError(message);
+            setInputStatus("error");
+          },
+        },
+      );
       recognitionRef.current = recognition;
       setInputStatus("requesting_permission");
-      try {
-        recognition.start();
-      } catch {
-        recognitionRef.current = null;
-        recognitionCompleteRef.current = null;
-        setInputError(
-          "Voice input could not start. Try again or keep typing your answer.",
-        );
-        setInputStatus("error");
-      }
+      void recognition.start();
     },
-    [inputSupported, setTranscript, stopSpeaking],
+    [inputSupported, stopSpeaking],
   );
 
   const stopListening = useCallback(() => {
@@ -430,20 +332,23 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
       return;
     }
     setInputStatus("processing");
-    try {
-      recognitionRef.current.stop();
-    } catch {
-      recognitionRef.current.abort();
-    }
+    recognitionRef.current.stop();
   }, []);
 
   const clearTranscript = useCallback(() => {
     recognitionCompleteRef.current = null;
-    recognitionTranscriptRef.current = "";
     setInputError(null);
-    setTranscript("");
+    setTranscriptState("");
+    setTranscriptFinality("none");
+    setLastUtterance(null);
     setInputStatus(inputSupported ? "idle" : "unsupported");
-  }, [inputSupported, setTranscript]);
+  }, [inputSupported]);
+
+  const reportInputConcern = useCallback((message: string) => {
+    recognitionCompleteRef.current = null;
+    setInputError(message);
+    setInputStatus("error");
+  }, []);
 
   const resetVoiceSession = useCallback(() => {
     cancelListening();
@@ -453,15 +358,13 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
 
   useEffect(() => {
     return () => {
-      cancelRequestedRef.current = true;
       recognitionSessionRef.current += 1;
       speechSessionRef.current += 1;
       interruptionSessionRef.current += 1;
-      recognitionRef.current?.abort();
+      recognitionRef.current?.cancel();
       interruptionDetectorRef.current?.stop();
       interruptionDetectorRef.current = null;
       recognitionCompleteRef.current = null;
-      recognitionTranscriptRef.current = "";
       if (outputSupported) {
         window.speechSynthesis.cancel();
       }
@@ -473,11 +376,14 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
     inputStatus,
     inputError,
     transcript,
+    transcriptFinality,
+    lastUtterance,
     setTranscript,
     startListening,
     stopListening,
     cancelListening,
     clearTranscript,
+    reportInputConcern,
     outputSupported,
     outputStatus,
     outputError,

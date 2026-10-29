@@ -937,6 +937,14 @@ function App() {
     needsAdvance:
       (canStartAgent || canResumeAgent) && hasUnansweredAgentField,
     latestAssistantTurn,
+    activeField: activeAgentField
+      ? {
+          id: activeAgentField.id,
+          label: activeAgentField.label,
+          question: activeAgentField.question,
+          type: activeAgentField.type,
+        }
+      : null,
     activeFieldId: agentActiveFieldId,
     activeQuestion: activeAgentQuestion,
     hasPendingProposal: pendingProposal !== null,

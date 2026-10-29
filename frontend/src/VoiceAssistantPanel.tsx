@@ -174,7 +174,15 @@ export default function VoiceAssistantPanel({
 
       {voice.transcript || isCapturing ? (
         <label className="voice-transcript" htmlFor="voice-transcript">
-          <span>{isCapturing ? "What I hear" : "What I heard"}</span>
+          <span>
+            {isCapturing
+              ? voice.transcriptFinality === "interim"
+                ? "What I hear · interim"
+                : "What I hear"
+              : voice.transcriptFinality === "final"
+                ? "What I heard · final"
+                : "What I heard"}
+          </span>
           <textarea
             id="voice-transcript"
             value={voice.transcript}
@@ -220,7 +228,8 @@ export default function VoiceAssistantPanel({
         <small className="voice-confirmation-note">
           During assistant speech, temporary local sound detection lets you
           interrupt by talking. Transcription still runs for one visible turn
-          at a time; typing and Answer now remain available.
+          at a time through Deepgram Nova-3; typing and Answer now remain
+          available. Formless does not retain audio or speech metadata.
         </small>
       )}
 
@@ -333,7 +342,7 @@ function getInterviewStatusCopy(
     processing: {
       label: "Preparing transcript",
       detail:
-        "The browser is finishing the visible transcript. No form value has changed.",
+        "Deepgram is finalizing the visible transcript. No form value has changed.",
     },
     waiting_agent: {
       label: "Assistant thinking",
@@ -364,7 +373,7 @@ function getInterviewStatusCopy(
     unsupported: {
       label: "Typing available",
       detail:
-        "Voice input is unavailable in this browser or connection. The typed interview and proposal controls still work.",
+        "Streaming voice input is unavailable in this browser or connection. The typed interview and proposal controls still work.",
     },
   };
 

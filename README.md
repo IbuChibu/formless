@@ -32,24 +32,39 @@ npm run dev
 
 Open `http://localhost:5173`. The header reports only whether the FastAPI
 backend is reachable. A successful `GET /health` response does not prove that
-Nebius Token Factory or Tavily is configured; provider configuration is checked
-when the corresponding assistant feature is used. Manual PDF extraction,
-editing, filling, and download remain available if an AI provider is
+Nebius Token Factory, Tavily, or Deepgram is configured; provider configuration
+is checked when the corresponding assistant feature is used. Manual PDF
+extraction, editing, filling, and download remain available if a provider is
 unavailable.
 
-Voice input uses the browser's speech-recognition capability and therefore
-requires a supported browser on `localhost` or HTTPS. After uploading a form,
-select **Start conversation** once. The assistant reads the visible question,
-and temporarily analyses local microphone levels while speaking. Start talking
-to interrupt it hands-free, or use **Answer now**; either route opens the same
-one-turn recognizer, displays the transcript, and sends it through the same
-Form Agent path as typed text. Level detection does not transcribe, store, or
-upload audio. A proposal still changes nothing until it is explicitly
-confirmed; while its review card is visible, phrases such as `confirm that`,
-`put that in`, `no`, and `skip this` use the same validated events as the
-buttons. **Pause** and **End** stop microphone capture and spoken output without
-changing the form. Typing and visible proposal controls remain available when
-voice is unsupported, denied, interrupted, or misheard.
+For voice input, add a Deepgram key with Member permission to `backend/.env`:
+
+```env
+DEEPGRAM_API_KEY=your_server_side_key
+DEEPGRAM_BASE_URL=https://api.deepgram.com/v1
+```
+
+Never put this key in a `VITE_` variable. FastAPI exchanges it for a temporary
+browser credential only when a user explicitly starts listening.
+
+Voice input uses Deepgram Nova-3 streaming and requires a browser with
+`getUserMedia`, `MediaRecorder`, and WebSocket support on `localhost` or HTTPS.
+After uploading a form, select **Start conversation** once. The assistant reads
+the visible question and temporarily analyses local microphone levels while
+speaking. Start talking to interrupt it hands-free, or use **Answer now**;
+either route opens the same one-turn recognizer. Interim words remain visibly
+labelled, and only one finalized utterance enters the same Form Agent path as
+typed text. `window.SpeechRecognition` is not required.
+
+Formless does not retain audio, temporary tokens, or word-confidence metadata.
+Streaming requests set `mip_opt_out=true`; according to Deepgram's
+[data-handling documentation](https://developers.deepgram.com/trust-security/your-data),
+opted-out audio and transcripts are retained only as needed to process the
+request, while non-content request metadata and usage logs are still recorded.
+A proposal still changes nothing until explicitly confirmed. **Pause** and
+**End** release microphone and socket resources without changing the form.
+Typing and visible proposal controls remain available when voice is
+unconfigured, unsupported, denied, disconnected, or uncertain.
 
 ## Checks
 
@@ -62,6 +77,7 @@ python -m evaluations.form_agent_transcript_evaluation
 cd ../frontend
 npm run test:workspace-layout
 npm run test:voice-interruption
+npm run test:deepgram-speech
 npm run build
 ```
 

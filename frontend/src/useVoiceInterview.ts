@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  nameConfidenceConcern,
+  recognitionKeyterms,
+  type VoiceRecognitionField,
+} from "./deepgramSpeechRecognition";
 import type { VoiceAssistantControls } from "./useVoiceAssistant";
 
 export type VoiceInterviewStatus =
@@ -28,6 +33,7 @@ type VoiceInterviewOptions = {
   canSendMessage: boolean;
   needsAdvance: boolean;
   latestAssistantTurn: AssistantTurn | null;
+  activeField: VoiceRecognitionField | null;
   activeFieldId: string | null;
   activeQuestion: string | null;
   hasPendingProposal: boolean;
@@ -168,9 +174,16 @@ export default function useVoiceInterview(
     setBaseStatus(
       current.hasPendingProposal ? "awaiting_confirmation" : "starting",
     );
-    current.voice.startListening((transcript) => {
-      submitTranscriptRef.current(transcript);
-    });
+    const keyterms = recognitionKeyterms(current.activeField);
+    current.voice.startListening((utterance) => {
+      const concern = nameConfidenceConcern(current.activeField, utterance);
+      if (concern) {
+        current.voice.reportInputConcern(concern);
+        setBaseStatus("error");
+        return;
+      }
+      submitTranscriptRef.current(utterance.transcript);
+    }, keyterms);
   }, []);
 
   const continueAfterSpeech = useCallback(() => {

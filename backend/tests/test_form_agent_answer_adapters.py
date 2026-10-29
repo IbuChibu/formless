@@ -115,6 +115,29 @@ def test_name_removes_only_clear_conversational_framing(
     assert result == MatchedAnswer(expected)
 
 
+@pytest.mark.parametrize(
+    ("answer", "expected", "original"),
+    [
+        ("A-K-H-O-O-N", "AKHOON", "A-K-H-O-O-N"),
+        ("A K H O O N", "AKHOON", "A K H O O N"),
+        ("My surname is A. K. H. O. O. N.", "AKHOON", "A. K. H. O. O. N."),
+        ("Mary-Jane O'Neill", "Mary-Jane O'Neill", "Mary-Jane O'Neill"),
+        ("Jean Luc Picard", "Jean Luc Picard", "Jean Luc Picard"),
+    ],
+)
+def test_name_adapter_joins_only_explicit_letter_by_letter_spelling(
+    answer: str,
+    expected: str,
+    original: str,
+) -> None:
+    result = interpret_answer(
+        _field(field_id="surname", label="Surname"),
+        answer,
+    )
+
+    assert result == MatchedAnswer(expected, original_value=original)
+
+
 def test_free_text_removes_only_clear_conversational_framing() -> None:
     text_result = interpret_answer(
         _field(field_id="label", label="Expense item description"),
