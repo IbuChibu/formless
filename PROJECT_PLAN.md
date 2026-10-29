@@ -85,6 +85,12 @@ Required technology:
 - Milestone 9 polish and reliability is complete: accessibility, responsive
   layout, non-destructive recovery, correction, and the supported-fixture
   workflow are covered by focused checks and the full regression suite
+- Milestone 9.2 Deepgram streaming and Milestone 9.2.1 Nemotron-first
+  orchestration are implemented but still require their recorded live/manual
+  completion evidence
+- the next planned work is Milestones 9.2.2 through 9.2.5: context-rich
+  conversational control, a continuous hands-free session, a fixed-viewport
+  workspace, and an integrated human-helper validation gate
 - deployment has not started; persistence remains outside the current plan
 
 ---
@@ -4020,30 +4026,32 @@ Verified outcomes recorded 16–17 October 2026:
 
 # Future milestone sequence
 
-Milestones 1 through 9 are complete. The remaining hackathon work must follow
-this order so that product changes are validated before deployment and the
-deployed build is frozen before submission:
+The base Milestones 1 through 9 are complete. The later Milestones 9.1, 9.1.1,
+9.2, and 9.2.1 have implementation evidence recorded above, with the named
+manual/live work still open where their status says so. The remaining product
+work must follow this order so conversation meaning, voice turn-taking, and
+layout can be tested separately before they are judged together:
 
-1. Milestone 9.1 — Support-aware introduction
-2. Milestone 9.1.1 — Natural-language turn interpretation
-3. Milestone 9.2 — Deepgram streaming speech and identity-field handling
-4. Milestone 9.2.1 — Nemotron-first conversational orchestration
+1. Milestone 9.2.2 — Context-rich Nemotron conversation and natural review
+2. Milestone 9.2.3 — Continuous hands-free voice session
+3. Milestone 9.2.4 — Fixed-viewport conversational workspace
+4. Milestone 9.2.5 — Integrated human-helper workflow validation
 5. Milestone 9.3 — One-language bilingual assistance pilot, only if its go/no-go
-   gate passes
+   gate passes and does not displace release validation
 6. Milestone 9.4 — Hero workflow validation and release freeze
 7. Milestone 10 — Deployment
 8. Milestone 11 — Hackathon submission
 
-Recommended schedule for the 30 October 2026 deadline:
-- 18–19 October: Milestone 9.1
-- 19–20 October: Milestone 9.1.1
-- 20–22 October: Milestone 9.2
-- 22 October: Milestone 9.3 language/reviewer go/no-go decision and, only if
-  approved, a tightly bounded implementation; otherwise defer it
-- 23–24 October: Milestone 9.4
-- 24–26 October: Milestone 10
-- 27–29 October: Milestone 11
-- 30 October: submission and contingency buffer, not new feature work
+Sequencing rule recorded 29 October 2026:
+- implement and evaluate one of Milestones 9.2.2 through 9.2.4 at a time
+- do not hide a failed conversation, voice, safety, or layout criterion by
+  combining all three changes in one unmeasured implementation pass
+- Milestone 9.2.5 is the mandatory integration gate before hero-workflow freeze
+- because these are substantive product changes immediately before the stated
+  deadline, defer Milestone 9.3 rather than weakening safety, testing, release,
+  deployment, or submission evidence if time is insufficient
+- deadline pressure does not authorize skipping explicit confirmation, live
+  provider checks, source-PDF preservation, or the no-invention boundary
 
 Milestones 12 onward are a deferred post-hackathon roadmap. They are recorded
 so near-term architecture does not block the product direction, but they are
@@ -4953,6 +4961,720 @@ Automated implementation outcome recorded 29 October 2026:
   with only the existing non-blocking Vite chunk-size advisory
 - the required configured-model and browser/Deepgram manual runs above have not
   yet been recorded, so this milestone is implemented but not marked complete
+
+# Milestone 9.2.2 — Context-rich Nemotron conversation and natural review
+
+Status: NOT STARTED
+
+Problem to solve:
+The assistant now asks Nemotron to interpret eligible natural messages, but a
+real session can still alternate between model-written replies and older
+deterministic templates. The model does not consistently receive the complete
+active-question and pending-review context it needs, pending proposal decisions
+remain unusually rigid, and conservative fallback behavior can look like a
+form validator rather than a person helping beside the user. This is visible in
+repeated field headings, `You said ... I prepared ...` narration, explanation
+requests that initially repeat the question, noisy name proposals, dates
+accepted in the wrong displayed format, and dropdown guesses that invent facts.
+
+Goal:
+Make one bounded Nemotron decision the conversational authority for every
+natural turn in the guided interview, including proposal review, while keeping
+all state-changing effects closed, structurally validated, and explicitly
+confirmed. Give Nemotron enough real form context to understand the user's
+meaning and respond naturally; use deterministic code to enforce what may
+change, not to script how the assistant speaks.
+
+Target turn flow:
+
+```text
+latest typed or finalized voice message
+        +
+active question, field constraints, finite options, pending review,
+canonical progress, relevant form map, assistance preferences, recent history
+        |
+        v
+one bounded Nemotron conversational decision
+        |
+        +-- natural assistant reply
+        +-- closed intent and exact user evidence
+        +-- optional candidate values tied to real field IDs
+        +-- explicit ambiguity / clarification reason
+        |
+        v
+deterministic structural and state validation
+        |
+        +-- no effect / focused clarification / reviewable proposal
+        +-- explicit review decision only when the latest words clearly say so
+        |
+        v
+canonical state changes only through an allowed closed effect
+```
+
+Context supplied to Nemotron:
+- the latest user message as the authoritative turn evidence
+- the current conversation phase and current support-setup step
+- the active field's stable ID, real question, user-facing label, plain-language
+  help text when available, section, page, and field type
+- every actual finite option for dropdown, radio, or checkbox fields, including
+  the distinction between display text and stored AcroForm value
+- deterministic field constraints such as required date representation,
+  numeric shape, multiline capability, and unsupported/placeholder values
+- the currently pending proposal or replacement, its original and prepared
+  values, and the previous confirmed value when a correction is in progress
+- canonical confirmed, skipped, proposed, and unanswered counts, plus only the
+  minimum referenced canonical value needed for a correction or review answer
+- a compact ordered map of supported questions so volunteered facts,
+  navigation, and references such as `the address question` remain grounded
+- bounded recent conversation history, with the active unresolved exchange
+  retained explicitly even if it falls outside the ordinary history window
+- the user's explicit session-only assistance preferences and current
+  interaction mode
+- reviewed-guidance availability and source metadata only when the existing
+  guidance policy has selected it
+
+Context boundaries:
+- do not send raw PDF bytes, rendered pages, audio, temporary speech tokens,
+  hidden unsupported fields, or every confirmed personal answer
+- do not rely on model memory outside the supplied request
+- treat form text, history, assistance notes, user text, and external guidance
+  as bounded untrusted data
+- keep the prompt within explicit field, option, history, candidate, and
+  character limits and test those limits
+
+Nemotron decision contract:
+- distinguish answer, several supplied answers, correction, explanation,
+  simpler explanation, uncertainty, side question, frustration, pause,
+  assistance-preference change, progress/review, navigation, skip, start,
+  proposal confirmation, proposal rejection, proposal edit, repeat/read-back,
+  and unrelated conversation
+- return a concise natural reply separately from any candidate or requested
+  workflow operation
+- cite an exact excerpt from the latest message for every proposed personal
+  fact and every review decision
+- reference only real supplied field IDs and exact finite values from the
+  supplied schema
+- report what is ambiguous or missing instead of filling the gap with a likely
+  answer
+- never return a frontend effect, call Tavily, write canonical state, confirm a
+  value itself, or call the PDF Service
+
+Conversational behavior:
+- answer the latest message first, then return to the form only when useful
+- vary sentence structure naturally; do not require `You said`, `I prepared`,
+  `Please review and confirm`, or a repeated workflow menu
+- let the active-question card carry the formal field heading instead of
+  repeating it at the start of every assistant message
+- make a proposal sound like normal spoken review, for example `Got it — John
+  Michael. Is that exactly how it appears on your official documents?`
+- after confirmation, acknowledge briefly and ask the next real question, for
+  example `Thanks. And what would you like me to call you?`
+- adapt detail, pace, and vocabulary from the explicit assistance preferences
+  and recent repair attempts without diagnosing the user
+- if the user asks again, materially simplify or explain a different part
+  rather than repeating substantially the same sentence
+- preserve the user's uncertainty and never become more precise than the user
+  was
+- keep proposal details and transformations in the separate review card even
+  when the spoken reply is concise
+
+Finite-choice and constrained-field behavior:
+- give Nemotron the complete available option list and ask it to distinguish
+  an answer that selects an option from information that is merely related
+- map an ordinary paraphrase to an exact option only when the user's words
+  establish that option without an unsupported assumption
+- when the answer establishes only part of the distinction, ask one focused
+  question that explains what still matters
+- `I live by myself` must not become `Living with family or friends`, `Sole
+  tenant`, or `Owner-occupier`; it should lead to a tenure-focused follow-up
+- `Solo tenant` may become a reviewable `Sole tenant` candidate because the
+  supplied option and user evidence establish one unambiguous match
+- an input such as `05/19/2011` for a field explicitly requiring `DD/MM/YYYY`
+  must be clarified rather than stored in an incompatible or guessed format
+- checkbox answers may map natural agreement or disagreement to the supplied
+  boolean state, but remain pending until explicit review confirmation
+
+Name and identity behavior:
+- treat duplicated words, mixed normal speech and letter spelling, and
+  conflicting name variants as uncertainty rather than combining everything
+  into a malformed proposal
+- when one component is uncertain, ask for only that component to be repeated
+  or spelled
+- preserve the exact letters supplied; capitalization may be prepared visibly,
+  but Nemotron must not silently repair an unfamiliar name
+- let Deepgram confidence remain supporting turn evidence, not authority to
+  guess, reject, or confirm an identity value
+- keep every name proposal and correction behind the existing visible review
+  and explicit-confirmation boundary
+
+Natural proposal-review behavior:
+- include pending proposal context in the model decision so a spoken or typed
+  review response is interpreted against the exact value visibly awaiting
+  review
+- clear phrases such as `yes, that is correct`, `confirm that`, `no, reject
+  it`, `say it again`, or `change the surname to ...` may request an existing
+  closed review event
+- deterministic validation must verify the phase, pending field, pending
+  value, exact latest-turn evidence, and allowed decision before returning the
+  corresponding effect
+- vague acknowledgements, unrelated answers, low-confidence transcripts, and
+  near-matches such as a recognition result of `permit` must not confirm a
+  proposal; the assistant should ask a short review-specific clarification
+- a correction creates a new reviewable replacement and never overwrites the
+  current confirmed value before separate confirmation
+- duplicate or stale confirmations remain no-ops with a natural recovery
+  response
+
+Fallback and observability:
+- record privacy-safe development diagnostics showing whether a turn used the
+  primary Nemotron decision, a corrected model response, or provider fallback
+- diagnostics may include phase, intent category, validation reason, latency,
+  and fallback category, but must not log user text, field values, PDF content,
+  API keys, or personal answers
+- provider or parsing failure may use a grounded fallback, but it should ask a
+  useful question and must not silently switch to a misleading proposal
+- tests must be able to assert the selected route so old deterministic wording
+  cannot appear unpredictably without a visible failure reason
+- manual completion and direct PDF editing remain available when Nemotron is
+  unavailable
+
+Acceptance criteria:
+- every eligible natural turn in support setup, answering, clarification,
+  replacement, and proposal review receives the bounded Nemotron decision
+  before conversational wording is chosen
+- Nemotron receives the complete active-field constraints and every valid
+  finite option, plus bounded form, state, preference, pending-review, and
+  history context
+- deterministic code validates provenance, IDs, types, options, phases, and
+  effects without requiring a second general-purpose semantic interpretation
+- the assistant's normal reply is natural and does not have a required canned
+  opening, closing, field heading, or confirmation paragraph
+- explanation requests are answered on the first attempt and remain anchored
+  to the current question
+- repeated explanation requests produce materially simpler or differently
+  focused help
+- insufficient information about a dropdown distinction produces a focused
+  follow-up and never an invented option or invented factual rationale
+- incompatible or ambiguous dates, names, numbers, and identifiers produce a
+  targeted clarification rather than an invalid proposal
+- clear natural proposal decisions use the existing closed effects; vague or
+  misrecognized review speech cannot confirm or reject anything
+- proposals and replacements remain visibly pending, and canonical values and
+  PDF bytes change only after an allowed explicit confirmation effect
+- route diagnostics identify semantic fallback without retaining user content
+  or credentials
+- provider failure, malformed output, and correction failure leave the active
+  field, pending proposal, canonical values, source PDF, and manual workflow
+  intact
+- the complete backend, evaluation, PDF, frontend, voice, safety, and
+  human-helper regression gates pass
+
+Required automated testing:
+- prompt/context tests for active question, help text, field constraints,
+  finite options, pending proposal, relevant history, assistance preferences,
+  compact form map, and all configured context bounds
+- parser tests for every closed intent, exact evidence, candidate type,
+  clarification reason, review decision, malformed JSON, extra keys, unknown
+  fields, invalid options, prompt injection, and false saved/confirmed claims
+- state/effect tests for natural confirmation, rejection, edit, repeat, skip,
+  stale review, duplicate review, ambiguous acknowledgement, and near-match
+  speech with no unintended mutation
+- transcript tests based on the observed sessions, including repeated/spelled
+  names, first-attempt `What does that mean?`, progressively simpler wording,
+  `05/19/2011` in a `DD/MM/YYYY` field, `I live by myself`, `Solo tenant`, and
+  a proposal followed by `Permit`
+- explicit safety assertions that `I live by myself` never maps to `Living
+  with family or friends` and never invents lease, ownership, household, or
+  co-tenant facts
+- diagnostics tests proving fallback metadata excludes user text, candidate
+  values, PDF content, and secrets
+- a fixed before/after live Nemotron comparison using the same suite digest
+- the complete established local regression gate
+
+Required live/manual testing:
+1. Restart the backend so the tested process contains this milestone's code.
+2. Repeat both observed sample and household-support transcripts using
+   synthetic values, once by typing and once through Deepgram final transcripts.
+3. Ask for the same explanation at least three ways and verify each response
+   addresses the latest wording without repeating a template.
+4. Exercise one checkbox, dropdown, date, number, full-name, correction,
+   pending-review confirmation, rejection, and ambiguous review utterance.
+5. Temporarily make Nemotron unavailable and verify the diagnostic route,
+   natural safe fallback, unchanged canonical state, and manual completion.
+6. Inspect logs and browser/backend network data to verify no personal answer,
+   PDF content, or credential was added to diagnostics.
+
+Completion evidence to record:
+- exact model ID, suite digest, scenario and turn counts, model-call count, and
+  latency distribution
+- before/after contextual relevance, first-turn explanation success,
+  clarification success, dropdown inference safety, repeated-response rate,
+  first-attempt proposal rate, and turns per confirmed field
+- complete synthetic transcripts for the two observed failure flows
+- privacy-safe fallback examples and provider-failure result
+- full regression output and remaining conversational limitations
+
+Do not implement:
+- direct model-to-state or model-to-PDF writes, silent confirmation, invented
+  personal facts, autonomous tools, or model-selected Tavily calls
+- another agent, agent framework, model debate, or second conversational model
+- unbounded history, server-side conversation persistence, analytics,
+  authentication, a database, OCR, XFA, or new PDF-format support
+- the continuous microphone lifecycle or fixed workspace planned for the next
+  milestones
+
+# Milestone 9.2.3 — Continuous hands-free voice session
+
+Status: NOT STARTED
+
+Problem to solve:
+Deepgram now provides a controlled one-utterance transcript, and the existing
+voice loop can speak, listen, and detect some interruptions. The experience
+still exposes the underlying turn machinery: users may have to press `Answer
+now`, retry listening after silence, or manually interrupt the helper. A person
+helping beside the user would keep the conversation open, notice when the user
+starts speaking, pause, listen, and continue without a button press on every
+turn.
+
+Goal:
+After one deliberate `Start conversation` action, maintain one visible,
+session-scoped hands-free interview until the user pauses, mutes, ends, changes
+the PDF, or encounters a non-recoverable permission/provider failure. Reuse
+Deepgram, browser speech synthesis, the existing Form Agent endpoint, and the
+same canonical state; do not create a voice agent or voice-owned form path.
+
+Session state model:
+- `inactive`: no microphone access and no automatic speech
+- `requesting_permission`: the explicit start is obtaining microphone access
+- `listening`: the user may speak naturally and interim text is visible
+- `finalizing`: the current utterance boundary is settling and deduplicating
+- `thinking`: one finalized transcript is being processed by the Form Agent
+- `speaking`: the already-visible assistant reply is being read aloud
+- `interrupted`: real user speech stopped playback and is opening recognition
+- `paused`: microphone and automatic turn-taking are stopped but state remains
+- `recovering`: one bounded automatic provider/session recovery is in progress
+- `ended`: resources are released; typing and manual editing remain available
+
+Hands-free turn rhythm:
+1. The user selects `Start conversation` once and grants microphone permission.
+2. If an assistant response is waiting, it is spoken; otherwise the session
+   begins listening.
+3. After speech completes, listening opens automatically without another
+   button press.
+4. Interim Deepgram text is visible but never dispatched as a form answer.
+5. A guarded pause finalizes exactly one utterance and sends it through the
+   existing message/review-event path.
+6. While the backend is thinking, the microphone cannot dispatch a second
+   conflicting turn; any supported queued interruption remains bounded and
+   visible.
+7. The returned assistant reply becomes visible before it is spoken.
+8. The loop resumes automatically until paused, muted, ended, or blocked.
+
+Interruption and barge-in:
+- while the assistant is speaking, keep a conservative local speech-activity
+  path capable of distinguishing probable user speech from playback leakage
+- sustained probable speech stops synthesis, acknowledges the interruption,
+  and begins the same Deepgram utterance path without requiring `Answer now`
+- a short noise, keyboard tap, cough, room sound, or the assistant's own voice
+  must not interrupt the response
+- if the user begins speaking during the final words, their utterance must not
+  be lost while audio resources transfer from playback monitoring to Deepgram
+- a manual `Interrupt` or `Answer now` control may remain as an accessibility
+  fallback, but it must not be required for normal hands-free use
+- spoken interruptions enter the same Nemotron decision and closed-effect
+  validation as typed turns
+
+Silence and recovery:
+- ordinary silence is not an error and does not display `I didn't hear any
+  speech` or require `Try listening again`
+- remain ready to listen after a normal silent interval, or gently reprompt
+  once after a documented longer interval without advancing the form
+- an empty or duplicate final transcript creates no Form Agent request and no
+  form effect
+- recover one transient Deepgram disconnect or expired temporary token
+  automatically when safe; repeated failure pauses the session with one clear
+  typed fallback
+- a low-confidence identity turn asks the targeted repeat-or-spell question and
+  automatically listens again
+- pause, mute, end, form replacement, permission revocation, provider failure,
+  browser backgrounding policy, and component unmount release every stream,
+  recorder, socket, audio node, timer, and speech callback
+
+Privacy and user control:
+- no microphone access occurs before explicit start or after pause/end
+- keep `Listening`, `Thinking`, `Speaking`, `Paused`, and recovery state visible
+  at all times without relying only on colour
+- provide permanent `Mute`, `Pause`, and `End` controls plus the typed composer
+- explain once that the microphone remains active only for the current visible
+  session and that Formless does not store audio
+- stream active-session audio directly to Deepgram with the existing temporary
+  credential and `mip_opt_out=true`; do not proxy it through the Form Agent
+- do not persist audio, confidence, interim text, token data, or timing after
+  the active turn/session boundary already documented by the voice adapter
+
+Acceptance criteria:
+- one explicit start is sufficient to complete multiple consecutive questions,
+  explanations, proposals, confirmations, corrections, and skips by voice
+- listening resumes automatically after every spoken assistant turn and safe
+  recoverable error without a retry button
+- ordinary silence neither advances the form nor ends the session
+- a real spoken interruption stops playback and captures exactly one utterance
+  without losing the beginning or sending playback audio as the user's answer
+- playback leakage and representative non-speech noises do not interrupt the
+  assistant or dispatch a transcript
+- only one finalized transcript or closed spoken review event reaches the Form
+  Agent per utterance
+- proposal confirmation still requires clear review language tied to the
+  visible pending proposal; vague or low-confidence speech cannot confirm
+- pause, mute, end, permission failure, provider failure, PDF replacement, and
+  unmount leave canonical state unchanged and release all audio resources
+- typing, proposal buttons, direct PDF editing, and the manual drawer remain
+  usable throughout and share the same state
+- no voice-specific agent, backend conversation endpoint, PDF path, state
+  store, runtime dependency, or persistence system is introduced
+- the complete voice, frontend, backend, conversation, safety, and PDF
+  regression gates pass
+
+Required automated testing:
+- session-state transition tests covering start, permission, listen, finalize,
+  think, speak, interrupt, resume, pause, mute, recover, end, reset, and unmount
+- fake-timer tests proving silence does not create an error, duplicate request,
+  automatic skip, or endless rapid reconnect loop
+- exactly-once dispatch tests across interim revisions, multiple final events,
+  pause/resume, barge-in, stale callbacks, reconnect, and rapid assistant turns
+- acoustic-policy tests for calibrated playback, real speech, short spikes,
+  steady noise, cough-like bursts, delayed resource transfer, and speech near
+  the end of playback
+- lifecycle tests proving all media tracks, recorders, sockets, audio contexts,
+  detectors, speech synthesis, timers, and callbacks are released
+- integration tests for voice answer, explanation, proposal, natural
+  confirmation, ambiguous confirmation, correction, skip, and low-confidence
+  name recovery through the existing typed Form Agent contract
+- accessibility tests for visible state labels and keyboard-operable mute,
+  pause, end, interrupt fallback, and typed input
+- the complete established local regression gate
+
+Required live/manual testing:
+1. On the target demo laptop and browser, start once and complete at least ten
+   consecutive turns without pressing a recording, interrupt, or retry button.
+2. Interrupt the assistant early, in the middle, and during its last words;
+   verify speech stops only for the user's actual voice and no words are lost.
+3. Introduce representative room noise, typing, a cough, and speaker playback;
+   verify none is treated as a user turn.
+4. Remain silent through the configured interval, then answer normally without
+   selecting retry.
+5. Exercise pause/resume, mute/unmute, end/restart, denied permission, a
+   disconnected network, and one expired/rejected temporary token.
+6. Complete a sample-form voice path containing an explanation, uncertain name,
+   spelled correction, checkbox, rejection, confirmation, and final review.
+7. Inspect browser indicators and network traffic to confirm microphone access
+   stops on pause/end and audio goes only to Deepgram during the visible session.
+
+Completion evidence to record:
+- browser, operating system, microphone/speaker arrangement, Deepgram model,
+  locale, endpointing, silence, barge-in, and reconnect settings
+- ten-turn uninterrupted transcript with synthetic information
+- false-interruption rate, missed-interruption rate, duplicate/drop rate,
+  silence recovery result, final-transcript latency, and end-to-reply latency
+- lifecycle/resource-cleanup results and provider-failure fallback
+- known acoustic limitations and the demonstrated typed/manual fallback
+
+Do not implement:
+- microphone access before explicit start, background listening after end,
+  wake words, speaker identification, audio recording, stored transcripts,
+  telephony, or call history
+- Deepgram Voice Agent, Deepgram TTS, another speech provider, a second agent,
+  or direct voice-to-PDF writes
+- automatic confirmation from noise, vague acknowledgement, or model prose
+- the fixed workspace or release work planned for later milestones
+
+# Milestone 9.2.4 — Fixed-viewport conversational workspace
+
+Status: NOT STARTED
+
+Problem to solve:
+The loaded application contains all required controls, but users can still
+scroll the whole page between microphone state, current question, transcript,
+proposal review, composer, PDF position, and manual controls. That makes it
+hard to know whether Formless is listening, what question is active, where a
+proposal is waiting, or where to answer. The interface should behave like a
+stable document-and-helper workspace rather than a long dashboard.
+
+Goal:
+Keep the loaded experience inside the usable browser viewport. Give the PDF and
+assistant separate, predictable scrolling regions; keep voice/session state,
+current question, proposal review, and input reachable without whole-page
+scrolling; and preserve the existing single canonical state and accessibility
+fallbacks.
+
+Desktop layout:
+- use one compact application header for product, filename, progress, change
+  PDF, review, and download actions
+- place the PDF stage on the left and the assistant workspace on the right in a
+  stable approximately 58/42 split at representative laptop widths
+- size the loaded workspace from the available viewport height after the app
+  header; the document body itself should not become the primary scroll region
+- let PDF pages and page controls scroll or navigate only inside the PDF stage
+- let conversation history scroll only inside the assistant transcript region
+- keep the two panes mounted so navigation, page, transcript, proposal, and
+  canonical state are never recreated by layout changes
+
+Assistant layout:
+- pin one compact session bar at the top showing `Listening`, `Thinking`,
+  `Speaking`, `Paused`, `Needs attention`, or `Complete`, plus Mute, Pause, and
+  End when valid
+- keep section, page, progress, and the active question immediately below the
+  session bar rather than burying them in transcript history
+- display the most recent exchange and current conversational context in one
+  internally scrollable transcript, with the full transcript still accessible
+- place a pending proposal/replacement review adjacent to the latest relevant
+  exchange and ensure its confirmation controls cannot scroll out of reach
+  while awaiting a decision
+- pin the typed composer or context-valid review controls at the bottom of the
+  assistant pane above browser safe-area insets
+- show Deepgram interim text near the composer without duplicating it as a
+  permanent user message before finalization
+- keep guidance sources, provider details, full transcript controls,
+  assistance adjustments, and `Edit all fields` behind clearly labelled
+  secondary disclosures
+- avoid repeating the active field as both a large card heading and the first
+  line of every assistant bubble
+
+Mobile and constrained layouts:
+- retain the accessible `Assistant` / `Form` view switch and default to the
+  assistant during an active conversation
+- make the selected view use the available viewport height with its own
+  internal scroll region; do not place the full PDF above or below the helper
+- keep the voice state, current question, and composer/review action visible in
+  the first working view where practical
+- preserve PDF page, transcript position, pending proposal, current phase,
+  voice session, and canonical values when switching views or rotating the
+  device
+- account for mobile browser toolbars, virtual keyboards, and safe-area insets
+  without hiding the composer or creating horizontal overflow
+
+Visual and interaction priorities:
+- the current question, assistant response, listening state, and next valid
+  action are primary
+- the PDF remains the largest desktop visual surface and can be selected
+  directly without displacing the conversation
+- proposal review remains visually distinct from ordinary dialogue but uses
+  concise human wording rather than another dense card stack
+- advanced/manual controls stay collapsed by default and never compete with an
+  ordinary interview turn
+- use existing design tokens and components; do not introduce a component,
+  layout, animation, icon, or state-management framework
+- preserve visible focus, screen-reader status announcements, reduced motion,
+  comfortable text size, contrast, and keyboard reachability
+
+Acceptance criteria:
+- at 1280 by 720 and 1440 by 900, the loaded app fits the browser viewport and
+  does not require whole-page scrolling to see session state, active question,
+  current response, and the composer or pending review controls
+- the PDF and assistant have independent, predictable internal scrolling or
+  page navigation and neither scroll moves the other pane
+- microphone/listening state remains visible while reviewing conversation,
+  answering, or waiting for the backend
+- the active question and progress remain visible or immediately reachable
+  without searching through old messages
+- proposal review controls remain reachable without scrolling to a distant
+  part of the page and retain every explicit safety action
+- the composer remains reachable when the transcript grows, the PDF changes
+  page, the assistant speaks, guidance opens, or an error appears
+- on a 390 by 844 layout, no horizontal overflow occurs and switching between
+  Assistant and Form preserves all session, page, transcript, proposal, and
+  canonical state
+- opening guidance, transcript history, assistance settings, or the manual
+  drawer does not reset the active field or force the primary controls off
+  screen without a clear close/return path
+- keyboard focus order, Escape behavior, live regions, labels, and focus
+  restoration work across both panes and every disclosure
+- upload, extraction, PDF clicks, manual editing, typing, continuous voice,
+  proposals, confirmation, preview filling, review, and download retain their
+  existing shared-state behavior
+- no backend, Form Agent, PDF Service, provider, model, voice-policy, or runtime
+  dependency change is introduced by this milestone
+
+Required automated testing:
+- focused layout checks for viewport sizing, independent scroll owners, sticky
+  session/question/composer regions, proposal visibility, and collapsed
+  secondary controls
+- state-preservation checks across desktop resizing, mobile view switching,
+  rotation-like dimensions, long transcripts, long questions, guidance cards,
+  errors, proposals, and virtual-keyboard-sized viewports
+- accessibility checks for landmarks, status regions, keyboard order, visible
+  focus, Escape/close behavior, focus restoration, labels, and reduced motion
+- regression checks proving both panes remain mounted and no second canonical
+  field or conversation store was introduced
+- the complete established frontend and backend regression gate
+
+Required visual/manual testing:
+1. Capture and inspect upload, ready, listening, thinking, speaking, interrupted,
+   proposal, clarification, error, paused, complete, review, and manual-editor
+   states at 1280 by 720, 1440 by 900, and 390 by 844.
+2. Grow a transcript beyond 50 messages and verify only the transcript scrolls
+   while status, question, and answer/review controls remain reachable.
+3. Navigate a multi-page PDF while the voice session continues and verify the
+   assistant pane and canonical state do not move or reset.
+4. Open every secondary disclosure and test the full workflow by keyboard and
+   one screen-reader smoke path.
+5. Open the mobile virtual keyboard and verify the active input and latest
+   reply are not obscured.
+
+Completion evidence to record:
+- desktop and mobile screenshots for every named state
+- viewport and overflow measurements
+- keyboard and screen-reader smoke results
+- long-transcript, multi-page PDF, proposal, and virtual-keyboard results
+- focused layout/check commands and full regression output
+
+Do not implement:
+- new conversation intents, prompts, model behavior, voice capture policy, PDF
+  semantics, widget geometry, authentication, persistence, analytics, or
+  deployment
+- a new frontend framework, state library, component system, CSS framework, or
+  decorative redesign unrelated to the active task
+
+# Milestone 9.2.5 — Integrated human-helper workflow validation
+
+Status: NOT STARTED
+
+Why this gate is required:
+Milestones 9.2.2 through 9.2.4 deliberately separate conversation meaning,
+voice turn-taking, and presentation. Each can pass in isolation while the
+combined experience still feels robotic, loses an utterance, hides a proposal,
+or makes the user hunt for controls. This milestone changes only reproduced
+high-impact integration defects and establishes whether the product now feels
+like a patient person sitting beside the user.
+
+Goal:
+Validate one uninterrupted, voice-first, context-aware form-completion
+experience through the real frontend, Deepgram, Form Agent, Nemotron, PDF
+preview, proposal confirmation, correction, final review, and download paths.
+Use the evaluation harness and synthetic information to prove both human-helper
+quality and exact canonical form correctness before release freeze.
+
+Required fixed regression scenarios:
+- support introduction: `Easier`, `make things clearer`, and `just start`
+  produce natural setup behavior without requiring exact product wording
+- identity: normal, duplicated, mixed-spelling, unfamiliar, corrected, and
+  low-confidence names lead to a good proposal or targeted component question,
+  never a guessed identity value
+- explanation: the first `What does that mean?` explains the current field;
+  repeated `Say it more simply` turns materially simplify rather than repeat
+- date: spoken natural dates normalize only when unambiguous, and
+  `05/19/2011` is clarified for a `DD/MM/YYYY` field
+- dropdown: `I live by myself` asks about the missing tenure distinction and
+  can never select `Living with family or friends`; `Solo tenant` may propose
+  the exact `Sole tenant` option
+- side question: `What if they live there but do not share costs?` is answered
+  before returning naturally to the count question
+- review: clear voice confirmation, rejection, repeat, edit, and correction
+  operate through closed effects; `Permit`, vague agreement, background noise,
+  and stale speech do not confirm anything
+- hands-free rhythm: at least ten consecutive turns complete after one start,
+  including a real interruption and a silent interval, without recording,
+  interrupt, or retry button presses
+- layout: the listening state, active question, latest response, proposal, and
+  composer remain visible or immediately reachable throughout a long transcript
+  and multi-page PDF
+- recovery: one provider failure, network interruption, denied microphone,
+  and paused session preserve the PDF and canonical state and allow typed/manual
+  completion
+
+Evaluation harness expansion:
+- create a versioned `human-helper-experience-v2` suite from the observed
+  transcripts and real extracted fixture schemas using synthetic facts only
+- retain deterministic correctness and human-helper gates as separate results
+- add route-selection, first-turn-help, progressive-simplification,
+  finite-choice-safety, ambiguous-format, review-understanding,
+  hands-free-continuity, false-interruption, silence-recovery, and
+  control-hunting measurements
+- score natural dialogue through observable behavior rather than exact sentence
+  matching: addresses latest message, acknowledges useful content, asks only
+  the missing distinction, avoids repetition, uses bounded context, and offers
+  a useful next step
+- retain exact effect, proposal, state, confirmation, invention, source, and
+  PDF assertions as hard correctness requirements
+- save full synthetic transcripts, route/fallback category, expected and actual
+  state, visible UI state, timing, scores, and failure reasons
+- compare only identical suite digests and model/provider configurations
+
+Acceptance criteria:
+- every scheduled deterministic turn completes with exact expected canonical
+  state and zero invalid actions, invalid proposals, invented facts, invented
+  purposes, unsafe transformations, or confirmation-boundary failures
+- finite-choice safety is 100%; no related-but-insufficient utterance becomes
+  an option without a focused clarification
+- first-turn explanation success, latest-message adherence, context retention,
+  progressive-simplification, clarification success, interruption recovery,
+  and side-question recovery are each at least 90%
+- repeated-response, redundant-question, unnecessary workflow-push,
+  contradiction, false-interruption, duplicate-dispatch, and dropped-utterance
+  rates are each at most 5%, with zero allowed for unsafe confirmation or
+  invented personal information
+- at least 90% of review decisions are understood on the first attempt, while
+  ambiguous review language remains non-mutating
+- the ten-turn hands-free scenario completes after one explicit start without
+  mandatory record, interrupt, or retry actions
+- the loaded desktop and mobile workflows do not require whole-page control
+  hunting and retain one canonical state across PDF, conversation, voice, and
+  manual editing
+- sample and household-support fixtures complete from upload through reopened
+  download with source bytes unchanged; one additional supported real-world
+  fixture completes its selected hero subset
+- provider, microphone, and network failures preserve confirmed values,
+  pending review, transcript, current PDF, and manual fallback where technically
+  possible
+- any reproduced safety, data-loss, false-confirmation, invented-option, or
+  source-PDF mutation failure blocks completion regardless of naturalness score
+- the complete local regression gate, live provider suite, frontend visual QA,
+  and reopened-PDF checks pass
+
+Required automated testing:
+- run the complete backend, PDF, Form Agent, transcript, safety, human-helper,
+  Deepgram, interruption, workspace, accessibility, and production-build gates
+- run `human-helper-experience-v2` first with deterministic provider doubles
+  and then explicitly with configured Nemotron for the model-handled scenarios
+- reopen every generated fixture PDF with `pypdf`, assert the demonstrated
+  stored values, and prove each source fixture's bytes are unchanged
+- save a digest-checked baseline/candidate comparison for every targeted repair
+- scan tracked files, frontend output, and diagnostic artifacts for provider
+  secrets or synthetic values that should remain local
+
+Required end-to-end manual testing:
+1. Complete the sample fixture from upload through reopened download by voice
+   after one start, using a noisy/spelled name, explanation, rejection,
+   correction, checkbox, interruption, silence, and final review.
+2. Complete the household-support fixture with natural answers, an ambiguous
+   date, `I live by myself`, a side question, skip/reopen, dropdown selection,
+   and a corrected confirmed value.
+3. Run the selected subset of one real official fixture and verify every shown
+   question, option, prepared value, PDF update, and downloaded result.
+4. Repeat a shorter typed-only path and verify identical transcripts yield the
+   same effects and canonical values as voice.
+5. Perform the flows at laptop and mobile sizes, with a 50-message transcript,
+   keyboard-only navigation, and a screen-reader smoke pass.
+6. Deny microphone permission and interrupt Nemotron, Deepgram, backend, and
+   network availability one at a time; demonstrate recovery without starting
+   the form over.
+
+Completion evidence to record:
+- suite version/digest, Git revision, model ID, Deepgram model/locale, fixture
+  versions, browser/OS, scenario count, turn count, and field coverage
+- full deterministic and live metric tables plus fixed/new/unchanged failures
+- the three complete synthetic end-to-end transcripts and reopened-PDF results
+- voice continuity, false/missed interruption, duplicate/drop, latency, layout,
+  accessibility, and recovery results
+- remaining known limitations stated plainly enough for README and demo use
+
+Do not implement:
+- unrelated features, additional languages, new PDF types, authentication,
+  persistence, analytics, a database, Docker, or deployment
+- a second agent, model debate, direct model effects, silent confirmation, or
+  weakened safety thresholds merely to improve conversational scores
+- Milestone 9.3, 9.4, deployment, or submission work before this integration
+  gate actually passes
 
 # Milestone 9.3 — One-language bilingual assistance pilot
 
