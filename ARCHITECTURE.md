@@ -179,7 +179,12 @@ fields. Apart from the local pause command, finalized speech is sent as the
 existing `message` event so the same context-rich turn interpretation handles
 answers, explanations, review decisions, and corrections. A correction creates
 a new visible proposal and still requires separate confirmation. Proposal-card
-buttons remain a deterministic accessibility fallback.
+buttons remain a deterministic accessibility fallback. When that message is an
+unmistakable bounded confirmation command such as `Confirm` and a current
+proposal is visibly pending, the backend may resolve the existing closed
+confirmation effect without depending on a model response. Conversational,
+ambiguous, negated, stale, or near-match language still uses semantic
+interpretation and cannot mutate the form by lexical similarity alone.
 
 The long-lived `DEEPGRAM_API_KEY` is loaded only by FastAPI. The browser asks
 `POST /voice/deepgram/token` for a temporary credential immediately before a

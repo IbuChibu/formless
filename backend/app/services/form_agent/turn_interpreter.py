@@ -888,6 +888,67 @@ def _pending_review_action(
     return None
 
 
+_EXACT_CONFIRM_REVIEW_PHRASES = {
+    "yes",
+    "yes please",
+    "confirm it",
+    "confirm that",
+    "confirmed",
+    "correct",
+    "that is correct",
+    "that's correct",
+    "looks good",
+    "go ahead",
+    "use that",
+    "put that in",
+}
+
+
+def explicit_pending_review_action(
+    request: FormAgentRequest,
+) -> Optional[FormAgentAction]:
+    """Resolve only unmistakable confirmation commands without a model call.
+
+    Proposal confirmation is a closed state transition. Exact commands such as
+    ``Confirm`` remain safe to handle when Nemotron is unavailable or returns
+    malformed output, while near matches and conversational sentences still go
+    through semantic interpretation.
+    """
+
+    if (
+        request.conversation_state.phase
+        not in {"awaiting_confirmation", "awaiting_replacement_confirmation"}
+        or not isinstance(request.event, MessageEvent)
+    ):
+        return None
+    active_field = _active_field(request)
+    pending = request.conversation_state.pending_proposal
+    if active_field is None or pending is None:
+        return None
+
+    normalized = re.sub(
+        r"[^a-z']+",
+        " ",
+        request_message(request).casefold(),
+    ).strip()
+    words = normalized.split()
+    repeated_confirm = bool(words) and all(
+        word in {"confirm", "confirmed"} for word in words
+    )
+    if not repeated_confirm and normalized not in _EXACT_CONFIRM_REVIEW_PHRASES:
+        return None
+
+    return confirmed_action(
+        active_field,
+        pending.value,
+        request.fields,
+        replacement=(
+            request.conversation_state.phase
+            == "awaiting_replacement_confirmation"
+        ),
+    )
+
+
 _EXPLICIT_CONFIRM_REVIEW = re.compile(
     r"\b(?:yes|confirm|confirmed|correct|right|looks?\s+good|go\s+ahead|"
     r"use\s+that|put\s+that\s+in|that(?:'s|\s+is)\s+(?:fine|right|correct))\b",

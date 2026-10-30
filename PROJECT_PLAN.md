@@ -5236,8 +5236,9 @@ Do not implement:
 
 Automated implementation outcome (2026-10-29):
 - eligible support-setup, answer, clarification, replacement, and pending-review
-  messages now reach one bounded Nemotron turn decision before conversational
-  wording is selected
+  messages reach one bounded Nemotron turn decision before conversational
+  wording is selected, except an exact closed confirmation command that can be
+  resolved safely without provider availability
 - the turn context includes the full active question/help/type/page/section,
   all schema-bounded finite options, explicit field constraints, pending review,
   canonical progress, assistance preferences, eight bounded history messages,
@@ -5246,7 +5247,9 @@ Automated implementation outcome (2026-10-29):
   requests remain behind exact latest-message evidence, phase/pending-value
   validation, existing closed effects, and visible proposal review
 - finalized Deepgram speech now follows the same message route instead of a
-  frontend review phrase table; only the local pause command remains local
+  frontend review phrase table; the backend recognizes only unmistakable
+  bounded confirmation commands while ordinary review language remains model
+  interpreted, and only the pause command remains local to voice
 - focused constraints reject incompatible numeric date order, unsupported
   housing inference, and duplicated/conflicting mixed spoken-spelled names while
   allowing a clean deliberately spelled component and exact finite-option match
@@ -5472,6 +5475,20 @@ Automated implementation outcome (2026-10-29):
   ten-turn, opening-word accuracy, room-noise, interruption-timing, permission,
   and network evidence remains required before this milestone can be marked
   complete
+
+Manual-feedback reliability fix (2026-10-30):
+- a real hands-free trial showed that the compact workspace hid Deepgram's live
+  words while a proposal was pending and that exact spoken `Confirm` could fail
+  when the turn-interpreter provider response was unavailable or malformed
+- live interim and final recognized text now has a pinned strip immediately
+  above answer/review controls, remains visible during pending review, and can
+  be corrected before resubmission
+- exact `Confirm` and repeated `Confirm. Confirm.` messages now use the existing
+  closed backend confirmation transition without a model call; `Permit` and
+  ambiguous review language remain non-mutating
+- focused exact-command, state-machine, workspace, continuous-voice, Deepgram,
+  interruption, reliability, preference, and production-build checks pass; a
+  repeat live voice run remains required before completion
 
 # Milestone 9.2.4 — Fixed-viewport conversational workspace
 

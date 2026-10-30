@@ -79,6 +79,7 @@ from .web_guidance import (
 )
 from .turn_interpreter import (
     action_from_interpretation,
+    explicit_pending_review_action,
     interpret_turn,
     pending_review_fallback_action,
     should_interpret_turn,
@@ -154,6 +155,11 @@ class FormAgentService:
             ),
             None,
         )
+        if self._turn_interpretation_enabled:
+            explicit_review_action = explicit_pending_review_action(request)
+            if explicit_review_action is not None:
+                _log_turn_route(request, "deterministic_review_command")
+                return response_for_action(explicit_review_action, request)
         requested_prose_candidate = (
             prose_polish_candidate(active_field, request_message(request))
             if active_field is not None

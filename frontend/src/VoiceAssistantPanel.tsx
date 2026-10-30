@@ -29,19 +29,6 @@ export default function VoiceAssistantPanel({
     voice.interruptionStatus,
     voice.interruptionError,
   );
-  const isCapturing = [
-    "requesting_permission",
-    "listening",
-    "processing",
-  ].includes(interview.status);
-  const transcriptIsEditable =
-    Boolean(voice.transcript) && interview.status !== "listening";
-  const canSubmitTranscript =
-    transcriptIsEditable &&
-    !agentIsBusy &&
-    interview.isActive &&
-    !isCapturing;
-
   return (
     <section
       className={`voice-assistant-panel ${interview.status}${
@@ -179,50 +166,6 @@ export default function VoiceAssistantPanel({
           </>
         )}
       </div>
-
-      {voice.transcript || isCapturing ? (
-        <label className="voice-transcript" htmlFor="voice-transcript">
-          <span>
-            {isCapturing
-              ? voice.transcriptFinality === "interim"
-                ? "What I hear · interim"
-                : "What I hear"
-              : voice.transcriptFinality === "final"
-                ? "What I heard · final"
-                : "What I heard"}
-          </span>
-          <textarea
-            id="voice-transcript"
-            value={voice.transcript}
-            readOnly={!transcriptIsEditable}
-            placeholder={
-              isCapturing
-                ? "Your words will appear here…"
-                : "The recognized answer will stay visible here"
-            }
-            onChange={(event) => voice.setTranscript(event.target.value)}
-          />
-        </label>
-      ) : null}
-
-      {canSubmitTranscript ? (
-        <div className="voice-transcript-actions">
-          <button
-            className="primary"
-            type="button"
-            onClick={() =>
-              interview.submitEditedTranscript(hasPendingProposal)
-            }
-          >
-            {hasPendingProposal
-              ? "Use corrected transcript"
-              : "Send edited transcript"}
-          </button>
-          <button type="button" onClick={voice.clearTranscript}>
-            Clear transcript
-          </button>
-        </div>
-      ) : null}
 
       {hasPendingProposal ? (
         <div className="voice-confirmation-note">

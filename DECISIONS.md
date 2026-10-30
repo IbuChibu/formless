@@ -740,6 +740,15 @@ Vague acknowledgement, stale state, malformed output, provider failure, or a
 near-match such as `permit` cannot change canonical state. A correction only
 creates another visible proposal.
 
+Refinement recorded 30 October 2026:
+An exact bounded command such as `Confirm` or a repeated transcription of that
+same word may directly invoke the existing backend confirmation transition when
+and only when a current proposal is pending. This is provider-independent
+reliability for a closed user decision, not a frontend phrase table or a return
+to lexical interpretation of ordinary conversation. `Permit`, questions about
+confirmation, negated wording, unrelated speech, and ambiguous acknowledgements
+remain non-mutating.
+
 Small deterministic constraints remain for facts the schema makes objectively
 unsafe: incompatible displayed numeric date order, a dropdown inference that
 requires an unstated fact, and duplicated or conflicting mixed spoken/spelled

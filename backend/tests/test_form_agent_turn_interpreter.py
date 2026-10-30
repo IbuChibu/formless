@@ -1046,6 +1046,28 @@ def test_near_match_review_language_cannot_confirm_even_if_model_requests_it() -
     assert "confirm, change, reject, or hear" in response.assistant_message
 
 
+@pytest.mark.parametrize("message", ["Confirm.", "Confirm. Confirm."])
+def test_exact_confirmation_command_does_not_depend_on_model_output(
+    message: str,
+) -> None:
+    model = StubNemotronService("not valid interpreter output")
+    request = _request(
+        message,
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "full_name", "value": "John Michael"},
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "confirmed"
+    assert response.action.action == "confirmed"
+    assert response.conversation_state.pending_proposal is None
+    assert response.conversation_state.phase == "form_complete"
+    assert model.calls == []
+
+
 def test_natural_review_edit_replaces_only_the_pending_proposal() -> None:
     message = "No, use Jane Doe instead."
     model = StubNemotronService(

@@ -21,6 +21,10 @@ const sideDrawerSource = await readFile(
   new URL("../src/components/AssistantSideDrawer.tsx", import.meta.url),
   "utf8",
 );
+const voiceTranscriptSource = await readFile(
+  new URL("../src/components/VoiceTranscriptDock.tsx", import.meta.url),
+  "utf8",
+);
 
 assert.match(
   appSource,
@@ -68,6 +72,26 @@ assert.match(
   appSource,
   /<\/section>[\s\S]*className="ai-question-form agent-message-form"/,
   "the typed composer must remain outside the internally scrolling assistant panel",
+);
+assert.match(
+  appSource,
+  /assistant-conversation-region[\s\S]*<VoiceTranscriptDock[\s\S]*assistant-proposal-region/,
+  "live recognized speech must remain visible between the conversation and proposal review",
+);
+assert.match(
+  voiceTranscriptSource,
+  /Your words will appear here as you speak/,
+  "the voice dock must render interim recognition throughout capture",
+);
+assert.match(
+  voiceTranscriptSource,
+  /requesting_permission[\s\S]*listening[\s\S]*processing/,
+  "permission, listening, and final-processing states must keep the live dock visible",
+);
+assert.doesNotMatch(
+  styles,
+  /has-proposal[^\{]*voice-transcript[\s\S]*display:\s*none/,
+  "pending proposal review must not hide live confirmation speech",
 );
 assert.equal(
   count(appSource, 'id="assistant-workspace"'),

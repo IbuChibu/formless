@@ -4394,10 +4394,10 @@ a {
 }
 
 .document-loaded .ai-explanation-panel {
-  display: grid;
+  display: flex;
   min-height: 0;
   flex: 1 1 0;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  flex-direction: column;
   gap: 0;
   padding: 0;
   overflow: hidden;
@@ -4511,8 +4511,6 @@ a {
 
 .assistant-session-region .voice-assistant-heading > div > div > span,
 .assistant-session-region .voice-assistant-panel > small.voice-confirmation-note,
-.has-proposal .assistant-session-region .voice-transcript,
-.has-proposal .assistant-session-region .voice-transcript-actions,
 .has-proposal .assistant-session-region div.voice-confirmation-note {
   display: none;
 }
@@ -4596,6 +4594,98 @@ a {
   overflow: hidden;
   overscroll-behavior: contain;
   background: #f9f8f3;
+}
+
+.assistant-live-transcript {
+  z-index: 5;
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: end;
+  gap: 8px;
+  padding: 8px 13px;
+  border-top: 1px solid #d9e1da;
+  background: #f1f7f2;
+  box-shadow: 0 -5px 16px rgb(30 71 44 / 5%);
+}
+
+.assistant-live-transcript.capturing {
+  background: #fff7f3;
+}
+
+.assistant-live-transcript label {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 4px;
+}
+
+.assistant-live-transcript label > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #476052;
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.assistant-live-transcript label > span i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #77877d;
+}
+
+.assistant-live-transcript.capturing label > span i {
+  background: #b64f3c;
+  box-shadow: 0 0 0 4px rgb(182 79 60 / 10%);
+  animation: voice-pulse 1.1s ease-in-out infinite;
+}
+
+.assistant-live-transcript textarea {
+  width: 100%;
+  min-height: 38px;
+  max-height: 58px;
+  padding: 8px 10px;
+  resize: vertical;
+  border: 1px solid #b9cbbd;
+  border-radius: 8px;
+  color: #26382c;
+  background: #fff;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.assistant-live-transcript textarea:read-only {
+  cursor: default;
+  background: rgb(255 255 255 / 82%);
+}
+
+.assistant-live-transcript-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.assistant-live-transcript-actions button {
+  min-height: 38px;
+  padding: 0 9px;
+  border: 1px solid #aec1b2;
+  border-radius: 8px;
+  color: #285d3a;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.65rem;
+  font-weight: 850;
+}
+
+.assistant-live-transcript-actions button:first-child {
+  color: #fff;
+  border-color: var(--green);
+  background: var(--green);
 }
 
 .assistant-conversation-region .agent-transcript {
@@ -4840,6 +4930,16 @@ a {
     scrollbar-gutter: auto;
   }
 
+  .assistant-live-transcript {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 7px 9px;
+  }
+
+  .assistant-live-transcript-actions button {
+    flex: 1 1 0;
+  }
+
   .assistant-proposal-region {
     max-height: min(210px, 31dvh);
     padding: 8px 9px;
@@ -4864,7 +4964,8 @@ a {
   .document-loaded .voice-mark,
   .document-loaded .voice-pulse,
   .document-loaded .spinner,
-  .document-loaded .agent-progress-track span {
+  .document-loaded .agent-progress-track span,
+  .document-loaded .assistant-live-transcript label > span i {
     animation: none;
     transition: none;
   }

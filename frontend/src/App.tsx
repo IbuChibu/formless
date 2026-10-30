@@ -14,6 +14,7 @@ import ManualFieldsDrawer from "./components/ManualFieldsDrawer";
 import ProposalReview from "./components/ProposalReview";
 import SupportPreferencesPanel from "./components/SupportPreferencesPanel";
 import UploadLanding from "./components/UploadLanding";
+import VoiceTranscriptDock from "./components/VoiceTranscriptDock";
 import {
   createDefaultAssistancePreferences,
   hasAssistancePreferences,
@@ -1383,6 +1384,15 @@ function App() {
                   </section>
                 ) : null}
                 </div>
+
+                {canUseAgent ? (
+                  <VoiceTranscriptDock
+                    agentIsBusy={agentStatus === "loading"}
+                    hasPendingProposal={pendingProposal !== null}
+                    interview={voiceInterview}
+                    voice={voice}
+                  />
+                ) : null}
 
                 {pendingProposal && pendingProposalField ? (
                   <div

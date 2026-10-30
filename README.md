@@ -75,10 +75,12 @@ unconfigured, unsupported, denied, disconnected, or uncertain.
 With a PDF loaded, Formless uses a fixed document-and-assistant workspace. The
 PDF page and conversation history scroll independently. The assistant keeps a
 compact recording status, current-question line, pending answer review, and
-typed composer visible around the full conversation. Use **Question**, **Adjust
-help**, **Edit fields**, or **Review** to open occasional controls from the
-right without losing the transcript. On narrow screens, use the **Assistant**
-and **Form** switch; both panes stay mounted so the current page, transcript,
+typed composer visible around the full conversation. While listening, a pinned
+**What I hear** strip displays Deepgram's live transcript and keeps the final
+recognized wording available for correction. Use **Question**, **Adjust help**,
+**Edit fields**, or **Review** to open occasional controls from the right
+without losing the transcript. On narrow screens, use the **Assistant** and
+**Form** switch; both panes stay mounted so the current page, transcript,
 proposal, and answers are preserved.
 
 ## Checks
