@@ -5,6 +5,7 @@ import VoiceAssistantPanel from "./VoiceAssistantPanel";
 import useVoiceAssistant from "./useVoiceAssistant";
 import useVoiceInterview from "./useVoiceInterview";
 import ActiveQuestionCard from "./components/ActiveQuestionCard";
+import AssistantSideDrawer from "./components/AssistantSideDrawer";
 import AppHeader from "./components/AppHeader";
 import ConversationTranscript from "./components/ConversationTranscript";
 import DocumentWorkspace from "./components/DocumentWorkspace";
@@ -65,6 +66,8 @@ import type {
 
 const previewDebounceMs = 600;
 const maxAgentHistoryMessages = 8;
+type AssistantDrawer = "question" | "preferences" | null;
+
 function App() {
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("checking");
@@ -108,13 +111,15 @@ function App() {
     useState<FieldValue>("");
   const [pendingProposalDetails, setPendingProposalDetails] =
     useState<ProposalAgentEffect | null>(null);
+  const [assistantDrawer, setAssistantDrawer] =
+    useState<AssistantDrawer>(null);
   const [manualDrawerOpen, setManualDrawerOpen] = useState(false);
   const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
   const [directEditFieldId, setDirectEditFieldId] = useState<string | null>(
     null,
   );
   const [directEditValue, setDirectEditValue] = useState<FieldValue>("");
-  const [showFullTranscript, setShowFullTranscript] = useState(false);
+  const [showFullTranscript, setShowFullTranscript] = useState(true);
   const [mobileWorkspaceView, setMobileWorkspaceView] =
     useState<MobileWorkspaceView>("assistant");
   const [assistancePreferences, setAssistancePreferences] =
@@ -318,11 +323,12 @@ function App() {
     setIsEditingProposal(false);
     setProposalEditValue("");
     setPendingProposalDetails(null);
+    setAssistantDrawer(null);
     setManualDrawerOpen(false);
     setReviewPanelOpen(false);
     setDirectEditFieldId(null);
     setDirectEditValue("");
-    setShowFullTranscript(false);
+    setShowFullTranscript(true);
     setMobileWorkspaceView("assistant");
     setAssistancePreferences(createDefaultAssistancePreferences());
     setSupportIntroductionStatus("pending");
@@ -451,6 +457,12 @@ function App() {
     window.requestAnimationFrame(() => {
       document.getElementById("open-form-review")?.focus();
     });
+  }
+
+  function openAssistantDrawer(drawer: Exclude<AssistantDrawer, null>) {
+    setReviewPanelOpen(false);
+    setManualDrawerOpen(false);
+    setAssistantDrawer((current) => (current === drawer ? null : drawer));
   }
 
   function saveDirectEdit() {
@@ -964,6 +976,8 @@ function App() {
         extractionStatus={extractionStatus}
         onFileSelection={handleFileSelection}
         onOpenReview={() => {
+          setAssistantDrawer(null);
+          setManualDrawerOpen(false);
           setReviewPanelOpen(true);
           setMobileWorkspaceView("assistant");
         }}
@@ -1077,19 +1091,9 @@ function App() {
               </div>
 
               {currentAgentFields.length > 0 ? (
-                <section
-                  className="agent-progress-overview"
-                  aria-label="Supported field progress"
-                >
-                  <div className="agent-progress-copy">
-                    <span>Form progress</span>
-                    <strong>
-                      {reviewedAgentFieldCount} of {currentAgentFields.length}{" "}
-                      reviewed
-                    </strong>
-                  </div>
+                <div className="assistant-utility-bar">
                   <div
-                    className="agent-progress-track"
+                    className="assistant-progress-line"
                     role="progressbar"
                     aria-label="Reviewed supported fields"
                     aria-valuemin={0}
@@ -1098,15 +1102,63 @@ function App() {
                   >
                     <span style={{ width: `${agentProgressPercentage}%` }} />
                   </div>
-                  <div className="agent-progress-breakdown">
-                    <span>{confirmedAgentFieldCount} confirmed</span>
-                    <span>{skippedAgentFieldCount} skipped</span>
-                    <span>
-                      {currentAgentFields.length - reviewedAgentFieldCount}{" "}
-                      unanswered
-                    </span>
+                  <div className="assistant-utility-actions">
+                    <button
+                      id="assistant-question-drawer-trigger"
+                      type="button"
+                      aria-expanded={assistantDrawer === "question"}
+                      disabled={!activeAgentField}
+                      onClick={() => openAssistantDrawer("question")}
+                    >
+                      Question
+                    </button>
+                    <button
+                      id="assistant-preferences-drawer-trigger"
+                      type="button"
+                      aria-expanded={assistantDrawer === "preferences"}
+                      onClick={() => openAssistantDrawer("preferences")}
+                    >
+                      Adjust help
+                    </button>
+                    <ManualFieldsDrawer
+                      activeFieldId={agentActiveFieldId}
+                      agentFields={currentAgentFields}
+                      agentStatus={agentStatus}
+                      fieldCount={fields.length}
+                      fieldGroups={fieldGroups}
+                      formValues={formValues}
+                      isOpen={manualDrawerOpen}
+                      isReady={extractionStatus === "ready"}
+                      hasPendingProposal={pendingProposal !== null}
+                      onAskForExplanation={(fieldId, message) =>
+                        sendAgentEvent(
+                          {
+                            type: "focus_field",
+                            field_id: fieldId,
+                            content: message,
+                          },
+                          message,
+                        )
+                      }
+                      onChangeField={updateField}
+                      onToggle={() => {
+                        setAssistantDrawer(null);
+                        setReviewPanelOpen(false);
+                        setManualDrawerOpen((current) => !current);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAssistantDrawer(null);
+                        setManualDrawerOpen(false);
+                        setReviewPanelOpen(true);
+                      }}
+                    >
+                      Review
+                    </button>
                   </div>
-                </section>
+                </div>
               ) : null}
 
               {reviewPanelOpen ? (
@@ -1193,32 +1245,24 @@ function App() {
                     aria-label="Current form question"
                     role="region"
                   >
-                    <ActiveQuestionCard
-                      agentStatus={agentStatus}
-                      canAnswer={canAnswerActiveQuestion}
-                      field={activeAgentField}
-                      fieldIndex={activeAgentFieldIndex}
-                      phase={agentConversationState.phase}
-                      question={activeAgentQuestion}
-                      quickAnswers={activeQuickAnswers}
-                      section={activeAgentSection}
-                      totalFields={currentAgentFields.length}
-                      transcriptLength={agentMessages.length}
-                      onAskForGuidance={() =>
-                        sendAgentMessage(
-                          "Check official guidance for this question.",
-                        )
-                      }
-                      onAskForPlainLanguage={() =>
-                        sendAgentMessage(
-                          "Explain this question in plain language.",
-                        )
-                      }
-                      onQuickAnswer={sendAgentMessage}
-                      onSkip={(fieldId) =>
-                        sendAgentEvent({ type: "skip", field_id: fieldId })
-                      }
-                    />
+                    <div className="assistant-current-question">
+                      <div>
+                        <span>
+                          Question {activeAgentFieldIndex + 1} of{" "}
+                          {currentAgentFields.length}
+                          {activeAgentField.page
+                            ? ` · Page ${activeAgentField.page}`
+                            : ""}
+                        </span>
+                        <strong>{activeAgentQuestion}</strong>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openAssistantDrawer("question")}
+                      >
+                        Help & options
+                      </button>
+                    </div>
                   </div>
                 ) : null}
 
@@ -1228,28 +1272,6 @@ function App() {
                   role="region"
                   tabIndex={0}
                 >
-                  {canUseAgent ? (
-                    <SupportPreferencesPanel
-                      disabled={agentStatus === "loading"}
-                      preferences={assistancePreferences}
-                      status={supportIntroductionStatus}
-                      onSave={(preferences) => {
-                        setAssistancePreferences(preferences);
-                        setSupportIntroductionStatus(
-                          hasAssistancePreferences(preferences)
-                            ? "saved"
-                            : "skipped",
-                        );
-                      }}
-                      onSkip={() => {
-                        setAssistancePreferences(
-                          createDefaultAssistancePreferences(),
-                        );
-                        setSupportIntroductionStatus("skipped");
-                      }}
-                    />
-                  ) : null}
-
                 {agentMessages.length === 0 ? (
                   <p className="ai-explanation-empty">
                     Start a guided conversation, or choose{" "}
@@ -1337,7 +1359,11 @@ function App() {
                       <button
                         type="button"
                         disabled={agentStatus === "loading"}
-                        onClick={() => setReviewPanelOpen(true)}
+                        onClick={() => {
+                          setAssistantDrawer(null);
+                          setManualDrawerOpen(false);
+                          setReviewPanelOpen(true);
+                        }}
                       >
                         Review answers
                       </button>
@@ -1459,29 +1485,74 @@ function App() {
                 </p>
               ) : null}
 
-              <ManualFieldsDrawer
-                activeFieldId={agentActiveFieldId}
-                agentFields={currentAgentFields}
-                agentStatus={agentStatus}
-                fieldCount={fields.length}
-                fieldGroups={fieldGroups}
-                formValues={formValues}
-                isOpen={manualDrawerOpen}
-                isReady={extractionStatus === "ready"}
-                hasPendingProposal={pendingProposal !== null}
-                onAskForExplanation={(fieldId, message) =>
-                  sendAgentEvent(
-                    {
-                      type: "focus_field",
-                      field_id: fieldId,
-                      content: message,
-                    },
-                    message,
-                  )
-                }
-                onChangeField={updateField}
-                onToggle={() => setManualDrawerOpen((current) => !current)}
-              />
+              {assistantDrawer === "question" && activeAgentField && activeAgentQuestion ? (
+                <AssistantSideDrawer
+                  eyebrow="Current question"
+                  returnFocusId="assistant-question-drawer-trigger"
+                  title="Question details"
+                  onClose={() => setAssistantDrawer(null)}
+                >
+                  <ActiveQuestionCard
+                    agentStatus={agentStatus}
+                    canAnswer={canAnswerActiveQuestion}
+                    field={activeAgentField}
+                    fieldIndex={activeAgentFieldIndex}
+                    phase={agentConversationState.phase}
+                    question={activeAgentQuestion}
+                    quickAnswers={activeQuickAnswers}
+                    section={activeAgentSection}
+                    totalFields={currentAgentFields.length}
+                    transcriptLength={agentMessages.length}
+                    onAskForGuidance={() =>
+                      sendAgentMessage(
+                        "Check official guidance for this question.",
+                      )
+                    }
+                    onAskForPlainLanguage={() =>
+                      sendAgentMessage(
+                        "Explain this question in plain language.",
+                      )
+                    }
+                    onQuickAnswer={(message) => {
+                      setAssistantDrawer(null);
+                      sendAgentMessage(message);
+                    }}
+                    onSkip={(fieldId) => {
+                      setAssistantDrawer(null);
+                      sendAgentEvent({ type: "skip", field_id: fieldId });
+                    }}
+                  />
+                </AssistantSideDrawer>
+              ) : null}
+
+              {assistantDrawer === "preferences" ? (
+                <AssistantSideDrawer
+                  eyebrow="Conversation settings"
+                  returnFocusId="assistant-preferences-drawer-trigger"
+                  title="Adjust how I help"
+                  onClose={() => setAssistantDrawer(null)}
+                >
+                  <SupportPreferencesPanel
+                    disabled={agentStatus === "loading"}
+                    preferences={assistancePreferences}
+                    status={supportIntroductionStatus}
+                    onSave={(preferences) => {
+                      setAssistancePreferences(preferences);
+                      setSupportIntroductionStatus(
+                        hasAssistancePreferences(preferences)
+                          ? "saved"
+                          : "skipped",
+                      );
+                    }}
+                    onSkip={() => {
+                      setAssistancePreferences(
+                        createDefaultAssistancePreferences(),
+                      );
+                      setSupportIntroductionStatus("skipped");
+                    }}
+                  />
+                </AssistantSideDrawer>
+              ) : null}
             </aside>
             </section>
           </>

@@ -83,9 +83,12 @@ Responsible for:
   field targets, explicit drawer state, Escape handling, and focus recovery for
   the direct editor and final review
 - constraining the loaded application to the usable viewport with independently
-  mounted and scrollable PDF and assistant panes; the assistant keeps session
-  state, current question, pending review, and composer outside the conversation
-  history scroll owner
+  mounted and scrollable PDF and assistant panes; the assistant keeps a compact
+  session state, current-question line, pending review, and composer outside the
+  conversation history scroll owner
+- treating the growing conversation and live recording state as the primary
+  assistant surface while question details, assistance preferences, the manual
+  field editor, and final review open as closeable side drawers
 - preserving those same pane instances and the canonical state while the
   mobile Assistant/Form switch changes only which pane is visible
 
@@ -109,12 +112,15 @@ responsibilities:
 
 The loaded workspace uses layout ownership rather than another state layer.
 `App` renders one document pane and one assistant pane. CSS constrains the shell
-to `100dvh`, assigns PDF page scrolling to the document stage, and assigns
-conversation scrolling to one keyboard-reachable assistant region. Session and
-question context sit above it; proposal review, the typed composer, and the
-manual fallback toggle sit below it. Final review and the expanded manual drawer
-are bounded overlays with explicit close/focus-return paths, so opening them
-does not recreate panes or displace canonical controls.
+to `100dvh`, assigns PDF page scrolling to the document stage, and assigns the
+remaining assistant height to one keyboard-reachable conversation log. A
+compact session strip makes recording state visible, and a one-line question
+context plus the permanently reachable typed composer frame the conversation.
+Pending proposal review remains pinned because it guards canonical mutation.
+Full question controls, assistance preferences, final review, and the manual
+field editor open from the right with explicit close and focus-return paths, so
+secondary controls neither compete with the transcript nor recreate panes or
+displace canonical controls.
 
 Extracted presentation components do not fetch, own a second field store,
 interpret free-form agent text, or apply PDF changes. Moving between components

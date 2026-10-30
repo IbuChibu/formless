@@ -809,3 +809,21 @@ question was active, and where to confirm or answer. Layout-only ownership keeps
 those controls predictable without introducing another state store, changing
 conversation policy, or separating PDF, voice, typed, and manual inputs from
 their shared canonical state.
+
+## 2026-10-30 — Conversation is the primary assistant surface
+
+Decision:
+Within the fixed assistant pane, give the conversation log the available
+working height and show the complete transcript by default. Keep only compact
+recording/session status, a one-line current-question context, safety-critical
+proposal review, and the typed composer in the permanent layout. Open full
+question controls, assistance preferences, all-field manual editing, and final
+review from the right as closeable drawers with Escape and focus restoration.
+
+Reason:
+Loaded-form testing showed that permanently stacking every useful control made
+the transcript difficult to follow and made typed/manual correction feel
+buried. These controls remain important, but they are occasional tools rather
+than the main task. A conversation-first hierarchy better matches the product's
+human-helper intent while retaining one canonical field state, explicit
+confirmation, keyboard access, and a visible typed fallback.

@@ -39,11 +39,13 @@ export default function ManualFieldsDrawer({
   onToggle,
 }: ManualFieldsDrawerProps) {
   const toggleRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
 
   useEffect(() => {
     if (isOpen) {
       wasOpenRef.current = true;
+      panelRef.current?.focus();
       return;
     }
     if (wasOpenRef.current) {
@@ -87,10 +89,21 @@ export default function ManualFieldsDrawer({
       </button>
 
       <div
+        ref={panelRef}
         className="fields-content manual-fields-content"
         id="manual-fields-panel"
         hidden={!isOpen}
+        tabIndex={-1}
       >
+        <div className="manual-fields-heading">
+          <div>
+            <span>Manual fallback</span>
+            <h3>Edit form fields</h3>
+          </div>
+          <button type="button" aria-label="Close manual field editor" onClick={onToggle}>
+            ×
+          </button>
+        </div>
         {isReady ? (
           <form
             className="field-list"

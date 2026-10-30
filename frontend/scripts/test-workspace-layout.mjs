@@ -46,8 +46,18 @@ assert.equal(
 );
 assert.match(
   appSource,
-  /className="ai-question-form agent-message-form"[\s\S]*<ManualFieldsDrawer/,
-  "the permanent typed composer must remain outside and above the manual fallback",
+  /<\/section>[\s\S]*className="ai-question-form agent-message-form"/,
+  "the permanent typed composer must remain outside the internally scrolling conversation",
+);
+assert.match(
+  appSource,
+  /className="assistant-utility-actions"[\s\S]*<ManualFieldsDrawer/,
+  "the manual fallback must open from the compact assistant utility bar",
+);
+assert.match(
+  styles,
+  /\.document-loaded \.manual-fields-content \{[\s\S]*position: absolute;/,
+  "the manual editor must overlay the assistant instead of displacing the composer",
 );
 assert.match(
   styles,

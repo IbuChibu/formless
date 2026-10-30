@@ -17,6 +17,10 @@ const manualDrawerSource = await readFile(
   new URL("../src/components/ManualFieldsDrawer.tsx", import.meta.url),
   "utf8",
 );
+const sideDrawerSource = await readFile(
+  new URL("../src/components/AssistantSideDrawer.tsx", import.meta.url),
+  "utf8",
+);
 
 assert.match(
   appSource,
@@ -42,8 +46,18 @@ assert.match(
 );
 assert.match(
   appSource,
-  /assistant-conversation-region[\s\S]*<SupportPreferencesPanel/,
-  "secondary assistance settings must live in the scrollable conversation region",
+  /assistantDrawer === "preferences"[\s\S]*<AssistantSideDrawer[\s\S]*<SupportPreferencesPanel/,
+  "secondary assistance settings must live in a side drawer",
+);
+assert.match(
+  appSource,
+  /assistantDrawer === "question"[\s\S]*<AssistantSideDrawer[\s\S]*<ActiveQuestionCard/,
+  "full question controls must live in a side drawer",
+);
+assert.match(
+  appSource,
+  /useState\(true\)[\s\S]*setShowFullTranscript\(true\)/,
+  "the complete conversation must be visible by default",
 );
 assert.match(
   appSource,
@@ -88,7 +102,7 @@ assert.match(
 );
 assert.match(
   styles,
-  /\.assistant-conversation-region \{[\s\S]*overflow-y: auto;[\s\S]*overscroll-behavior: contain;/,
+  /\.assistant-conversation-region \.agent-conversation \{[\s\S]*overflow-y: auto;[\s\S]*overscroll-behavior: contain;/,
   "conversation history must own its internal scrolling",
 );
 assert.match(
@@ -103,13 +117,28 @@ assert.match(
 );
 assert.match(
   styles,
-  /\.document-loaded \.manual-fields-content \{[\s\S]*position: absolute;/,
-  "the expanded manual fallback must overlay rather than displace primary controls",
+  /\.document-loaded \.manual-fields-content \{[\s\S]*position: absolute;[\s\S]*inset: 0 0 0 auto;/,
+  "the expanded manual fallback must enter from the side rather than displace conversation controls",
 );
 assert.match(
   styles,
-  /\.document-loaded \.form-review-panel \{[\s\S]*position: absolute;/,
-  "final review must have a bounded closeable overlay",
+  /\.document-loaded \.form-review-panel \{[\s\S]*position: absolute;[\s\S]*inset: 0 0 0 auto;/,
+  "final review must have a bounded side overlay",
+);
+assert.match(
+  styles,
+  /\.assistant-side-drawer \{[\s\S]*position: absolute;[\s\S]*inset: 0 0 0 auto;/,
+  "question and assistance controls must use the shared side drawer",
+);
+assert.match(
+  sideDrawerSource,
+  /event\.key === "Escape"[\s\S]*onClose\(\)/,
+  "Escape must close secondary side drawers",
+);
+assert.match(
+  sideDrawerSource,
+  /document\.getElementById\(returnFocusId\)\?\.focus\(\)/,
+  "closing a secondary side drawer must restore focus to its trigger",
 );
 assert.match(
   styles,

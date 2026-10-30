@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import {
   getWebSourceQualityLabel,
   humanizeFieldId,
@@ -28,6 +30,17 @@ export default function ConversationTranscript({
   onRetryGuidance,
   onToggleFullTranscript,
 }: ConversationTranscriptProps) {
+  const conversationRef = useRef<HTMLDivElement>(null);
+  const followLatestRef = useRef(true);
+
+  useEffect(() => {
+    const conversation = conversationRef.current;
+    if (!conversation || !followLatestRef.current) {
+      return;
+    }
+    conversation.scrollTop = conversation.scrollHeight;
+  }, [visibleMessages.length, agentStatus]);
+
   return (
     <section className="agent-transcript">
       <div className="agent-transcript-heading">
@@ -47,10 +60,20 @@ export default function ConversationTranscript({
         ) : null}
       </div>
       <div
+        ref={conversationRef}
         className="agent-conversation"
         id="agent-conversation-log"
         aria-label="Form assistant conversation"
         role="log"
+        tabIndex={0}
+        onScroll={(event) => {
+          const conversation = event.currentTarget;
+          followLatestRef.current =
+            conversation.scrollHeight -
+              conversation.scrollTop -
+              conversation.clientHeight <
+            72;
+        }}
       >
         {visibleMessages.map((message) => {
           const messageField = fields.find(

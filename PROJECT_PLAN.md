@@ -5627,13 +5627,15 @@ Automated implementation outcome (2026-10-29):
 - desktop keeps both mounted panes in an approximately 58/42 split; the PDF
   page stage retains its own scrolling and navigation while the assistant owns
   a separate bounded conversation scroll region
-- the assistant is divided into stable session, active-question, conversation,
-  pending-review, composer, and collapsed-manual regions; a pending proposal
-  stays outside transcript scrolling and hides the redundant question card
-  while retaining every explicit review action
-- the typed composer and manual toggle remain fixed at the bottom of the pane;
-  final review and the expanded manual editor use bounded closeable overlays so
-  they do not resize or unmount the primary workspace
+- the assistant keeps compact session and current-question context above a
+  conversation that receives the available working height; the full transcript
+  is visible by default and follows new turns until the user scrolls upward
+- the typed composer stays permanently reachable below the conversation and a
+  pending proposal stays outside transcript scrolling with every explicit
+  review action
+- full question controls, assistance preferences, the manual field editor, and
+  final review open from the right as bounded closeable drawers, so occasional
+  controls do not reduce transcript space or unmount the primary workspace
 - the existing mobile Assistant/Form switch reuses the same mounted panes and
   now lets the selected pane shrink with dynamic browser chrome and virtual
   keyboard height without introducing horizontal overflow
@@ -5644,6 +5646,19 @@ Automated implementation outcome (2026-10-29):
   production build pass; live uploaded-form screenshots, long-transcript,
   virtual-keyboard, and screen-reader evidence remain required before this
   milestone can be marked complete
+
+Manual-feedback refinement (2026-10-30):
+- a loaded-form trial found that the first fixed layout still stacked too many
+  permanent regions, made the developing transcript difficult to follow, and
+  made typed/manual correction feel buried
+- the assistant hierarchy was therefore simplified within this milestone:
+  conversation and visible recording state are now primary, typing remains
+  pinned, and secondary question/settings/edit/review surfaces enter from the
+  side
+- focused fixed-workspace, workspace-layout, PDF-workflow, voice-interruption,
+  continuous-voice, Deepgram, reliability, support-preference, and production
+  build checks pass after the refinement; a repeat loaded-form usability check
+  remains required before completion
 
 # Milestone 9.2.5 — Integrated human-helper workflow validation
 
