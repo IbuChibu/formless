@@ -788,3 +788,24 @@ existing privacy, exactly-once dispatch, explicit-confirmation, and single-state
 architecture while a session-level loop supplies natural turn-taking. Stream
 transfer reduces the handoff gap during interruption without creating an
 always-on recorder, a voice agent, stored audio, or a second conversation path.
+
+---
+
+## 2026-10-29 — The loaded UI is one fixed workspace with explicit scroll owners
+
+Decision:
+When a PDF is loaded, the application shell fits the usable browser viewport.
+The PDF page stage and assistant conversation are independent scroll owners.
+Voice/session state and the active question remain above conversation history;
+pending proposal review, the typed composer, and the collapsed manual fallback
+remain below it. The existing mobile switch changes visibility without
+conditionally mounting either pane. Final review and the expanded manual editor
+overlay the assistant with close and focus-return behavior instead of expanding
+the document body.
+
+Reason:
+Whole-page scrolling made users hunt for whether Formless was listening, what
+question was active, and where to confirm or answer. Layout-only ownership keeps
+those controls predictable without introducing another state store, changing
+conversation policy, or separating PDF, voice, typed, and manual inputs from
+their shared canonical state.

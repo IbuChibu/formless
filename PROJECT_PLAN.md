@@ -94,10 +94,15 @@ Required technology:
 - Milestone 9.2.3 continuous hands-free voice is implemented with automated
   session, silence, recovery, interruption-transfer, cleanup, and regression
   coverage; its real-browser acoustic and ten-turn evidence is still pending
-- the immediate remaining work is Milestone 9.2.3 live/manual evidence,
-  followed by Milestones 9.2.4 and 9.2.5: a fixed-viewport workspace and an
-  integrated human-helper gate
-- deployment has not started; persistence remains outside the current plan
+- Milestone 9.2.4 fixed-viewport workspace is implemented with separate PDF,
+  conversation, session, question, review, and composer regions; uploaded-form
+  visual, long-transcript, keyboard, and screen-reader evidence is still pending
+- the immediate remaining work is the open Milestone 9.2.3 and 9.2.4
+  live/manual evidence, followed by Milestone 9.2.5 integrated human-helper
+  validation
+- deployment has not started; persistence remains outside the active hackathon
+  plan, with any account-backed personal-details feature deferred to Milestone
+  16 after the production trust decision
 
 ---
 
@@ -5470,7 +5475,7 @@ Automated implementation outcome (2026-10-29):
 
 # Milestone 9.2.4 — Fixed-viewport conversational workspace
 
-Status: NOT STARTED
+Status: IMPLEMENTED — LIVE/MANUAL QA PENDING
 
 Problem to solve:
 The loaded application contains all required controls, but users can still
@@ -5614,6 +5619,31 @@ Do not implement:
   deployment
 - a new frontend framework, state library, component system, CSS framework, or
   decorative redesign unrelated to the active task
+
+Automated implementation outcome (2026-10-29):
+- the loaded application is constrained to `100dvh`; the compact header and
+  main workspace use grid/flex minimum sizing so the document body is not the
+  primary scroll owner
+- desktop keeps both mounted panes in an approximately 58/42 split; the PDF
+  page stage retains its own scrolling and navigation while the assistant owns
+  a separate bounded conversation scroll region
+- the assistant is divided into stable session, active-question, conversation,
+  pending-review, composer, and collapsed-manual regions; a pending proposal
+  stays outside transcript scrolling and hides the redundant question card
+  while retaining every explicit review action
+- the typed composer and manual toggle remain fixed at the bottom of the pane;
+  final review and the expanded manual editor use bounded closeable overlays so
+  they do not resize or unmount the primary workspace
+- the existing mobile Assistant/Form switch reuses the same mounted panes and
+  now lets the selected pane shrink with dynamic browser chrome and virtual
+  keyboard height without introducing horizontal overflow
+- the conversation scroll owner is labelled and keyboard reachable; Escape
+  closes the manual overlay and restores focus to its toggle; existing direct
+  editor, review, focus, live-region, and reduced-motion behavior is retained
+- focused fixed-workspace checks, the existing workspace check, and the
+  production build pass; live uploaded-form screenshots, long-transcript,
+  virtual-keyboard, and screen-reader evidence remain required before this
+  milestone can be marked complete
 
 # Milestone 9.2.5 — Integrated human-helper workflow validation
 
@@ -6209,3 +6239,159 @@ Completion rule:
 Do not add authentication, a database, persistent transcripts, document
 history, or analytics by default. Each requires an explicit user need,
 architecture decision, privacy boundary, and testable deletion story.
+
+## Milestone 16 — Account-backed Personal Details Vault
+
+Status: DEFERRED UNTIL AFTER SUBMISSION AND MILESTONE 15
+
+Dependency:
+Milestone 15 must first approve an account, authentication, storage, retention,
+encryption, and deletion model. This milestone must not be pulled into the
+ephemeral hackathon application merely to avoid asking repeated questions.
+
+Problem to solve:
+People should not have to repeatedly speak or type stable personal details such
+as their name, date of birth, address, email address, and telephone number on
+every form. Repetition is particularly burdensome for voice users and people
+who find spelling, memory, typing, or official forms difficult. At the same
+time, these are sensitive facts and an old, ambiguous, or cross-account value
+must never be silently placed into a form.
+
+Goal:
+Provide authenticated account settings where a user can explicitly create and
+manage a small reusable personal-details profile. When a compatible form field
+is encountered, Formless may offer the relevant saved value as a normal,
+reviewable proposal. The user remains in control of every form value and must
+explicitly confirm it before canonical form state or a PDF changes.
+
+Initial profile scope:
+- legal name, stored in structured given, middle, and family-name parts plus
+  the exact full-name presentation supplied by the user
+- preferred name
+- date of birth
+- email address and telephone number
+- explicitly labelled current residential, previous, mailing, and
+  correspondence addresses, with country and optional valid-from/valid-to
+  dates where the user supplies them
+- metadata required for safety, including when the user last reviewed a value
+  and whether an address is still current
+
+Account-settings experience:
+- let the authenticated user view, add, edit, replace, and delete every saved
+  detail without opening a PDF
+- explain plainly that saved details can be proposed on future forms but will
+  not be entered without review
+- distinguish address purpose instead of maintaining one ambiguous `address`
+  value
+- show when each value was last reviewed and invite the user to re-check stale
+  details before use
+- require a separate, explicit choice before a correction made for one form is
+  also saved back to account settings
+- provide complete profile deletion and account deletion paths consistent with
+  the Milestone 15 retention policy
+
+Form-assistant experience:
+- when the active field is a safe, compatible match, offer the saved fact in
+  natural language, for example: `I have your legal name saved as Ebrahim
+  Akhoon. Shall I use that here?`
+- identify the source as `saved personal details` in proposal presentation and
+  final review
+- pass saved facts into the existing closed proposal and confirmation workflow;
+  they never bypass field validation, normalization, explicit confirmation, or
+  the PDF Service boundary
+- allow the user to edit, reject, skip, or replace a saved suggestion without
+  changing their account profile
+- ask a focused clarification when the form's meaning is narrower than the
+  available profile fact, including current versus previous address, legal
+  versus preferred name, or residence versus correspondence address
+- keep the current confirmed form value unchanged while a saved-value proposal
+  or replacement is awaiting confirmation
+- continue the ordinary interview when no safe compatible profile value exists
+
+Architecture and safety boundaries:
+- the Personal Details Vault is user-managed profile data, separate from
+  canonical per-form field state, bounded conversation history, PDFs, and
+  transcripts
+- the backend retrieves profile data only for the authenticated account and
+  exposes the minimum fields required for the current operation
+- Nemotron may propose a semantic mapping between a form question and a
+  profile attribute, but it cannot read arbitrary account records, write to the
+  profile, confirm a value, mutate canonical form state, or fill a PDF
+- deterministic code validates the account owner, permitted profile attribute,
+  field compatibility, requested format, address purpose, and closed effect
+  before showing a proposal
+- a model-generated mapping with insufficient confidence or conflicting
+  context becomes a clarification, never an automatic selection
+- profile storage must use the encryption, authorization, retention, deletion,
+  audit, secret-management, and incident boundaries approved in Milestone 15
+- do not persist uploaded PDFs or conversation transcripts merely because an
+  account exists
+- do not treat profile data as evidence for eligibility, declarations,
+  signatures, consent, financial answers, household circumstances, or any fact
+  the user did not explicitly save
+
+Acceptance criteria:
+- an authenticated user can create, inspect, edit, and delete every supported
+  profile attribute and can delete the entire stored profile
+- one account can never read, propose, update, or delete another account's
+  personal details
+- compatible name, date-of-birth, contact, and correctly typed address fields
+  can receive a clearly sourced saved-value proposal
+- no saved value changes canonical form state or PDF bytes without the existing
+  explicit confirmation action
+- ambiguous, stale, incompatible, missing, or conflicting values produce a
+  focused clarification or no proposal rather than a guessed mapping
+- rejecting or editing a form proposal does not silently modify account
+  settings; saving the edit requires a separate explicit action
+- changing or deleting a saved value invalidates any stale unconfirmed
+  proposal derived from it
+- a user can complete the same form entirely without creating or using a
+  saved profile
+- account/profile deletion follows the documented retention deadline and is
+  verifiable without relying only on a UI success message
+- the completed PDF and final review show the confirmed form values, not hidden
+  or newer profile values
+- all existing conversation, confirmation, PDF source-preservation,
+  accessibility, and no-invention tests continue to pass
+
+Required automated testing:
+- authentication, authorization, tenant-isolation, object-level access, and
+  session-expiry tests for every profile operation
+- create/read/update/delete, validation, encryption-boundary, retention, and
+  deletion tests using synthetic personal information only
+- deterministic field-to-profile compatibility tests for names, dates,
+  contacts, and each address purpose, including ambiguous and adversarial field
+  labels
+- transcript tests for offer, accept, edit, reject, skip, correction, stale
+  value, profile conflict, and missing-value conversations
+- canonical-state and PDF-byte assertions proving no mutation occurs before
+  confirmation and the uploaded source PDF remains unchanged
+- tests proving a form-only edit cannot update the profile and a profile edit
+  cannot rewrite an already confirmed form value
+- privacy-safe logging, backup/deletion, rate-limit, provider-failure, and
+  complete regression checks required by Milestone 15
+
+Required manual testing:
+1. Create two synthetic accounts with deliberately different names, dates of
+   birth, and address types; verify no value crosses between them.
+2. Complete the same representative form with the vault enabled and disabled;
+   compare accuracy, confirmation count, completion time, and user control.
+3. Exercise an old residential address, a separate mailing address, a changed
+   legal name, and an edited form-only value; inspect every clarification and
+   final PDF.
+4. Delete one field, the full profile, and the account; verify the documented
+   deletion result and that old proposals cannot subsequently be applied.
+5. Complete keyboard, screen-reader, mobile, sign-out/session-expiry, and
+   shared-device smoke paths.
+
+Do not implement:
+- automatic or silent form filling, confirmation on the user's behalf, or
+  profile updates inferred from conversation
+- storage of passwords, signatures, national identifiers, passport numbers,
+  social-security numbers, bank details, health records, eligibility answers,
+  or legal declarations in the initial vault
+- uploaded-document history, transcript history, advertising profiles,
+  behavioural profiling, or model-training use of personal details
+- household sharing, delegated access, organisation accounts, identity
+  verification, government-record lookup, or a general-purpose personal-data
+  platform in the initial implementation

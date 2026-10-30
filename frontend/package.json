@@ -11,6 +11,7 @@
     "build": "tsc && vite build",
     "test:pdf-workflow": "node scripts/test-pdf-workflow.mjs",
     "test:workspace-layout": "node scripts/test-workspace-layout.mjs",
+    "test:fixed-workspace": "node scripts/test-fixed-workspace.mjs",
     "test:voice-interruption": "node scripts/test-voice-interruption.mjs",
     "test:continuous-voice": "node scripts/test-continuous-voice-session.mjs",
     "test:deepgram-speech": "node scripts/test-deepgram-speech.mjs",

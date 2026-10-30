@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import { FieldControl } from "../FieldControls";
 import { humanizeFieldId, isExplainableField } from "../formFieldState";
 import type {
@@ -36,9 +38,33 @@ export default function ManualFieldsDrawer({
   onChangeField,
   onToggle,
 }: ManualFieldsDrawerProps) {
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      wasOpenRef.current = true;
+      return;
+    }
+    if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      toggleRef.current?.focus();
+    }
+  }, [isOpen]);
+
   return (
-    <section className="manual-fields-drawer" aria-label="Manual field editor">
+    <section
+      className="manual-fields-drawer"
+      aria-label="Manual field editor"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && isOpen) {
+          event.preventDefault();
+          onToggle();
+        }
+      }}
+    >
       <button
+        ref={toggleRef}
         className="manual-drawer-toggle"
         type="button"
         aria-controls="manual-fields-panel"

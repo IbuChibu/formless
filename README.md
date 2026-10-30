@@ -72,6 +72,13 @@ the form.
 Typing and visible proposal controls remain available when voice is
 unconfigured, unsupported, denied, disconnected, or uncertain.
 
+With a PDF loaded, Formless uses a fixed document-and-assistant workspace. The
+PDF page and conversation history scroll independently, while voice status, the
+current question, pending answer review, and the typed composer remain in their
+own stable regions. On narrow screens, use the **Assistant** and **Form** switch;
+both panes stay mounted so the current page, transcript, proposal, and answers
+are preserved.
+
 ## Checks
 
 ```bash
@@ -82,6 +89,7 @@ python -m evaluations.form_agent_transcript_evaluation
 
 cd ../frontend
 npm run test:workspace-layout
+npm run test:fixed-workspace
 npm run test:voice-interruption
 npm run test:deepgram-speech
 npm run test:continuous-voice

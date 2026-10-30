@@ -1109,28 +1109,6 @@ function App() {
                 </section>
               ) : null}
 
-              {canUseAgent ? (
-                <SupportPreferencesPanel
-                  disabled={agentStatus === "loading"}
-                  preferences={assistancePreferences}
-                  status={supportIntroductionStatus}
-                  onSave={(preferences) => {
-                    setAssistancePreferences(preferences);
-                    setSupportIntroductionStatus(
-                      hasAssistancePreferences(preferences)
-                        ? "saved"
-                        : "skipped",
-                    );
-                  }}
-                  onSkip={() => {
-                    setAssistancePreferences(
-                      createDefaultAssistancePreferences(),
-                    );
-                    setSupportIntroductionStatus("skipped");
-                  }}
-                />
-              ) : null}
-
               {reviewPanelOpen ? (
                 <FormReviewPanel
                   counts={reviewCounts}
@@ -1185,50 +1163,93 @@ function App() {
               ) : null}
 
               <section
-                className={`ai-explanation-panel agent-panel ${agentStatus}`}
+                className={`ai-explanation-panel agent-panel ${agentStatus}${
+                  pendingProposal ? " has-proposal" : ""
+                }`}
                 aria-busy={agentStatus === "loading"}
                 aria-live="polite"
               >
                 {canUseAgent ? (
-                  <VoiceAssistantPanel
-                    voice={voice}
-                    interview={voiceInterview}
-                    agentIsBusy={agentStatus === "loading"}
-                    hasPendingProposal={pendingProposal !== null}
-                    voicePreferred={
-                      assistancePreferences.interaction_mode === "voice"
-                    }
-                  />
+                  <div
+                    className="assistant-session-region"
+                    aria-label="Voice session controls"
+                    role="region"
+                  >
+                    <VoiceAssistantPanel
+                      voice={voice}
+                      interview={voiceInterview}
+                      agentIsBusy={agentStatus === "loading"}
+                      hasPendingProposal={pendingProposal !== null}
+                      voicePreferred={
+                        assistancePreferences.interaction_mode === "voice"
+                      }
+                    />
+                  </div>
                 ) : null}
 
                 {activeAgentField && activeAgentQuestion ? (
-                  <ActiveQuestionCard
-                    agentStatus={agentStatus}
-                    canAnswer={canAnswerActiveQuestion}
-                    field={activeAgentField}
-                    fieldIndex={activeAgentFieldIndex}
-                    phase={agentConversationState.phase}
-                    question={activeAgentQuestion}
-                    quickAnswers={activeQuickAnswers}
-                    section={activeAgentSection}
-                    totalFields={currentAgentFields.length}
-                    transcriptLength={agentMessages.length}
-                    onAskForGuidance={() =>
-                      sendAgentMessage(
-                        "Check official guidance for this question.",
-                      )
-                    }
-                    onAskForPlainLanguage={() =>
-                      sendAgentMessage(
-                        "Explain this question in plain language.",
-                      )
-                    }
-                    onQuickAnswer={sendAgentMessage}
-                    onSkip={(fieldId) =>
-                      sendAgentEvent({ type: "skip", field_id: fieldId })
-                    }
-                  />
+                  <div
+                    className="assistant-question-region"
+                    aria-label="Current form question"
+                    role="region"
+                  >
+                    <ActiveQuestionCard
+                      agentStatus={agentStatus}
+                      canAnswer={canAnswerActiveQuestion}
+                      field={activeAgentField}
+                      fieldIndex={activeAgentFieldIndex}
+                      phase={agentConversationState.phase}
+                      question={activeAgentQuestion}
+                      quickAnswers={activeQuickAnswers}
+                      section={activeAgentSection}
+                      totalFields={currentAgentFields.length}
+                      transcriptLength={agentMessages.length}
+                      onAskForGuidance={() =>
+                        sendAgentMessage(
+                          "Check official guidance for this question.",
+                        )
+                      }
+                      onAskForPlainLanguage={() =>
+                        sendAgentMessage(
+                          "Explain this question in plain language.",
+                        )
+                      }
+                      onQuickAnswer={sendAgentMessage}
+                      onSkip={(fieldId) =>
+                        sendAgentEvent({ type: "skip", field_id: fieldId })
+                      }
+                    />
+                  </div>
                 ) : null}
+
+                <div
+                  className="assistant-conversation-region"
+                  aria-label="Conversation and secondary controls"
+                  role="region"
+                  tabIndex={0}
+                >
+                  {canUseAgent ? (
+                    <SupportPreferencesPanel
+                      disabled={agentStatus === "loading"}
+                      preferences={assistancePreferences}
+                      status={supportIntroductionStatus}
+                      onSave={(preferences) => {
+                        setAssistancePreferences(preferences);
+                        setSupportIntroductionStatus(
+                          hasAssistancePreferences(preferences)
+                            ? "saved"
+                            : "skipped",
+                        );
+                      }}
+                      onSkip={() => {
+                        setAssistancePreferences(
+                          createDefaultAssistancePreferences(),
+                        );
+                        setSupportIntroductionStatus("skipped");
+                      }}
+                    />
+                  ) : null}
+
                 {agentMessages.length === 0 ? (
                   <p className="ai-explanation-empty">
                     Start a guided conversation, or choose{" "}
@@ -1249,36 +1270,6 @@ function App() {
                     onToggleFullTranscript={() =>
                       setShowFullTranscript((current) => !current)
                     }
-                  />
-                ) : null}
-
-                {pendingProposal && pendingProposalField ? (
-                  <ProposalReview
-                    agentStatus={agentStatus}
-                    canApplyEditedProposal={canApplyEditedProposal}
-                    canUseOriginalProposal={canUseOriginalProposal}
-                    details={activeProposalDetails}
-                    field={pendingProposalField}
-                    isEditing={isEditingProposal}
-                    isReplacement={isReplacementPending}
-                    pendingProposal={pendingProposal}
-                    proposalEditValue={proposalEditValue}
-                    onCancelCorrection={() =>
-                      sendAgentEvent({ type: "cancel_correction" })
-                    }
-                    onCancelEdit={() => {
-                      setProposalEditValue(pendingProposal.value);
-                      setIsEditingProposal(false);
-                    }}
-                    onChangeEditValue={setProposalEditValue}
-                    onConfirm={confirmPendingProposal}
-                    onEdit={() => {
-                      setProposalEditValue(pendingProposal.value);
-                      setIsEditingProposal(true);
-                    }}
-                    onReject={rejectPendingProposal}
-                    onSkip={skipPendingProposal}
-                    onUseOriginal={useOriginalProposal}
                   />
                 ) : null}
 
@@ -1365,7 +1356,43 @@ function App() {
                     </div>
                   </section>
                 ) : null}
+                </div>
 
+                {pendingProposal && pendingProposalField ? (
+                  <div
+                    className="assistant-proposal-region"
+                    aria-label="Pending answer review"
+                    role="region"
+                  >
+                    <ProposalReview
+                      agentStatus={agentStatus}
+                      canApplyEditedProposal={canApplyEditedProposal}
+                      canUseOriginalProposal={canUseOriginalProposal}
+                      details={activeProposalDetails}
+                      field={pendingProposalField}
+                      isEditing={isEditingProposal}
+                      isReplacement={isReplacementPending}
+                      pendingProposal={pendingProposal}
+                      proposalEditValue={proposalEditValue}
+                      onCancelCorrection={() =>
+                        sendAgentEvent({ type: "cancel_correction" })
+                      }
+                      onCancelEdit={() => {
+                        setProposalEditValue(pendingProposal.value);
+                        setIsEditingProposal(false);
+                      }}
+                      onChangeEditValue={setProposalEditValue}
+                      onConfirm={confirmPendingProposal}
+                      onEdit={() => {
+                        setProposalEditValue(pendingProposal.value);
+                        setIsEditingProposal(true);
+                      }}
+                      onReject={rejectPendingProposal}
+                      onSkip={skipPendingProposal}
+                      onUseOriginal={useOriginalProposal}
+                    />
+                  </div>
+                ) : null}
               </section>
 
               {canUseAgent ? (

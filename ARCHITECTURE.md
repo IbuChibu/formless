@@ -82,6 +82,12 @@ Responsible for:
 - providing named live status regions, keyboard-operable PDF navigation and
   field targets, explicit drawer state, Escape handling, and focus recovery for
   the direct editor and final review
+- constraining the loaded application to the usable viewport with independently
+  mounted and scrollable PDF and assistant panes; the assistant keeps session
+  state, current question, pending review, and composer outside the conversation
+  history scroll owner
+- preserving those same pane instances and the canonical state while the
+  mobile Assistant/Form switch changes only which pane is visible
 
 Frontend internals preserve one orchestration boundary while separating stable
 responsibilities:
@@ -100,6 +106,15 @@ responsibilities:
 - components under `components` render the header, upload surface, document
   workspace, active question, transcript, proposal review, final review, and
   manual drawer from explicit props and callbacks
+
+The loaded workspace uses layout ownership rather than another state layer.
+`App` renders one document pane and one assistant pane. CSS constrains the shell
+to `100dvh`, assigns PDF page scrolling to the document stage, and assigns
+conversation scrolling to one keyboard-reachable assistant region. Session and
+question context sit above it; proposal review, the typed composer, and the
+manual fallback toggle sit below it. Final review and the expanded manual drawer
+are bounded overlays with explicit close/focus-return paths, so opening them
+does not recreate panes or displace canonical controls.
 
 Extracted presentation components do not fetch, own a second field store,
 interpret free-form agent text, or apply PDF changes. Moving between components
