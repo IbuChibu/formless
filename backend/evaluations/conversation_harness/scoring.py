@@ -448,8 +448,11 @@ def _used_closed_confirmation_route(turn: RecordedTurn) -> bool:
     if not turn.request_state.get("pending_proposal"):
         return False
     return any(
-        diagnostic.get("route") == "interpreted_action_accepted"
-        and diagnostic.get("intent") == "confirm_proposal"
+        diagnostic.get("route") == "deterministic_review_command"
+        or (
+            diagnostic.get("route") == "interpreted_action_accepted"
+            and diagnostic.get("intent") == "confirm_proposal"
+        )
         for diagnostic in turn.route_diagnostics
     )
 

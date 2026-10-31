@@ -1,0 +1,299 @@
+{
+  "schema_version": 3,
+  "suite_id": "human-helper-experience-v2",
+  "description": "Synthetic release-gate conversations based on observed Formless voice and typed failures. The suite uses real extracted fixture schemas and never contains real personal information.",
+  "personas": [
+    {
+      "id": "plain_words",
+      "name": "Sam",
+      "summary": "A synthetic user who needs official wording explained gradually.",
+      "communication_style": "Short questions and ordinary spoken answers.",
+      "behaviours": ["asks what wording means", "requests simpler explanations", "answers after understanding"]
+    },
+    {
+      "id": "voice_reviewer",
+      "name": "Alex",
+      "summary": "A synthetic voice-first user who reviews proposals carefully.",
+      "communication_style": "Brief speech-like commands with occasional recognition errors.",
+      "behaviours": ["confirms explicitly", "asks for read-back", "rejects near-match commands"]
+    },
+    {
+      "id": "nonlinear_helper",
+      "name": "Jordan",
+      "summary": "A synthetic user who asks side questions and supplies corrections.",
+      "communication_style": "Conversational and nonlinear.",
+      "behaviours": ["interrupts with relevant questions", "skips and returns", "corrects earlier answers"]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "first-explanation-progressively-simplifies",
+      "title": "Explain the active question on the first request and simplify it",
+      "persona_id": "plain_words",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["occupancy_start_date"],
+      "purpose": "Catch the observed failure where the first clarification was treated as an invalid answer or repeated verbatim.",
+      "tags": ["human_helper", "first_turn_help", "progressive_simplification"],
+      "turns": [
+        {
+          "id": "select",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "occupancy_start_date"}
+        },
+        {
+          "id": "first-meaning",
+          "event": {"type": "message", "content": "What does that mean?"},
+          "expect": {"effects": ["none"], "message_excludes_all": ["could not safely validate", "provide one exact"]},
+          "behavior": {"answers_latest_request_with_any": ["moved", "started living", "living"], "must_not_advance": true, "max_questions": 1, "speech_suitable": true},
+          "tags": ["clarification", "clarification_success", "side_question_recovery", "unnecessary_push_check", "speech_suitability"]
+        },
+        {
+          "id": "simpler",
+          "event": {"type": "message", "content": "Say that more simply."},
+          "expect": {"effects": ["none"]},
+          "behavior": {"answers_latest_request_with_any": ["moved in", "home", "live there", "start living", "started living", "current address", "ordinary residence", "began living"], "must_not_advance": true, "max_questions": 1, "speech_suitable": true},
+          "tags": ["clarification_success", "side_question_recovery", "repetition_check", "unnecessary_push_check", "speech_suitability"]
+        },
+        {
+          "id": "answer",
+          "event": {"type": "message", "content": "I moved in on 2000-10-10."},
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "occupancy_start_date", "prepared_value": "2000-10-10"},
+          "behavior": {"acknowledges_with_any": ["2000-10-10", "10 October 2000"], "speech_suitable": true},
+          "tags": ["latest_answer", "acknowledgement", "speech_suitability"]
+        },
+        {
+          "id": "confirm",
+          "event": {"type": "message", "content": "Confirm."},
+          "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "occupancy_start_date", "prepared_value": "2000-10-10"},
+          "tags": ["confirmation_boundary"]
+        }
+      ],
+      "expected_final": {"confirmed_values": {"occupancy_start_date": "2000-10-10"}},
+      "allowed_proposals": {"occupancy_start_date": ["2000-10-10"]}
+    },
+    {
+      "id": "finite-choice-missing-distinction",
+      "title": "Do not infer tenure from living alone",
+      "persona_id": "plain_words",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["residency_arrangement"],
+      "purpose": "Require a focused tenure clarification before choosing one of the PDF's exact options.",
+      "tags": ["human_helper", "finite_choice_safety", "clarification"],
+      "turns": [
+        {
+          "id": "select",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "residency_arrangement"}
+        },
+        {
+          "id": "insufficient-answer",
+          "event": {"type": "message", "content": "I live by myself."},
+          "expect": {"effects": ["none"], "phase": "awaiting_clarification", "field_id": "residency_arrangement", "message_excludes_all": ["closest option is Living with family or friends", "I prepared Sole tenant"]},
+          "behavior": {"clarifies_with_any": ["rent", "own", "tenant", "arrangement"], "must_not_advance": true, "max_questions": 1, "speech_suitable": true},
+          "tags": ["clarification", "clarification_success", "latest_answer", "contradiction_check", "speech_suitability"]
+        },
+        {
+          "id": "near-match",
+          "event": {"type": "message", "content": "Solo tenant."},
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "residency_arrangement", "prepared_value": "Sole tenant"},
+          "behavior": {"acknowledges_with_any": ["Sole tenant"], "speech_suitable": true},
+          "tags": ["latest_answer", "acknowledgement", "speech_suitability"]
+        },
+        {
+          "id": "confirm",
+          "event": {"type": "message", "content": "Yes, confirm that."},
+          "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "residency_arrangement", "prepared_value": "Sole tenant"},
+          "tags": ["confirmation_boundary"]
+        }
+      ],
+      "expected_final": {"confirmed_values": {"residency_arrangement": "Sole tenant"}},
+      "allowed_proposals": {"residency_arrangement": ["Sole tenant"]},
+      "forbidden_assistant_terms": ["living alone means you are a sole tenant", "best reflects your situation"]
+    },
+    {
+      "id": "ambiguous-date-needs-clarification",
+      "title": "Clarify a date that conflicts with the requested format",
+      "persona_id": "plain_words",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_date_of_birth"],
+      "purpose": "Prevent an invalid US-style date from crossing the proposal boundary for a DD/MM/YYYY field.",
+      "tags": ["human_helper", "ambiguous_format", "clarification"],
+      "turns": [
+        {
+          "id": "select",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_date_of_birth"}
+        },
+        {
+          "id": "invalid-date",
+          "event": {"type": "message", "content": "05/19/2011"},
+          "expect": {"effects": ["none"], "phase": "awaiting_clarification", "field_id": "applicant_date_of_birth", "state_unchanged": false},
+          "behavior": {"clarifies_with_any": ["day", "month", "DD/MM/YYYY", "19 May"], "must_not_advance": true, "max_questions": 1, "speech_suitable": true},
+          "tags": ["clarification", "clarification_success", "latest_answer", "speech_suitability"]
+        },
+        {
+          "id": "clear-date",
+          "event": {"type": "message", "content": "The nineteenth of May 2011."},
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_date_of_birth", "prepared_value": "19/05/2011"},
+          "behavior": {"acknowledges_with_any": ["19/05/2011", "19 May 2011"], "speech_suitable": true},
+          "tags": ["latest_answer", "acknowledgement", "speech_suitability"]
+        },
+        {
+          "id": "confirm",
+          "event": {"type": "message", "content": "Confirm. Confirm."},
+          "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "applicant_date_of_birth", "prepared_value": "19/05/2011"},
+          "tags": ["confirmation_boundary"]
+        }
+      ],
+      "expected_final": {"confirmed_values": {"applicant_date_of_birth": "19/05/2011"}},
+      "allowed_proposals": {"applicant_date_of_birth": ["19/05/2011"]}
+    },
+    {
+      "id": "review-commands-remain-closed",
+      "title": "Understand clear review commands without accepting near matches",
+      "persona_id": "voice_reviewer",
+      "fixture": "sample_form.pdf",
+      "field_ids": ["full_name"],
+      "purpose": "Prove that spoken confirmation and read-back work while a recognition near-match remains non-mutating.",
+      "tags": ["human_helper", "review_understanding", "confirmation"],
+      "turns": [
+        {
+          "id": "select",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "full_name"}
+        },
+        {
+          "id": "answer",
+          "event": {"type": "message", "content": "Ebrahim Akhoon"},
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "full_name", "prepared_value": "Ebrahim Akhoon"},
+          "behavior": {"acknowledges_with_any": ["Ebrahim Akhoon"], "speech_suitable": true},
+          "tags": ["acknowledgement", "speech_suitability"]
+        },
+        {
+          "id": "near-match-does-not-confirm",
+          "event": {"type": "message", "content": "Permit."},
+          "expect": {"effects": ["none"], "phase": "awaiting_confirmation", "field_id": "full_name", "state_unchanged": true},
+          "behavior": {"clarifies_with_any": ["confirm", "change", "reject", "repeat"], "must_not_advance": true, "max_questions": 1, "speech_suitable": true},
+          "tags": ["confirmation_boundary", "clarification", "speech_suitability"]
+        },
+        {
+          "id": "read-back",
+          "event": {"type": "message", "content": "What did you hear?"},
+          "expect": {"effects": ["none"], "phase": "awaiting_confirmation", "field_id": "full_name", "state_unchanged": true, "message_includes_all": ["Ebrahim Akhoon"]},
+          "behavior": {"answers_latest_request_with_any": ["Ebrahim Akhoon"], "must_not_advance": true, "max_questions": 1, "speech_suitable": true},
+          "tags": ["context_retention", "side_question_recovery", "speech_suitability"]
+        },
+        {
+          "id": "confirm",
+          "event": {"type": "message", "content": "Confirm."},
+          "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "full_name", "prepared_value": "Ebrahim Akhoon"},
+          "tags": ["confirmation_boundary"]
+        }
+      ],
+      "expected_final": {"confirmed_values": {"full_name": "Ebrahim Akhoon"}},
+      "allowed_proposals": {"full_name": ["Ebrahim Akhoon"]}
+    },
+    {
+      "id": "ten-turn-human-helper-journey",
+      "title": "Complete a long low-effort interview with side questions and correction",
+      "persona_id": "nonlinear_helper",
+      "fixture": "household_support_review_demo.pdf",
+      "field_ids": ["applicant_full_legal_name", "applicant_preferred_name", "household_member_count"],
+      "purpose": "Measure conversational continuity over more than ten consecutive turns without requiring a new recording action between turns.",
+      "tags": ["human_helper", "hands_free_continuity", "long_form", "recovery"],
+      "turns": [
+        {
+          "id": "select-name",
+          "event": {"type": "advance"},
+          "expect": {"effects": ["field_selected"], "phase": "awaiting_answer", "field_id": "applicant_full_legal_name"}
+        },
+        {
+          "id": "explain-name",
+          "event": {"type": "message", "content": "What do you mean by legal name?"},
+          "expect": {"effects": ["none"], "phase": "awaiting_answer", "state_unchanged": true},
+          "behavior": {"answers_latest_request_with_any": ["official", "passport", "birth certificate", "documents"], "must_not_advance": true, "max_questions": 1, "speech_suitable": true},
+          "tags": ["side_question_recovery", "interruption_recovery", "unnecessary_push_check", "speech_suitability"]
+        },
+        {
+          "id": "name",
+          "event": {"type": "message", "content": "Jordan Lee"},
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_full_legal_name", "prepared_value": "Jordan Lee"},
+          "behavior": {"acknowledges_with_any": ["Jordan Lee"], "speech_suitable": true},
+          "tags": ["latest_answer", "acknowledgement", "speech_suitability"]
+        },
+        {
+          "id": "confirm-name",
+          "event": {"type": "message", "content": "Confirm."},
+          "expect": {"effects": ["confirmed"], "phase": "awaiting_answer", "field_id": "applicant_full_legal_name", "prepared_value": "Jordan Lee"},
+          "tags": ["confirmation_boundary"]
+        },
+        {
+          "id": "skip-preferred",
+          "event": {"type": "message", "content": "Let's skip that for now."},
+          "expect": {"effects": ["skipped"], "phase": "awaiting_answer", "field_id": "applicant_preferred_name"}
+        },
+        {
+          "id": "count-side-question",
+          "event": {"type": "message", "content": "What if someone lives here but does not share food or costs?"},
+          "expect": {"effects": ["none"], "phase": "awaiting_answer", "state_unchanged": true},
+          "behavior": {"answers_latest_request_with_any": ["do not count", "only count", "share"], "returns_to_form_with_any": ["how many", "number", "count"], "must_not_advance": true, "max_questions": 1, "speech_suitable": true},
+          "tags": ["side_question_recovery", "interruption_recovery", "unnecessary_push_check", "speech_suitability"]
+        },
+        {
+          "id": "count",
+          "event": {"type": "message", "content": "Two, including me."},
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "household_member_count", "prepared_value": "2"},
+          "behavior": {"acknowledges_with_any": ["2", "two"], "speech_suitable": true},
+          "tags": ["latest_answer", "acknowledgement", "interruption_recovery", "speech_suitability"]
+        },
+        {
+          "id": "reject-count",
+          "event": {"type": "message", "content": "No, change that."},
+          "expect": {"effects": ["rejected"], "phase": "awaiting_answer", "field_id": "household_member_count"},
+          "tags": ["confirmation_boundary"]
+        },
+        {
+          "id": "correct-count",
+          "event": {"type": "message", "content": "It should be one, just me."},
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "household_member_count", "prepared_value": "1"},
+          "behavior": {"acknowledges_with_any": ["1", "one"], "speech_suitable": true},
+          "tags": ["latest_answer", "acknowledgement", "recovery", "speech_suitability"]
+        },
+        {
+          "id": "confirm-count",
+          "event": {"type": "message", "content": "Confirm that."},
+          "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "household_member_count", "prepared_value": "1"},
+          "tags": ["confirmation_boundary"]
+        },
+        {
+          "id": "return-preferred",
+          "event": {"type": "message", "content": "Go back to the name you should call me."},
+          "expect": {"effects": ["field_reopened"], "phase": "awaiting_answer", "field_id": "applicant_preferred_name"},
+          "tags": ["context_retention", "interruption_recovery"]
+        },
+        {
+          "id": "preferred",
+          "event": {"type": "message", "content": "Call me Jordy."},
+          "expect": {"effects": ["proposal"], "phase": "awaiting_confirmation", "field_id": "applicant_preferred_name", "prepared_value": "Jordy"},
+          "behavior": {"acknowledges_with_any": ["Jordy"], "speech_suitable": true},
+          "tags": ["latest_answer", "acknowledgement", "speech_suitability"]
+        },
+        {
+          "id": "confirm-preferred",
+          "event": {"type": "message", "content": "Confirm."},
+          "expect": {"effects": ["confirmed"], "phase": "form_complete", "field_id": "applicant_preferred_name", "prepared_value": "Jordy"},
+          "tags": ["confirmation_boundary"]
+        },
+        {
+          "id": "summary",
+          "event": {"type": "message", "content": "Tell me what we have entered."},
+          "expect": {"effects": ["none"], "phase": "form_complete", "state_unchanged": true},
+          "behavior": {"answers_latest_request_with_any": ["Jordan Lee", "Jordy", "1"], "must_not_advance": true, "max_questions": 0, "speech_suitable": true},
+          "tags": ["context_retention", "side_question_recovery", "speech_suitability"]
+        }
+      ],
+      "expected_final": {"confirmed_values": {"applicant_full_legal_name": "Jordan Lee", "applicant_preferred_name": "Jordy", "household_member_count": "1"}},
+      "allowed_proposals": {"applicant_full_legal_name": ["Jordan Lee"], "applicant_preferred_name": ["Jordy"], "household_member_count": ["1", "2"]}
+    }
+  ]
+}

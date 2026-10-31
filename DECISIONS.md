@@ -836,3 +836,28 @@ buried. These controls remain important, but they are occasional tools rather
 than the main task. A conversation-first hierarchy better matches the product's
 human-helper intent while retaining one canonical field state, explicit
 confirmation, keyboard access, and a visible typed fallback.
+
+## 2026-10-30 — Release reliability uses closed review commands and a v2 gate
+
+Decision:
+Use the versioned `human-helper-experience-v2` suite as the release integration
+gate. Exact pending-review read-back, confirmation, rejection, and the explicit
+request to skip the active unanswered field resolve without depending on a
+provider response. A recognition near-match such as `Permit` is explicitly
+non-mutating. While a proposal is pending, only the bounded `edit_proposal`
+intent may prepare a replacement; a generic answer classification cannot
+replace the visible value.
+
+Provider-failure fallbacks may restate only facts contained in the active field
+schema. Number adapters accept clear spoken whole-number framing such as “it
+should be one, just me,” and repeated explanations that merely echo official
+wording fall back to the field's existing plain label. None of these paths can
+confirm a value or write to the PDF without the existing closed effect.
+
+Reason:
+Live evaluation reproduced cascading failures from provider variability: a
+clear skip or rejection could leave the interview on the wrong field, read-back
+could answer an earlier utterance, and a review near-match could be interpreted
+as replacement text. These operations have objective meaning only in a narrow,
+visible state, so making them provider-independent improves reliability without
+returning ordinary conversation to a phrase table or weakening confirmation.

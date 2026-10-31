@@ -1019,7 +1019,87 @@ def test_natural_read_back_request_keeps_the_proposal_pending() -> None:
 
     assert response.effect.effect == "none"
     assert response.conversation_state == request.conversation_state
-    assert response.assistant_message == "Of course — I heard John Michael."
+    assert "John Michael" in response.assistant_message
+    assert "answer you want me to use" in response.assistant_message
+    assert model.calls == []
+
+
+def test_exact_read_back_uses_pending_value_before_model_interpretation() -> None:
+    request = _request(
+        "What did you hear?",
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "full_name", "value": "John Michael"},
+    )
+    model = StubNemotronService(error=AssertionError("model must not be called"))
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert "John Michael" in response.assistant_message
+    assert model.calls == []
+
+
+def test_exact_conversational_skip_survives_provider_failure() -> None:
+    request = _request("Let's skip that for now.")
+    model = StubNemotronService(error=AssertionError("model must not be called"))
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "skipped"
+    assert response.effect.field_id == "full_name"
+    assert response.conversation_state.phase == "form_complete"
+    assert model.calls == []
+
+
+def test_exact_rejection_survives_provider_failure() -> None:
+    request = _request(
+        "No, change that.",
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "full_name", "value": "John Michael"},
+    )
+    model = StubNemotronService(error=AssertionError("model must not be called"))
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "rejected"
+    assert response.conversation_state.phase == "awaiting_answer"
+    assert response.conversation_state.pending_proposal is None
+    assert model.calls == []
+
+
+def test_conversational_preferred_name_reference_reopens_skipped_field() -> None:
+    fields = [
+        _field("preferred_name", "Name you want us to use", status="skipped"),
+        _field(
+            "count",
+            "Household count",
+            status="confirmed",
+            confirmed_value="1",
+        ),
+    ]
+    request = _request(
+        "Go back to the name you should call me.",
+        fields=fields,
+        active_field_id=None,
+        phase="form_complete",
+    )
+    model = StubNemotronService(error=AssertionError("model must not be called"))
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "field_reopened"
+    assert response.effect.field_id == "preferred_name"
+    assert response.conversation_state.phase == "awaiting_answer"
+    assert model.calls == []
 
 
 def test_near_match_review_language_cannot_confirm_even_if_model_requests_it() -> None:
@@ -1044,6 +1124,7 @@ def test_near_match_review_language_cannot_confirm_even_if_model_requests_it() -
     assert response.action.action == "clarify"
     assert response.conversation_state == request.conversation_state
     assert "confirm, change, reject, or hear" in response.assistant_message
+    assert model.calls == []
 
 
 @pytest.mark.parametrize("message", ["Confirm.", "Confirm. Confirm."])
@@ -1390,6 +1471,35 @@ def test_pending_review_provider_failure_preserves_the_proposal_naturally() -> N
     assert response.conversation_state == request.conversation_state
     assert "not changed the form" in response.assistant_message
     assert "Use Confirm, Edit" not in response.assistant_message
+
+
+def test_near_match_cannot_replace_pending_value_when_model_calls_it_an_answer() -> None:
+    model = StubNemotronService(
+        _interpretation(
+            intent="answer_current_field",
+            candidates=[
+                {
+                    "field_id": "full_name",
+                    "value": "John Michael",
+                    "evidence": "Permit",
+                }
+            ],
+            assistant_reply="John Michael — is that right?",
+        )
+    )
+    request = _request(
+        "Permit.",
+        phase="awaiting_confirmation",
+        pending_proposal={"field_id": "full_name", "value": "John Michael"},
+    )
+
+    response = asyncio.run(
+        FormAgentService(model).respond(request)  # type: ignore[arg-type]
+    )
+
+    assert response.effect.effect == "none"
+    assert response.conversation_state == request.conversation_state
+    assert "confirm, change, reject" in response.assistant_message
 
 
 def test_pending_read_back_survives_turn_interpreter_failure() -> None:

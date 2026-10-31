@@ -107,6 +107,24 @@ def validate_action_for_turn(
 
     repair_context = explanation_repair_context(request)
     previous_explanation = repair_context.previous_explanation
+    active_field_id = request_active_field_id(request)
+    active_field = next(
+        (field for field in request.fields if field.id == active_field_id),
+        None,
+    )
+    if (
+        repair_context.objective != "initial_paraphrase"
+        and active_field is not None
+        and active_field.question
+    ):
+        official_words = set(_comparison_words(active_field.question))
+        response_words = set(_comparison_words(action.message))
+        if (
+            official_words
+            and official_words <= response_words
+            and len(response_words) <= len(official_words) + 6
+        ):
+            raise FormAgentError(REPEATED_EXPLANATION_ERROR)
     if previous_explanation is not None and explanations_are_near_duplicate(
         previous_explanation,
         action.message,

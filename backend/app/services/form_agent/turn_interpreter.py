@@ -796,11 +796,10 @@ def _pending_review_action(
             field_id=active_field.id,
         )
 
-    if interpretation.intent in {
-        "edit_proposal",
-        "answer_current_field",
-        "correct_field",
-    }:
+    if interpretation.intent in {"answer_current_field", "correct_field"}:
+        return _ambiguous_review_clarification(active_field)
+
+    if interpretation.intent == "edit_proposal":
         if not _interpretation_is_settled(interpretation):
             return _uncertain_clarification(active_field, interpretation)
         candidate = next(
@@ -897,20 +896,30 @@ _EXACT_CONFIRM_REVIEW_PHRASES = {
     "correct",
     "that is correct",
     "that's correct",
+    "yes that's right",
+    "yes that is right",
     "looks good",
     "go ahead",
     "use that",
     "put that in",
 }
+_EXACT_REJECT_REVIEW_PHRASES = {
+    "no change that",
+    "change that",
+    "reject that",
+    "do not use that",
+    "don't use that",
+}
+_EXACT_AMBIGUOUS_REVIEW_PHRASES = {"permit"}
 
 
 def explicit_pending_review_action(
     request: FormAgentRequest,
 ) -> Optional[FormAgentAction]:
-    """Resolve only unmistakable confirmation commands without a model call.
+    """Resolve unmistakable closed review commands without a model call.
 
-    Proposal confirmation is a closed state transition. Exact commands such as
-    ``Confirm`` remain safe to handle when Nemotron is unavailable or returns
+    Proposal confirmation and read-back are closed state transitions. Exact
+    commands remain safe to handle when Nemotron is unavailable or returns
     malformed output, while near matches and conversational sentences still go
     through semantic interpretation.
     """
@@ -926,15 +935,41 @@ def explicit_pending_review_action(
     if active_field is None or pending is None:
         return None
 
+    if _EXPLICIT_REPEAT_REVIEW.search(request_message(request)) is not None:
+        return _grounded_pending_readback(active_field, pending.value)
+
     normalized = re.sub(
         r"[^a-z']+",
         " ",
         request_message(request).casefold(),
     ).strip()
+    if normalized in _EXACT_AMBIGUOUS_REVIEW_PHRASES:
+        return _ambiguous_review_clarification(active_field)
     words = normalized.split()
     repeated_confirm = bool(words) and all(
         word in {"confirm", "confirmed"} for word in words
     )
+    if normalized in _EXACT_REJECT_REVIEW_PHRASES:
+        if (
+            request.conversation_state.phase
+            == "awaiting_replacement_confirmation"
+        ):
+            return ReplacementRejectedAction(
+                action="replacement_rejected",
+                message=(
+                    "No change made — the current confirmed answer stays "
+                    "as it is."
+                ),
+                field_id=active_field.id,
+            )
+        return RejectedAction(
+            action="rejected",
+            message=(
+                "No problem — I have not used that answer. What should "
+                "I use instead?"
+            ),
+            field_id=active_field.id,
+        )
     if not repeated_confirm and normalized not in _EXACT_CONFIRM_REVIEW_PHRASES:
         return None
 
@@ -947,6 +982,35 @@ def explicit_pending_review_action(
             == "awaiting_replacement_confirmation"
         ),
     )
+
+
+_EXACT_SKIP_CURRENT_FIELD = re.compile(
+    r"^(?:please\s+)?(?:let(?:'s|\s+us)\s+)?"
+    r"(?:skip|leave|pass)"
+    r"(?:\s+(?:this|that|it|this\s+one|that\s+one|"
+    r"this\s+question|that\s+question))?"
+    r"(?:\s+for\s+(?:now|later))?[.!]?$",
+    re.IGNORECASE,
+)
+
+
+def explicit_current_field_action(
+    request: FormAgentRequest,
+) -> Optional[FormAgentAction]:
+    """Resolve exact safe commands about the active unanswered field."""
+
+    if (
+        request.conversation_state.phase
+        not in {"awaiting_answer", "awaiting_clarification"}
+        or not isinstance(request.event, MessageEvent)
+    ):
+        return None
+    active_field = _active_field(request)
+    if active_field is None or active_field.status != "unanswered":
+        return None
+    if _EXACT_SKIP_CURRENT_FIELD.fullmatch(request_message(request).strip()) is None:
+        return None
+    return skip_action(active_field, request.fields)
 
 
 _EXPLICIT_CONFIRM_REVIEW = re.compile(

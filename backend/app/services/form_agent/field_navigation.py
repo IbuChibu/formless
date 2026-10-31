@@ -294,6 +294,16 @@ def _field_aliases(field: FormAgentField) -> set[str]:
         )
         if compact:
             aliases.add(compact)
+        if (
+            "preferred name" in normalized
+            or {"name", "want", "use"} <= set(normalized.split())
+        ):
+            aliases.update(
+                {
+                    "name you should call me",
+                    "name to call me",
+                }
+            )
     return aliases
 
 

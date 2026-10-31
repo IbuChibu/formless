@@ -228,3 +228,25 @@ python -m evaluations.conversation_harness run \
   --scenarios evaluations/scenarios/context_rich_natural_review.json \
   --judge
 ```
+
+Milestone 9.2.5 adds the release-gate `human-helper-experience-v2` suite based
+on observed voice and typed failures. It checks first-request explanations,
+progressive simplification, ambiguous dates, housing-option safety, proposal
+read-back, near-match review speech, skip/reopen, correction, and a fourteen-
+turn low-effort interview against real extracted fixture schemas:
+
+```bash
+cd backend
+source .venv/bin/activate
+set -a
+source .env
+set +a
+python -m evaluations.conversation_harness run \
+  --label human-helper-release-gate \
+  --scenarios evaluations/scenarios/human_helper_experience_v2.json \
+  --judge
+```
+
+The accepted local live run uses synthetic data only and must pass both the
+hard canonical-state gate and the human-helper gate. Generated transcripts stay
+under the ignored `backend/evaluations/results/` directory.

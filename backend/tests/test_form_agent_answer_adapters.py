@@ -279,6 +279,7 @@ def test_number_adapter_clarifies_estimates_ranges_and_multiple_values(
         ("One.", "1"),
         ("There are twelve.", "12"),
         ("The answer is twenty.", "20"),
+        ("It should be one, just me.", "1"),
     ],
 )
 def test_number_adapter_uses_unambiguous_spoken_whole_numbers(

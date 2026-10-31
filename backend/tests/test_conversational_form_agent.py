@@ -484,7 +484,8 @@ def test_repeated_explanation_after_correction_uses_safe_fallback() -> None:
     response = _respond(request, nemotron, tavily)
 
     assert response.action.action == "explain"
-    assert "Which word or phrase" in response.action.message
+    assert "Put simply" in response.action.message
+    assert "move-in date" in response.action.message
     assert "Your form answer has not changed" in response.action.message
     assert response.conversation_state == request.conversation_state
     assert len(nemotron.calls) == 3

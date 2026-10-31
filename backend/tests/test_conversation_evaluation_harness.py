@@ -54,6 +54,12 @@ HUMAN_HELPER_SCENARIOS = (
     / "scenarios"
     / "human_helper_experience.json"
 )
+HUMAN_HELPER_V2_SCENARIOS = (
+    Path(__file__).parents[1]
+    / "evaluations"
+    / "scenarios"
+    / "human_helper_experience_v2.json"
+)
 
 
 class NeverCalledNemotron:
@@ -314,6 +320,40 @@ def test_human_helper_suite_is_long_form_synthetic_and_multi_fixture() -> None:
     )
 
 
+def test_human_helper_v2_suite_covers_observed_integrated_failures() -> None:
+    suite = load_scenario_suite(HUMAN_HELPER_V2_SCENARIOS)
+    scenario_tags = {tag for item in suite.scenarios for tag in item.tags}
+    visible_messages = {
+        turn.visible_user_message or str(turn.event.get("content", ""))
+        for item in suite.scenarios
+        for turn in item.turns
+    }
+
+    assert suite.schema_version == 3
+    assert suite.suite_id == "human-helper-experience-v2"
+    assert len(suite.scenarios) >= 5
+    assert {
+        "first_turn_help",
+        "progressive_simplification",
+        "finite_choice_safety",
+        "ambiguous_format",
+        "review_understanding",
+        "hands_free_continuity",
+    } <= scenario_tags
+    assert "What does that mean?" in visible_messages
+    assert "I live by myself." in visible_messages
+    assert "05/19/2011" in visible_messages
+    assert "Permit." in visible_messages
+    assert "Confirm." in visible_messages
+    hands_free = next(
+        item for item in suite.scenarios if "hands_free_continuity" in item.tags
+    )
+    assert len(hands_free.turns) >= 10
+    assert all(
+        "synthetic" in persona.summary.casefold() for persona in suite.personas
+    )
+
+
 def test_simulator_drives_real_service_and_records_canonical_state() -> None:
     report = asyncio.run(
         ConversationSimulator(_target()).run(_scenario(), _persona())
@@ -444,6 +484,34 @@ def test_natural_confirmation_counts_only_through_closed_semantic_route() -> Non
     assert _confirmation_boundary_failures(
         natural_confirmation.model_copy(update={"route_diagnostics": []})
     ) == 1
+
+
+def test_exact_confirmation_counts_through_closed_deterministic_route() -> None:
+    report = asyncio.run(
+        ConversationSimulator(_target()).run(_scenario(), _persona())
+    )
+    confirmation = report.transcript[2].model_copy(
+        update={
+            "user_event": {"type": "message", "content": "Confirm."},
+            "request_state": {
+                "phase": "awaiting_confirmation",
+                "active_field_id": "full_name",
+                "pending_proposal": {
+                    "field_id": "full_name",
+                    "value": "Ada Example",
+                },
+            },
+            "route_diagnostics": [
+                {
+                    "route": "deterministic_review_command",
+                    "phase": "awaiting_confirmation",
+                    "intent": "none",
+                }
+            ],
+        }
+    )
+
+    assert _confirmation_boundary_failures(confirmation) == 0
 
 
 def test_suite_report_saves_full_transcript_and_qualitative_scores(

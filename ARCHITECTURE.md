@@ -745,6 +745,15 @@ identities show whether a production change fixed or introduced behavior;
 free-form judge wording remains visible in each report but is not used as a
 stable failure identity.
 
+The versioned `human-helper-experience-v2` release suite is the integration
+gate for conversation meaning, closed review effects, and long-turn continuity.
+It includes observed speech near-matches and provider-failure paths. Exact
+confirmation, rejection, read-back, and skip commands may resolve through
+closed deterministic transitions when the relevant field/proposal state is
+already visible. They never infer a personal value. A pending proposal cannot
+be replaced by a model classification of an ordinary answer; replacement must
+use the bounded `edit_proposal` intent and still requires later confirmation.
+
 Normal tests use deterministic Nemotron doubles and make no network requests.
 The transcript evaluator may be run explicitly in live mode with the configured
 Nebius credentials to report model latency and calls per evaluated field. It

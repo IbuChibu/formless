@@ -51,10 +51,12 @@ _COUNT_SELF_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _SPOKEN_NUMBER_PATTERN = re.compile(
-    r"^(?:(?:the\s+answer\s+is|it\s+is|it's|there\s+(?:is|are)|just|only)\s+)?"
+    r"^(?:(?:the\s+answer\s+is|it\s+(?:is|should\s+be)|it's|"
+    r"there\s+(?:is|are)|just|only)\s+)?"
     r"(?P<number>zero|one|two|three|four|five|six|seven|eight|nine|ten|"
     r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
-    r"nineteen|twenty)(?:,?\s+(?:including|counting)\s+(?:me|myself))?[.!]?$",
+    r"nineteen|twenty)(?:,?\s+(?:(?:including|counting)\s+)?"
+    r"(?:just\s+)?(?:me|myself))?[.!]?$",
     re.IGNORECASE,
 )
 _SPOKEN_NUMBER_VALUES = {

@@ -5679,7 +5679,8 @@ Manual-feedback refinement (2026-10-30):
 
 # Milestone 9.2.5 — Integrated human-helper workflow validation
 
-Status: NOT STARTED
+Status: IMPLEMENTED — AUTOMATED AND LIVE MODEL GATES PASS; PHYSICAL MANUAL QA
+PENDING
 
 Why this gate is required:
 Milestones 9.2.2 through 9.2.4 deliberately separate conversation meaning,
@@ -5818,9 +5819,34 @@ Do not implement:
 - Milestone 9.3, 9.4, deployment, or submission work before this integration
   gate actually passes
 
+Automated and live outcome (2026-10-30):
+- added the versioned `human-helper-experience-v2` suite with five synthetic
+  scenarios and 32 turns over the sample and household-support schemas
+- reproduced and repaired pending-value read-back drift, provider-dependent
+  skip/reject commands, a proposal near-match replacement, spoken count
+  recovery, conversational skipped-field reference, and repeated official
+  wording during progressive simplification
+- the final live Lightning run passed both gates with exact form state `1.0`,
+  every measured human-helper rate `1.0`, zero repetition, zero invention, zero
+  deterministic or qualitative failures, and zero confirmation-boundary
+  failures
+- the configured Ultra candidate was not selected: it treated `Permit` as
+  replacement text before the final guard and did not justify changing the
+  retained Lightning runtime
+- complete backend regression passes with 493 tests; the focused five-fixture
+  PDF compatibility/reopen gate passes with 40 tests; every frontend workflow,
+  workspace, Deepgram, interruption, support-preference check and production
+  build passes
+- local browser checks confirm backend connectivity and no horizontal overflow
+  at 1280x720 or 390x844; the automation surface cannot attach a local PDF
+  through the native file picker, so loaded-form microphone, long-transcript,
+  keyboard, and screen-reader evidence remains required
+- no real provider secret is tracked; the scan finds only documented
+  placeholder values
+
 # Milestone 9.3 — One-language bilingual assistance pilot
 
-Status: NOT STARTED — CONDITIONAL
+Status: DEFERRED TO MILESTONE 12 — GO/NO-GO REQUIREMENTS NOT MET
 
 Go/no-go gate before implementation:
 - choose exactly one target assistance language
@@ -5919,9 +5945,17 @@ Do not implement:
 - a second agent, translation framework, persistence, accounts, or analytics
 - later deployment or submission work
 
+Go/no-go outcome (2026-10-30):
+- no single target assistance language and no fluent/native reviewer were
+  selected before the documented 22 October gate
+- no reviewed browser voice capability or bilingual fixture transcript exists
+- implementing unreviewed translation would create a meaning-changing safety
+  and judging risk, so the milestone is deferred exactly as specified
+
 # Milestone 9.4 — Hero workflow validation and release freeze
 
-Status: NOT STARTED
+Status: IN PROGRESS — AUTOMATED RELEASE CANDIDATE PASSES; OBSERVED HUMAN
+SESSIONS PENDING
 
 Goal:
 Choose the exact workflow judges will see, validate it with people who find
@@ -5993,6 +6027,21 @@ Do not implement:
 - new PDF types, additional languages, authentication, persistence, a
   database, analytics, online forms, or infrastructure beyond local testing
 - deployment or submission work before the release candidate passes
+
+Automated release-candidate outcome (2026-10-30):
+- selected `household_support_review_demo.pdf` as the hero fixture and
+  `sample_form.pdf` as the provider-independent fallback
+- documented the exact synthetic hero path, fallback path, observed-session
+  rubric, hard blockers, and remaining evidence in
+  `docs/milestone-9.4-hero-workflow.md`
+- the final 9.2.5 live suite and complete local regression gates pass; PDF
+  source-integrity/reopen coverage and tracked-secret checks pass
+- feature scope is provisionally frozen; only release-blocking safety,
+  accessibility, state-loss, and documentation fixes are allowed
+- completion is not claimed because three to five uncoached observed sessions,
+  a physical one-start microphone run, loaded-form responsive QA,
+  keyboard/screen-reader smoke testing, and visual downloaded-PDF inspection
+  still require human execution
 
 # Milestone 10 — Deployment
 

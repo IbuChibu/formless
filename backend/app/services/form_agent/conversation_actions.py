@@ -133,6 +133,15 @@ def explanation_repair_fallback(
             f"This is asking for {subject}. The form text available to me "
             "does not specify a required date format, so I won't invent one."
         )
+    elif (
+        str(error) == _REPEATED_EXPLANATION_ERROR
+        and field.label.casefold() != (field.question or field.label).casefold()
+    ):
+        plain_label = truncate_text(field.label, 180).rstrip(" .?")
+        message = (
+            f"Put simply, this asks for {plain_label.casefold()}. "
+            "Your form answer has not changed. What should I enter?"
+        )
     elif str(error) == _LOST_ACTIVE_FIELD_ERROR:
         message = (
             f'Let me stay with the question “{question}”. Which part of '
@@ -170,6 +179,29 @@ def model_failure_fallback(
     intent = turn_intent_override or classify_turn_intent(request)
     message = request_message(request)
     question = truncate_text(field_question(field), 220).rstrip(" .?")
+
+    if (
+        re.search(
+            r"\b(?:do\s+not|does\s+not|don't|doesn't)\s+share\b",
+            message,
+            re.IGNORECASE,
+        )
+        and re.search(
+            r"\bshare\b.{0,60}\b(?:food|costs?|living\s+costs?)\b",
+            question,
+            re.IGNORECASE,
+        )
+    ):
+        return ExplainAction(
+            action="explain",
+            message=(
+                "Based on this question's wording, count only people who "
+                "share food or essential living costs with you. Do not count "
+                "someone who lives there but does not share those things. "
+                "How many people should be counted?"
+            ),
+            field_id=field.id,
+        )
 
     if intent == "general_conversation":
         if re.search(r"\b(?:pause|wait|stop)\b", message, re.IGNORECASE):
