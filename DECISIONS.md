@@ -861,3 +861,45 @@ could answer an earlier utterance, and a review near-match could be interpreted
 as replacement text. These operations have objective meaning only in a narrow,
 visible state, so making them provider-independent improves reliability without
 returning ordinary conversation to a phrase table or weakening confirmation.
+
+---
+
+## 2026-10-31 — Replace conversation behind a parallel, evaluation-gated boundary
+
+Decision:
+Build the simpler Nemotron-led conversation core beside the retained Form
+Agent at `/agent/v2/respond`. Ordinary spoken or typed messages go to Nemotron
+with bounded form, state, proposal, preference, and transcript context. The
+model returns a natural reply and one closed effect. Deterministic code checks
+only effect safety, real fields, primitive types, exact finite options,
+replacement rules, and explicit confirmation. The frontend selects V2 only
+through `VITE_CONVERSATION_ENGINE=v2` until it wins the fixed blind comparison.
+
+Reason:
+Observed sessions showed that layered phrase routing could mistake questions
+for answers and expose validation language in ordinary conversation. Replacing
+that pipeline is preferable to adding another exception. Keeping the candidate
+parallel preserves the working PDF foundation and gives the evaluation harness
+a same-digest comparison target. The first V2 live run achieved exact canonical
+state and zero confirmation-boundary failures, but lost the blind comparison
+two scenarios to three; therefore deleting or silently making it the default
+would violate the evidence gate.
+
+---
+
+## 2026-11-05 — Promote the simple conversation core after the fixed gate
+
+Decision:
+Use `/agent/v2/respond` as the frontend default while preserving
+`/agent/respond` behind `VITE_CONVERSATION_ENGINE=legacy`. Keep the stronger V2
+model selection server-side through `NEBIUS_CONVERSATION_MODEL`, then
+`NEBIUS_CANDIDATE_MODEL`. Do not delete the retained engine during release
+validation.
+
+Reason:
+The corrected same-model live run passed the fixed 5-scenario, 32-turn suite
+with exact state and all human-helper metrics at `1.0`, zero invention, zero
+deterministic failures, and zero confirmation-boundary failures. A blinded
+same-digest review then preferred V2 in all five scenarios with no safety
+concerns. The reversible cutover therefore satisfies the documented promotion
+gate without coupling the model to PDF mutation or removing the known fallback.

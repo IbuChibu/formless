@@ -100,6 +100,10 @@ Required technology:
 - the immediate remaining work is the open Milestone 9.2.3 and 9.2.4
   live/manual evidence, followed by Milestone 9.2.5 integrated human-helper
   validation
+- Milestone 9.2.6 is complete: the simpler Nemotron-led conversation core at
+  `/agent/v2/respond` is now the frontend default after a same-digest blind
+  comparison preferred it in all five scenarios; the retained endpoint remains
+  available through `VITE_CONVERSATION_ENGINE=legacy`
 - deployment has not started; persistence remains outside the active hackathon
   plan, with any account-backed personal-details feature deferred to Milestone
   16 after the production trust decision
@@ -5843,6 +5847,79 @@ Automated and live outcome (2026-10-30):
   keyboard, and screen-reader evidence remains required
 - no real provider secret is tracked; the scan finds only documented
   placeholder values
+
+# Milestone 9.2.6 — Simple Nemotron Conversation Core
+
+Status: COMPLETE
+
+Goal:
+Replace layered conversational phrase routing with a parallel model-led path:
+voice or typed text becomes bounded Nemotron context, Nemotron returns one
+natural reply and one closed effect, a small validator protects canonical form
+state, and only a confirmed proposal reaches the existing PDF workflow.
+
+Scope:
+- expose the candidate separately at `POST /agent/v2/respond`
+- send the current field, bounded complete field schema, finite options,
+  canonical statuses, pending proposal, recent history, assistance preferences,
+  form context, and latest event to Nemotron
+- let Nemotron own conversational meaning, explanations, clarification,
+  correction, navigation, input-mode requests, and natural wording
+- validate only closed effect types, real field IDs, primitive field types,
+  exact finite options, pending-proposal existence, replacement safety, and
+  explicit confirmation
+- run one bounded Nemotron self-audit for an otherwise valid `none` decision;
+  the audit has no state or PDF access and cannot bypass validation
+- preserve `/agent/respond` as a reversible fallback while making V2 the
+  frontend default; `VITE_CONVERSATION_ENGINE=legacy` selects the fallback
+- allow V2 to use `NEBIUS_CONVERSATION_MODEL`, falling back to the already
+  configured `NEBIUS_CANDIDATE_MODEL`, without changing the retained engine
+
+Acceptance criteria:
+- exact canonical form state with zero invention or confirmation-boundary
+  failures on the fixed `human-helper-experience-v2` suite
+- the observed transcript cases cover input-mode changes, pending skip/reject,
+  ambiguous dates, word clarification, uncertain names, tenure ambiguity,
+  finite options, read-back, correction, and provider failure
+- voice and typing continue through the same frontend message path
+- PDF extraction, filling, preview, confirmation, and download remain unchanged
+- a same-digest blind comparison prefers V2 overall before it becomes the
+  default or the retained engine is removed
+- complete backend and frontend regression gates pass
+
+Implementation evidence (2026-10-31):
+- the isolated V2 service, context builder, response models, effect validator,
+  endpoint, tests, and harness `--engine` switch are implemented
+- the prompt-refined stronger-model run completed all 32 turns with exact form
+  state `1.0`, context retention `1.0`, zero invention, zero repetition, and
+  zero confirmation-boundary failures
+- the remaining differences are legacy phase expectations for informational
+  side questions; the human-helper gate remained below threshold
+- a blind same-digest comparison preferred V2 in two scenarios and the retained
+  engine in three, so V2 is opt-in and the old engine has not been removed
+
+Completion evidence (2026-11-05):
+- corrected the local evaluation harness to select the same configured V2 model
+  as the real `/agent/v2/respond` dependency instead of silently evaluating the
+  primary Lightning model
+- fixed non-mutating explanation and side-question turns so Nemotron's explicit
+  `awaiting` contract preserves `awaiting_answer` rather than forcing every
+  active-field reply into clarification
+- proposal replies now expose the exact stored value, and transformed finite
+  choices transparently identify their mapping to a real option before review
+- the fixed 5-scenario, 32-turn live Ultra run passed with exact form state
+  `1.0`, context retention `1.0`, human-helper behavior `1.0`, zero repetition,
+  zero invention, zero deterministic or qualitative failures, and zero
+  confirmation-boundary failures
+- the same-digest blinded comparison preferred V2 in all five scenarios, with
+  zero baseline wins, zero ties, and no safety concerns
+- 510 backend tests, all frontend workflow checks, and the production build
+  pass; the retained engine and `/agent/respond` remain available as fallback
+
+Do not implement:
+- direct model PDF writes, silent confirmation, arbitrary effects, duplicate
+  canonical state, an agent framework, authentication, persistence, deployment,
+  or deletion of the retained engine before the comparison passes
 
 # Milestone 9.3 — One-language bilingual assistance pilot
 

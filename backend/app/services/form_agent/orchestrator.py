@@ -591,6 +591,16 @@ def _log_turn_route(
     )
 
 
+def record_turn_route_diagnostic(
+    request: FormAgentRequest,
+    route: str,
+    *,
+    intent: Optional[str] = None,
+) -> None:
+    """Record privacy-safe routing evidence for alternate conversation cores."""
+    _log_turn_route(request, route, intent=intent)
+
+
 def consume_turn_route_diagnostics() -> list[dict[str, str]]:
     """Return and clear the current request's privacy-safe route trace."""
 

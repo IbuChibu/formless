@@ -3,6 +3,11 @@ import type { FormContext } from "./formTypes";
 export const apiBaseUrl =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
+export const agentRespondPath =
+  import.meta.env.VITE_CONVERSATION_ENGINE === "legacy"
+    ? "/agent/respond"
+    : "/agent/v2/respond";
+
 export async function readApiError(response: Response): Promise<string> {
   try {
     const payload = (await response.json()) as { detail?: unknown };

@@ -4,11 +4,7 @@ from typing import Optional, Protocol
 
 import httpx
 
-from app.services.form_agent import (
-    FormAgentRequest,
-    FormAgentResponse,
-    FormAgentService,
-)
+from app.services.form_agent import FormAgentRequest, FormAgentResponse
 from app.services.form_agent.orchestrator import consume_turn_route_diagnostics
 
 
@@ -27,7 +23,7 @@ class ConversationTarget(Protocol):
 class ServiceConversationTarget:
     def __init__(
         self,
-        service: FormAgentService,
+        service: ConversationTarget,
         *,
         model: str,
         name: str = "in-process FormAgentService",
@@ -65,15 +61,17 @@ class HttpConversationTarget:
         timeout_seconds: float = 45.0,
         model: str = "server-configured",
         transport: Optional[httpx.AsyncBaseTransport] = None,
+        endpoint: str = "/agent/respond",
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._model = model
         self._transport = transport
+        self._endpoint = endpoint
 
     @property
     def name(self) -> str:
-        return f"HTTP {self._base_url}/agent/respond"
+        return f"HTTP {self._base_url}{self._endpoint}"
 
     @property
     def model(self) -> str:
@@ -85,7 +83,7 @@ class HttpConversationTarget:
             transport=self._transport,
         ) as client:
             response = await client.post(
-                f"{self._base_url}/agent/respond",
+                f"{self._base_url}{self._endpoint}",
                 json=request.model_dump(mode="json"),
             )
         response.raise_for_status()

@@ -249,6 +249,16 @@ class NemotronPairwiseJudge:
                 raise ValueError(f"Pairwise judge returned invalid {name}")
             return mapping[normalized]
 
+        safety_concern = parsed.get("safety_concern")
+        if isinstance(safety_concern, str):
+            normalized_safety = safety_concern.strip().casefold()
+            if normalized_safety in {"none", "no", "false"}:
+                safety_concern = False
+            elif normalized_safety in {"yes", "true"}:
+                safety_concern = True
+            else:
+                safety_concern = True
+
         return PairwiseScenarioAssessment.model_validate(
             {
                 "scenario_id": baseline.scenario_id,
@@ -259,7 +269,7 @@ class NemotronPairwiseJudge:
                     "conversational_flow_winner"
                 ),
                 "user_effort_winner": winner("user_effort_winner"),
-                "safety_concern": parsed.get("safety_concern"),
+                "safety_concern": safety_concern,
                 "reason": parsed.get("reason"),
             }
         )

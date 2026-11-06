@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from app.services.form_agent import FormAgentService
+from app.services.conversation_v2 import ConversationV2Service
 from app.services.nemotron_service import (
     NemotronConfigurationError,
+    NemotronSettings,
     NemotronService,
 )
 from app.services.tavily_service import TavilyService
@@ -50,16 +53,32 @@ async def _run(args: argparse.Namespace) -> int:
     try:
         judge_service = NemotronService.from_environment() if args.judge else None
         if args.target == "local":
-            model_service = judge_service or NemotronService.from_environment()
-            target = ServiceConversationTarget(
-                FormAgentService(
+            model_service = _conversation_model_service(
+                args.engine,
+                default_service=judge_service,
+            )
+            conversation_service = (
+                ConversationV2Service(model_service)
+                if args.engine == "v2"
+                else FormAgentService(
                     model_service,
                     TavilyService.from_optional_environment(),
-                ),
+                )
+            )
+            target = ServiceConversationTarget(
+                conversation_service,
                 model=model_service.model,
+                name=f"in-process conversation-{args.engine}",
             )
         else:
-            target = HttpConversationTarget(args.base_url)
+            target = HttpConversationTarget(
+                args.base_url,
+                endpoint=(
+                    "/agent/v2/respond"
+                    if args.engine == "v2"
+                    else "/agent/respond"
+                ),
+            )
     except NemotronConfigurationError as error:
         print(f"Configuration error: {error}")
         return 2
@@ -81,6 +100,25 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"JSON report: {json_path}")
     print(f"Markdown report: {markdown_path}")
     return 0
+
+
+def _conversation_model_service(
+    engine: str,
+    *,
+    default_service: NemotronService | None,
+) -> NemotronService:
+    service = default_service or NemotronService.from_environment()
+    if engine != "v2":
+        return service
+    model_override = (
+        os.environ.get("NEBIUS_CONVERSATION_MODEL", "").strip()
+        or os.environ.get("NEBIUS_CANDIDATE_MODEL", "").strip()
+    )
+    if not model_override or model_override == service.model:
+        return service
+    environment = dict(os.environ)
+    environment["NEBIUS_MODEL"] = model_override
+    return NemotronService(NemotronSettings.from_environment(environment))
 
 
 def _compare(args: argparse.Namespace) -> int:
@@ -125,6 +163,12 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     run_parser = subparsers.add_parser("run", help="run the full scenario suite")
     run_parser.add_argument("--label", default="baseline")
+    run_parser.add_argument(
+        "--engine",
+        choices=("legacy", "v2"),
+        default="legacy",
+        help="conversation implementation to evaluate",
+    )
     run_parser.add_argument(
         "--scenarios",
         type=Path,

@@ -30,6 +30,21 @@ npm install
 npm run dev
 ```
 
+The simpler Nemotron-led V2 conversation core is the default. It posts to
+`/agent/v2/respond` and keeps the retained engine available as a reversible
+fallback. To run the retained engine explicitly, start the frontend with:
+
+```bash
+cd frontend
+VITE_CONVERSATION_ENGINE=legacy npm run dev
+```
+
+When configured,
+`NEBIUS_CONVERSATION_MODEL` selects its model; otherwise it falls back to
+`NEBIUS_CANDIDATE_MODEL`, then `NEBIUS_MODEL`. All values remain server-side.
+V2 uses the same visible proposal, explicit confirmation, canonical form
+state, PDF preview, and PDF filling service.
+
 Open `http://localhost:5173`. The header reports only whether the FastAPI
 backend is reachable. A successful `GET /health` response does not prove that
 Nebius Token Factory, Tavily, or Deepgram is configured; provider configuration
@@ -152,6 +167,17 @@ set -a
 source .env
 set +a
 python -m evaluations.conversation_harness run --label baseline --judge
+```
+
+Use `--engine v2` to run the identical suite against the parallel conversation
+core. Omitting the flag evaluates the retained engine:
+
+```bash
+python -m evaluations.conversation_harness run \
+  --engine v2 \
+  --label simple-core-candidate \
+  --scenarios evaluations/scenarios/human_helper_experience_v2.json \
+  --judge
 ```
 
 The command prints summary metrics and writes a full JSON report plus a readable

@@ -21,6 +21,7 @@ import {
 } from "./assistancePreferences";
 import { parseAgentResponse } from "./agentResponse";
 import {
+  agentRespondPath,
   apiBaseUrl,
   getErrorMessage,
   isAbortError,
@@ -614,7 +615,7 @@ function App() {
     setFailedAgentRequest(null);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/agent/respond`, {
+      const response = await fetch(`${apiBaseUrl}${agentRespondPath}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),

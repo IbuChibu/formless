@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from json import JSONDecodeError
 from typing import Optional, Union
 
@@ -14,6 +15,7 @@ from app.services.deepgram_service import (
     DeepgramService,
     DeepgramServiceError,
 )
+from app.services.conversation_v2 import ConversationV2Service
 from app.services.form_agent import (
     FormAgentError,
     FormAgentRequest,
@@ -25,6 +27,7 @@ from app.services.nemotron_service import (
     NemotronConfigurationError,
     NemotronService,
     NemotronServiceError,
+    NemotronSettings,
 )
 from app.services.pdf_service import (
     PdfExtractionError,
@@ -156,6 +159,22 @@ def get_form_agent_service(
     return FormAgentService(nemotron_service, tavily_service)
 
 
+def get_conversation_v2_service(
+    nemotron_service: NemotronService = Depends(get_nemotron_service),
+) -> ConversationV2Service:
+    model_override = (
+        os.environ.get("NEBIUS_CONVERSATION_MODEL", "").strip()
+        or os.environ.get("NEBIUS_CANDIDATE_MODEL", "").strip()
+    )
+    if not model_override or model_override == nemotron_service.model:
+        return ConversationV2Service(nemotron_service)
+    environment = dict(os.environ)
+    environment["NEBIUS_MODEL"] = model_override
+    return ConversationV2Service(
+        NemotronService(NemotronSettings.from_environment(environment))
+    )
+
+
 @app.post("/voice/deepgram/token", response_model=DeepgramTokenResponse)
 async def create_deepgram_token(
     service: DeepgramService = Depends(get_deepgram_service),
@@ -206,6 +225,17 @@ async def respond_to_form_agent(
     except TavilyConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except (FormAgentError, NemotronServiceError, TavilyServiceError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.post("/agent/v2/respond", response_model=FormAgentResponse)
+async def respond_to_conversation_v2(
+    request: FormAgentRequest,
+    service: ConversationV2Service = Depends(get_conversation_v2_service),
+) -> FormAgentResponse:
+    try:
+        return await service.respond(request)
+    except (FormAgentError, NemotronServiceError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 

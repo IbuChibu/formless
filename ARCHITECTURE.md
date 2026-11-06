@@ -318,6 +318,33 @@ Must not:
 - bypass field validation
 - convert an unconfirmed proposal into a confirmed value
 
+### Parallel simple conversation core
+
+Milestone 9.2.6 adds an evaluation-gated candidate at
+`POST /agent/v2/respond`. It accepts the established bounded Form Agent request
+and returns the established frontend response shape, but it does not call the
+legacy intent, navigation, answer-adapter, or conversation-policy pipeline.
+One compact service sends the current schema, canonical statuses, pending
+proposal, preferences, recent history, and latest event to Nemotron. Nemotron
+returns a natural reply and one closed candidate effect.
+
+The V2 validator does not reinterpret ordinary user language. It checks only
+that the effect is closed, the field exists, primitive types and exact finite
+options fit, confirmation has a current pending proposal, confirmed values are
+replaced only through review, and assistant wording does not claim an unapplied
+mutation. Repeatedly invalid model output becomes a non-mutating clarification.
+A narrowly triggered Nemotron self-audit rechecks `none` decisions against the
+same bounded context; it is not another agent and has no independent state,
+tools, or PDF access.
+
+The frontend canonical state remains authoritative. V2 effects are translated
+into the established proposal and confirmation contract, and the PDF Service
+is unchanged. After the fixed live suite passed and the same-digest blind
+comparison preferred V2 in all five scenarios, the frontend uses V2 by
+default. `VITE_CONVERSATION_ENGINE=legacy` selects `/agent/respond` as a
+reversible fallback. The retained endpoint remains separate from the V2 core;
+neither path can bypass canonical state or the PDF Service.
+
 The Form Agent is one service boundary with small internal modules:
 - `models` owns validated request, field, message, and action contracts
 - `orchestrator` coordinates one turn and is the package's public service

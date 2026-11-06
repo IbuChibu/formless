@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 
 from app.services.form_agent import FormAgentRequest, FormAgentService
+from app.services.nemotron_service import NemotronService, NemotronSettings
 from evaluations.conversation_harness.judge import (
     _JUDGE_SYSTEM_PROMPT,
     NemotronPairwiseJudge,
     NemotronQualitativeJudge,
 )
+from evaluations.conversation_harness.__main__ import _conversation_model_service
 from evaluations.conversation_harness.models import (
     BehaviorExpectation,
     BranchCondition,
@@ -692,6 +696,44 @@ def test_http_payload_shape_matches_existing_agent_interface() -> None:
         "history",
     }
     assert payload["event"] == {"type": "advance"}
+
+
+def test_local_v2_target_uses_the_application_conversation_model_override() -> None:
+    default_service = NemotronService(
+        NemotronSettings(api_key="test-key", model="lightning")
+    )
+    with patch.dict(
+        os.environ,
+        {
+            "NEBIUS_API_KEY": "test-key",
+            "NEBIUS_MODEL": "lightning",
+            "NEBIUS_CANDIDATE_MODEL": "ultra",
+        },
+        clear=True,
+    ):
+        selected = _conversation_model_service(
+            "v2",
+            default_service=default_service,
+        )
+
+    assert selected.model == "ultra"
+
+
+def test_local_legacy_target_keeps_the_primary_model() -> None:
+    default_service = NemotronService(
+        NemotronSettings(api_key="test-key", model="lightning")
+    )
+    with patch.dict(
+        os.environ,
+        {"NEBIUS_CANDIDATE_MODEL": "ultra"},
+        clear=True,
+    ):
+        selected = _conversation_model_service(
+            "legacy",
+            default_service=default_service,
+        )
+
+    assert selected is default_service
 
 
 def test_http_target_posts_to_existing_agent_endpoint() -> None:

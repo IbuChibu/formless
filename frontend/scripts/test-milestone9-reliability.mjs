@@ -63,6 +63,11 @@ assert.match(
   /Could not reach the backend[\s\S]*available retry control/,
   "offline requests must explain how to recover",
 );
+assert.match(
+  apiSource,
+  /VITE_CONVERSATION_ENGINE === "legacy"[\s\S]*"\/agent\/respond"[\s\S]*"\/agent\/v2\/respond"/,
+  "the evaluated V2 core must be the default with an explicit legacy fallback",
+);
 
 assert.match(
   headerSource,
