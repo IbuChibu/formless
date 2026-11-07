@@ -8,14 +8,15 @@ const sourceUrl = new URL(
   import.meta.url,
 );
 const source = await readFile(sourceUrl, "utf8");
-const compiled = ts.transpileModule(source, {
-  compilerOptions: {
-    module: ts.ModuleKind.ES2020,
-    target: ts.ScriptTarget.ES2020,
-  },
-  fileName: sourceUrl.pathname,
-}).outputText;
-const moduleUrl = `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`;
+const captureUrl = new URL("../src/voiceAudioCapture.ts", import.meta.url);
+const captureModuleUrl = compileToDataUrl(
+  await readFile(captureUrl, "utf8"),
+  captureUrl,
+);
+const { MICROPHONE_AUDIO_CONSTRAINTS } = await import(captureModuleUrl);
+const moduleUrl = compileToDataUrl(source, sourceUrl, {
+  "./voiceAudioCapture": captureModuleUrl,
+});
 const {
   analyzeVoiceActivity,
   initialVoiceActivityGateState,
@@ -140,15 +141,15 @@ function calibratedGate() {
   const browser = installFakeBrowser();
   let armedCount = 0;
   let voiceCount = 0;
-  let transferredStream = null;
+  let transferredCapture = null;
   const errors = [];
   startVoiceInterruptionDetector({
     onArmed: () => {
       armedCount += 1;
     },
-    onVoice: (stream) => {
+    onVoice: (capture) => {
       voiceCount += 1;
-      transferredStream = stream;
+      transferredCapture = capture;
     },
     onError: (message) => errors.push(message),
   });
@@ -159,17 +160,21 @@ function calibratedGate() {
   browser.runFrame(600, 0.04);
   browser.runFrame(900, 0.03);
   assert.equal(armedCount, 1);
-  assert.deepEqual(browser.requestedAudioConstraints(), {
-    autoGainControl: false,
-    echoCancellation: true,
-    noiseSuppression: true,
-  });
+  assert.equal(
+    browser.requestedAudioConstraints(),
+    MICROPHONE_AUDIO_CONSTRAINTS,
+    "barge-in and normal turns must share one microphone configuration",
+  );
 
   browser.runFrame(940, 0.045);
   browser.runFrame(1100, 0.052);
   browser.runFrame(1300, 0.041);
   browser.runFrame(1500, 0.05);
   assert.equal(voiceCount, 0, "playback leakage must not interrupt speech");
+
+  // 2.5 s of 100 ms chunks at 16 kHz; only the newest second survives.
+  const heardChunks = Array.from({ length: 25 }, () => new ArrayBuffer(3200));
+  heardChunks.forEach((chunk) => browser.emitPcm(chunk));
 
   browser.runFrame(1600, 0.075);
   browser.runFrame(1710, 0.09);
@@ -182,9 +187,31 @@ function calibratedGate() {
   assert.equal(
     browser.trackStops(),
     0,
-    "detected speech must transfer the live stream to recognition",
+    "detected speech must transfer the live capture to recognition",
   );
-  transferredStream.getTracks().forEach((track) => track.stop());
+  assert.equal(
+    browser.contextCloses(),
+    0,
+    "the handover must keep the capture running so no audio is lost",
+  );
+  const afterDetection = new ArrayBuffer(3200);
+  browser.emitPcm(afterDetection);
+  const delivered = [];
+  transferredCapture.setChunkListener((chunk) => delivered.push(chunk));
+  const expectedAudio = [...heardChunks.slice(-10), afterDetection].slice(-10);
+  assert.equal(delivered.length, expectedAudio.length);
+  delivered.forEach((chunk, index) => {
+    assert.equal(
+      chunk,
+      expectedAudio[index],
+      "recognition must receive the newest pre-roll, oldest first, without a gap",
+    );
+  });
+  const live = new ArrayBuffer(3200);
+  browser.emitPcm(live);
+  assert.equal(delivered.at(-1), live);
+
+  transferredCapture.stop();
   assert.equal(browser.trackStops(), 1);
   assert.equal(browser.contextCloses(), 1);
   assert.equal(browser.pendingFrames(), 0);
@@ -214,15 +241,59 @@ function calibratedGate() {
   assert.equal(browser.pendingFrames(), 0);
 }
 
+{
+  const browser = installFakeBrowser();
+  const detector = startVoiceInterruptionDetector({
+    onArmed: () => undefined,
+    onVoice: () => assert.fail("a stopped detector must not hand over"),
+    onError: () => assert.fail("a deliberate stop is not an error"),
+  });
+  await flushMicrotasks();
+  detector.stop();
+  assert.equal(browser.trackStops(), 1);
+  assert.equal(browser.contextCloses(), 1);
+  assert.equal(browser.pendingFrames(), 0);
+}
+
+{
+  const browser = installFakeBrowser(undefined, { workletError: true });
+  const errors = [];
+  startVoiceInterruptionDetector({
+    onArmed: () => undefined,
+    onVoice: () => assert.fail("a failed capture must not hand over"),
+    onError: (message) => errors.push(message),
+  });
+  await flushMicrotasks();
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /compatible microphone capture/);
+  assert.equal(browser.trackStops(), 1, "failure must release the microphone");
+  assert.equal(browser.contextCloses(), 1);
+}
+
 console.log("voice interruption policy checks passed");
 
-function installFakeBrowser(getUserMedia) {
+function compileToDataUrl(moduleSource, url, importMap = {}) {
+  let compiledSource = ts.transpileModule(moduleSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2020,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: url.pathname,
+  }).outputText;
+  for (const [specifier, target] of Object.entries(importMap)) {
+    compiledSource = compiledSource.replace(`"${specifier}"`, `"${target}"`);
+  }
+  return `data:text/javascript;base64,${Buffer.from(compiledSource).toString("base64")}`;
+}
+
+function installFakeBrowser(getUserMedia, { workletError = false } = {}) {
   let currentLevel = 0;
   let currentSampleKind = "speech";
   let nextFrameId = 1;
   let trackStopCount = 0;
   let contextCloseCount = 0;
   let requestedConstraints = null;
+  let workletNode = null;
   const frames = new Map();
   const stream = {
     getTracks: () => [
@@ -245,8 +316,29 @@ function installFakeBrowser(getUserMedia) {
     },
   };
 
+  class FakeAudioWorkletNode {
+    port = { onmessage: null };
+
+    constructor() {
+      workletNode = this;
+    }
+
+    connect() {}
+
+    disconnect() {}
+  }
+
   class FakeAudioContext {
     state = "running";
+    sampleRate = 48000;
+    destination = {};
+    audioWorklet = {
+      addModule: async () => {
+        if (workletError) {
+          throw new Error("worklet blocked");
+        }
+      },
+    };
 
     createAnalyser() {
       return analyser;
@@ -273,6 +365,7 @@ function installFakeBrowser(getUserMedia) {
     configurable: true,
     value: {
       AudioContext: FakeAudioContext,
+      AudioWorkletNode: FakeAudioWorkletNode,
       cancelAnimationFrame: (id) => frames.delete(id),
       isSecureContext: true,
       requestAnimationFrame: (callback) => {
@@ -298,6 +391,7 @@ function installFakeBrowser(getUserMedia) {
   return {
     stream,
     contextCloses: () => contextCloseCount,
+    emitPcm: (chunk) => workletNode.port.onmessage?.({ data: chunk }),
     pendingFrames: () => frames.size,
     requestedAudioConstraints: () => requestedConstraints?.audio,
     runFrame: (timestamp, level, sampleKind = "speech") => {
@@ -321,7 +415,5 @@ function fillSpeechWaveform(samples, level) {
 }
 
 async function flushMicrotasks() {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
 }

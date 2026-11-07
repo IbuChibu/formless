@@ -1,3 +1,10 @@
+import {
+  browserSupportsPcmCapture,
+  MICROPHONE_AUDIO_CONSTRAINTS,
+  startPcmCapture,
+  type PcmCapture,
+} from "./voiceAudioCapture";
+
 export type VoiceInterruptionDetector = {
   stop: () => void;
 };
@@ -28,12 +35,15 @@ type VoiceActivityGateResult = {
 
 type VoiceInterruptionDetectorOptions = {
   onArmed: () => void;
-  onVoice: (stream: MediaStream) => void;
+  onVoice: (capture: PcmCapture) => void;
   onError: (message: string) => void;
 };
 
 const CALIBRATION_MS = 900;
 const REQUIRED_ACTIVITY_MS = 420;
+// Covers the detection window plus the soft speech onset below the threshold.
+// Anything older is mostly assistant playback, which must not be transcribed.
+const PRE_ROLL_MS = 1000;
 const MINIMUM_ACTIVITY_LEVEL = 0.035;
 const NOISE_MULTIPLIER = 2.4;
 const NOISE_MARGIN = 0.018;
@@ -42,19 +52,11 @@ const MINIMUM_ACTIVE_SAMPLES = 5;
 const MINIMUM_SPEECH_LIKE_SAMPLES = 3;
 const MINIMUM_LEVEL_VARIATION = 0.008;
 
-declare global {
-  interface Window {
-    webkitAudioContext?: typeof AudioContext;
-  }
-}
-
 export function browserSupportsVoiceInterruption(): boolean {
-  const AudioContextConstructor =
-    window.AudioContext ?? window.webkitAudioContext;
   return Boolean(
     window.isSecureContext &&
       typeof navigator.mediaDevices?.getUserMedia === "function" &&
-      AudioContextConstructor,
+      browserSupportsPcmCapture(),
   );
 }
 
@@ -183,10 +185,10 @@ export function startVoiceInterruptionDetector(
   let stopped = false;
   let animationFrame: number | null = null;
   let stream: MediaStream | null = null;
-  let audioContext: AudioContext | null = null;
-  let source: MediaStreamAudioSourceNode | null = null;
+  let capture: PcmCapture | null = null;
+  let analyserNode: AnalyserNode | null = null;
 
-  const release = (preserveStream = false): MediaStream | null => {
+  const release = (preserveCapture = false): PcmCapture | null => {
     if (stopped) {
       return null;
     }
@@ -195,18 +197,21 @@ export function startVoiceInterruptionDetector(
       window.cancelAnimationFrame(animationFrame);
       animationFrame = null;
     }
-    source?.disconnect();
-    source = null;
-    const releasedStream = preserveStream ? stream : null;
-    if (!preserveStream) {
-      stream?.getTracks().forEach((track) => track.stop());
+    if (analyserNode) {
+      capture?.source.disconnect(analyserNode);
+      analyserNode = null;
     }
+    const releasedCapture = preserveCapture ? capture : null;
+    if (!preserveCapture) {
+      if (capture) {
+        capture.stop();
+      } else {
+        stream?.getTracks().forEach((track) => track.stop());
+      }
+    }
+    capture = null;
     stream = null;
-    if (audioContext && audioContext.state !== "closed") {
-      void audioContext.close().catch(() => undefined);
-    }
-    audioContext = null;
-    return releasedStream;
+    return releasedCapture;
   };
 
   const stop = () => {
@@ -234,11 +239,7 @@ export function startVoiceInterruptionDetector(
 
     try {
       const nextStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          autoGainControl: false,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
+        audio: MICROPHONE_AUDIO_CONSTRAINTS,
         video: false,
       });
       if (stopped) {
@@ -247,27 +248,18 @@ export function startVoiceInterruptionDetector(
       }
       stream = nextStream;
 
-      const AudioContextConstructor =
-        window.AudioContext ?? window.webkitAudioContext;
-      if (!AudioContextConstructor) {
-        throw new Error(
-          "Hands-free interruption is unavailable in this browser. Use Answer now or type your reply.",
-        );
-      }
-      audioContext = new AudioContextConstructor();
-      if (audioContext.state === "suspended") {
-        await audioContext.resume();
-      }
+      const nextCapture = await startPcmCapture(nextStream, PRE_ROLL_MS);
       if (stopped) {
-        stop();
+        nextCapture.stop();
         return;
       }
+      capture = nextCapture;
 
-      const analyser = audioContext.createAnalyser();
+      const analyser = nextCapture.audioContext.createAnalyser();
       analyser.fftSize = 1024;
       analyser.smoothingTimeConstant = 0.15;
-      source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyser);
+      nextCapture.source.connect(analyser);
+      analyserNode = analyser;
 
       const samples = new Float32Array(analyser.fftSize);
       let gate = initialVoiceActivityGateState();
@@ -289,9 +281,9 @@ export function startVoiceInterruptionDetector(
           options.onArmed();
         }
         if (result.detected) {
-          const recognitionStream = release(true);
-          if (recognitionStream) {
-            options.onVoice(recognitionStream);
+          const recognitionCapture = release(true);
+          if (recognitionCapture) {
+            options.onVoice(recognitionCapture);
           }
           return;
         }

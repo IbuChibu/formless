@@ -1,3 +1,11 @@
+import {
+  browserSupportsPcmCapture,
+  MICROPHONE_AUDIO_CONSTRAINTS,
+  startPcmCapture,
+  type PcmCapture,
+  type VoiceTurnAudio,
+} from "./voiceAudioCapture";
+
 export type DeepgramWord = {
   word: string;
   start: number;
@@ -21,11 +29,19 @@ export type DeepgramRecognitionCallbacks = {
   onError: (message: string) => void;
 };
 
+export type RecognitionTiming = {
+  endpointingMs: number;
+  utteranceEndMs: number;
+  settleMs: number;
+};
+
 export type DeepgramRecognitionOptions = {
   tokenUrl: string;
   keyterms?: string[];
   choiceKeyterms?: string[];
-  initialStream?: MediaStream;
+  timing?: RecognitionTiming;
+  initialCapture?: PcmCapture;
+  onTurnAudio?: (audio: VoiceTurnAudio) => void;
 };
 
 export type VoiceRecognitionField = {
@@ -69,23 +85,11 @@ type WebSocketLike = {
   close(code?: number, reason?: string): void;
 };
 
-type MediaRecorderLike = {
-  state: RecordingState;
-  ondataavailable: ((event: BlobEvent) => void) | null;
-  onerror: ((event: ErrorEvent) => void) | null;
-  start(timeslice?: number): void;
-  stop(): void;
-};
-
 export type DeepgramRecognitionDependencies = {
   fetch: typeof fetch;
   getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
   createWebSocket: (url: string, protocols: string[]) => WebSocketLike;
-  createMediaRecorder: (
-    stream: MediaStream,
-    options: MediaRecorderOptions,
-  ) => MediaRecorderLike;
-  isMediaTypeSupported: (mimeType: string) => boolean;
+  startPcmCapture: (stream: MediaStream) => Promise<PcmCapture>;
   now: () => number;
   setTimeout: typeof window.setTimeout;
   clearTimeout: typeof window.clearTimeout;
@@ -94,24 +98,45 @@ export type DeepgramRecognitionDependencies = {
 };
 
 const DEEPGRAM_SOCKET_OPEN = 1;
-const AUDIO_TIMESLICE_MS = 250;
-const MAX_BUFFERED_AUDIO_CHUNKS = 48;
-const SPEECH_FINAL_SETTLE_MS = 850;
+const MAX_BUFFERED_AUDIO_CHUNKS = 120;
 const MANUAL_FINALIZE_TIMEOUT_MS = 1800;
 const CONNECTION_TIMEOUT_MS = 10000;
 const KEEP_ALIVE_MS = 8000;
 const ENGLISH_LOCALE = "en-GB";
-const ALLOWED_KEYTERMS = new Set([
-  "address",
-  "date of birth",
-  "forename",
-  "postcode",
-  "reference number",
-  "surname",
-]);
+const CHOICE_RECOGNITION_TIMING: RecognitionTiming = {
+  endpointingMs: 500,
+  utteranceEndMs: 1200,
+  settleMs: 600,
+};
+const DEFAULT_RECOGNITION_TIMING: RecognitionTiming = {
+  endpointingMs: 1000,
+  utteranceEndMs: 2000,
+  settleMs: 1000,
+};
+const LONG_ANSWER_RECOGNITION_TIMING: RecognitionTiming = {
+  endpointingMs: 1500,
+  utteranceEndMs: 2500,
+  settleMs: 1200,
+};
+const CHOICE_FIELD_TYPES = new Set(["checkbox", "dropdown", "radio"]);
+const ADDRESS_FIELD_METADATA = /\b(?:address|postcode|street)\b/;
+const CONTROL_KEYTERMS = [
+  "skip",
+  "repeat",
+  "go back",
+  "I don't know",
+  "that's correct",
+];
+const ALLOWED_KEYTERMS = new Map(
+  CONTROL_KEYTERMS.map((value) => [value.toLocaleLowerCase(), value]),
+);
 const PLACEHOLDER_OPTION = /^(?:choose|none|please select|select|select one)$/i;
 const SAFE_OPTION_KEYTERM = /^[\p{L}\p{N}][\p{L}\p{N}\s'()&+,.\-/]*$/u;
-const MAX_OPTION_KEYTERMS = 12;
+// With the five control words, this caps a connection at 40 keyterms.
+const MAX_OPTION_KEYTERMS = 35;
+// Deepgram rejects a connection above 500 keyterm tokens, so long option labels
+// must not be able to end a voice turn. This allows 1.6 characters per token.
+const MAX_TOTAL_KEYTERM_CHARACTERS = 800;
 const MAX_OPTION_KEYTERM_CHARACTERS = 64;
 const MAX_OPTION_KEYTERM_WORDS = 8;
 const NAME_FRAMING_WORDS = new Set([
@@ -125,10 +150,6 @@ const NAME_FRAMING_WORDS = new Set([
 ]);
 const EXPLICIT_LETTER_SPELLING =
   /(?<![\p{L}])(?:[\p{L}](?:\s*[.\-]\s*|\s+)){2,}[\p{L}](?:\.)?(?![\p{L}])/u;
-const AUDIO_TYPES = [
-  "audio/webm;codecs=opus",
-  "audio/ogg;codecs=opus",
-];
 
 export const NAME_CONFIDENCE_THRESHOLD = 0.82;
 
@@ -138,7 +159,7 @@ export class DeepgramSpeechRecognizer {
   private readonly dependencies: DeepgramRecognitionDependencies;
   private stream: MediaStream | null = null;
   private socket: WebSocketLike | null = null;
-  private recorder: MediaRecorderLike | null = null;
+  private capture: PcmCapture | null = null;
   private settleTimer: number | null = null;
   private finalizeTimer: number | null = null;
   private keepAliveTimer: number | null = null;
@@ -150,7 +171,9 @@ export class DeepgramSpeechRecognizer {
   private segmentKeys = new Set<string>();
   private confidences: number[] = [];
   private speechFinalAt: number | null = null;
-  private bufferedAudio: Blob[] = [];
+  private bufferedAudio: ArrayBuffer[] = [];
+  private turnAudio: ArrayBuffer[] = [];
+  private turnSampleRate = 0;
 
   constructor(
     options: DeepgramRecognitionOptions,
@@ -165,25 +188,13 @@ export class DeepgramSpeechRecognizer {
   async start(): Promise<void> {
     this.cancelled = false;
     try {
-      this.stream =
-        this.options.initialStream ??
-        (await this.dependencies.getUserMedia({
-          audio: {
-            autoGainControl: true,
-            channelCount: { ideal: 1 },
-            echoCancellation: true,
-            noiseSuppression: true,
-          },
-        }));
-      if (this.cancelled) {
-        this.releaseMedia();
+      const capture = await this.openCapture();
+      if (!capture) {
         return;
       }
-
-      const mimeType = selectAudioType(
-        this.dependencies.isMediaTypeSupported,
-      );
-      this.startRecorder(mimeType);
+      this.capture = capture;
+      this.turnSampleRate = capture.sampleRate;
+      capture.setChunkListener((chunk) => this.handleAudioChunk(chunk));
 
       const token = await requestTemporaryToken(
         this.options.tokenUrl,
@@ -196,19 +207,16 @@ export class DeepgramSpeechRecognizer {
 
       const socket = this.dependencies.createWebSocket(
         buildDeepgramStreamingUrl(
+          capture.sampleRate,
           this.options.keyterms,
           this.options.choiceKeyterms,
+          this.options.timing,
         ),
         ["bearer", token.access_token],
       );
       socket.binaryType = "arraybuffer";
       this.socket = socket;
       this.bindSocket(socket);
-      this.connectionTimer = this.dependencies.setTimeout(() => {
-        this.fail(
-          "Deepgram voice input did not connect in time. Try again or keep typing.",
-        );
-      }, CONNECTION_TIMEOUT_MS);
     } catch (error) {
       if (!this.cancelled) {
         this.fail(recognitionStartError(error));
@@ -220,7 +228,7 @@ export class DeepgramSpeechRecognizer {
     if (this.cancelled || this.completed) {
       return;
     }
-    this.stopRecorderAndMedia();
+    this.releaseMedia();
     if (this.socket?.readyState === DEEPGRAM_SOCKET_OPEN) {
       this.socket.send(JSON.stringify({ type: "Finalize" }));
       this.clearFinalizeTimer();
@@ -239,43 +247,64 @@ export class DeepgramSpeechRecognizer {
     this.cancelled = true;
     this.completed = true;
     this.clearTimers();
-    this.stopRecorderAndMedia();
+    this.releaseMedia();
     this.closeSocket();
     this.clearTurnData();
   }
 
-  private startRecorder(mimeType: string): void {
-    const stream = this.stream;
-    if (!stream) {
-      throw new Error("Microphone audio was unavailable.");
+  private async openCapture(): Promise<PcmCapture | null> {
+    if (this.options.initialCapture) {
+      this.startConnectionTimer();
+      return this.options.initialCapture;
     }
-    const recorder = this.dependencies.createMediaRecorder(stream, { mimeType });
-    recorder.ondataavailable = (event) => {
-      if (this.cancelled || this.completed || event.data.size === 0) {
-        return;
-      }
-      const socket = this.socket;
-      if (socket?.readyState === DEEPGRAM_SOCKET_OPEN) {
-        socket.send(event.data);
-        return;
-      }
-      this.bufferedAudio.push(event.data);
-      if (this.bufferedAudio.length > MAX_BUFFERED_AUDIO_CHUNKS) {
-        this.fail(
-          "Deepgram voice input took too long to connect. Try again or keep typing.",
-        );
-      }
-    };
-    recorder.onerror = () => {
-      this.fail("Microphone audio could not be streamed. Keep typing instead.");
-    };
-    this.recorder = recorder;
-    recorder.start(AUDIO_TIMESLICE_MS);
+    this.stream = await this.dependencies.getUserMedia({
+      audio: MICROPHONE_AUDIO_CONSTRAINTS,
+    });
+    if (this.cancelled) {
+      this.releaseMedia();
+      return null;
+    }
+    // Armed after the permission prompt, which can legitimately take longer.
+    this.startConnectionTimer();
+    const capture = await this.dependencies.startPcmCapture(this.stream);
+    if (this.cancelled || this.completed) {
+      capture.stop();
+      return null;
+    }
+    return capture;
+  }
+
+  private startConnectionTimer(): void {
+    this.connectionTimer = this.dependencies.setTimeout(() => {
+      this.fail(
+        "Deepgram voice input did not connect in time. Try again or keep typing.",
+      );
+    }, CONNECTION_TIMEOUT_MS);
+  }
+
+  private handleAudioChunk(chunk: ArrayBuffer): void {
+    if (this.cancelled || this.completed) {
+      return;
+    }
+    if (this.options.onTurnAudio) {
+      this.turnAudio.push(chunk);
+    }
+    const socket = this.socket;
+    if (socket?.readyState === DEEPGRAM_SOCKET_OPEN) {
+      socket.send(chunk);
+      return;
+    }
+    this.bufferedAudio.push(chunk);
+    if (this.bufferedAudio.length > MAX_BUFFERED_AUDIO_CHUNKS) {
+      this.fail(
+        "Deepgram voice input took too long to connect. Try again or keep typing.",
+      );
+    }
   }
 
   private bindSocket(socket: WebSocketLike): void {
     socket.onopen = () => {
-      if (this.cancelled || socket !== this.socket || !this.stream) {
+      if (this.cancelled || socket !== this.socket || !this.capture) {
         return;
       }
       this.clearConnectionTimer();
@@ -349,7 +378,7 @@ export class DeepgramSpeechRecognizer {
       this.speechFinalAt = this.dependencies.now();
       this.settleTimer = this.dependencies.setTimeout(() => {
         this.finish();
-      }, SPEECH_FINAL_SETTLE_MS);
+      }, (this.options.timing ?? DEFAULT_RECOGNITION_TIMING).settleMs);
     }
   }
 
@@ -375,11 +404,18 @@ export class DeepgramSpeechRecognizer {
       provider: "deepgram",
       finalTranscriptLatencyMs: latency,
     };
+    const turnAudio: VoiceTurnAudio = {
+      chunks: this.turnAudio,
+      sampleRate: this.turnSampleRate,
+    };
 
     this.clearTimers();
-    this.stopRecorderAndMedia();
+    this.releaseMedia();
     this.closeSocket();
     this.clearTurnData();
+    if (turnAudio.chunks.length > 0) {
+      this.options.onTurnAudio?.(turnAudio);
+    }
     if (!transcript) {
       this.callbacks.onNoSpeech();
       return;
@@ -394,7 +430,7 @@ export class DeepgramSpeechRecognizer {
     }
     this.completed = true;
     this.clearTimers();
-    this.stopRecorderAndMedia();
+    this.releaseMedia();
     this.closeSocket();
     this.clearTurnData();
     this.callbacks.onError(message);
@@ -404,20 +440,13 @@ export class DeepgramSpeechRecognizer {
     return this.finalSegments.join(" ").replace(/\s+/g, " ").trim();
   }
 
-  private stopRecorderAndMedia(): void {
-    if (this.recorder?.state === "recording") {
-      try {
-        this.recorder.stop();
-      } catch {
-        // Resource release below remains authoritative.
-      }
-    }
-    this.recorder = null;
-    this.releaseMedia();
-  }
-
   private releaseMedia(): void {
-    this.stream?.getTracks().forEach((track) => track.stop());
+    if (this.capture) {
+      this.capture.stop();
+    } else {
+      this.stream?.getTracks().forEach((track) => track.stop());
+    }
+    this.capture = null;
     this.stream = null;
   }
 
@@ -478,6 +507,7 @@ export class DeepgramSpeechRecognizer {
 
   private clearTurnData(): void {
     this.bufferedAudio = [];
+    this.turnAudio = [];
     this.finalSegments = [];
     this.finalWords = [];
     this.segmentKeys.clear();
@@ -491,29 +521,30 @@ export function browserSupportsDeepgramSpeech(): boolean {
     window.isSecureContext &&
       typeof navigator.mediaDevices?.getUserMedia === "function" &&
       typeof window.WebSocket === "function" &&
-      typeof window.MediaRecorder === "function",
+      browserSupportsPcmCapture(),
   );
 }
 
 export function buildDeepgramStreamingUrl(
+  sampleRate: number,
   keyterms: string[] = [],
   choiceKeyterms: string[] = [],
+  timing: RecognitionTiming = DEFAULT_RECOGNITION_TIMING,
 ): string {
   const parameters = new URLSearchParams({
     model: "nova-3",
     language: ENGLISH_LOCALE,
+    encoding: "linear16",
+    sample_rate: String(sampleRate),
     smart_format: "true",
     punctuate: "true",
     interim_results: "true",
-    endpointing: "700",
-    utterance_end_ms: "1500",
+    endpointing: String(timing.endpointingMs),
+    utterance_end_ms: String(timing.utteranceEndMs),
     vad_events: "true",
     mip_opt_out: "true",
   });
-  [
-    ...boundedKeyterms(keyterms),
-    ...boundedChoiceKeyterms(choiceKeyterms),
-  ].forEach((keyterm) => {
+  combinedKeyterms(keyterms, choiceKeyterms).forEach((keyterm) => {
     parameters.append("keyterm", keyterm);
   });
   return `wss://api.deepgram.com/v1/listen?${parameters.toString()}`;
@@ -521,8 +552,29 @@ export function buildDeepgramStreamingUrl(
 
 export function boundedKeyterms(keyterms: string[]): string[] {
   return [...new Set(keyterms.map((value) => value.trim().toLocaleLowerCase()))]
-    .filter((value) => ALLOWED_KEYTERMS.has(value))
-    .slice(0, 4);
+    .flatMap((value) => ALLOWED_KEYTERMS.get(value) ?? []);
+}
+
+function combinedKeyterms(
+  keyterms: string[],
+  choiceKeyterms: string[],
+): string[] {
+  // An option may repeat a control word; the option's own casing wins.
+  const combined = new Map<string, string>();
+  [
+    ...boundedKeyterms(keyterms),
+    ...boundedChoiceKeyterms(choiceKeyterms),
+  ].forEach((value) => {
+    combined.set(value.toLocaleLowerCase(), value);
+  });
+  let remainingCharacters = MAX_TOTAL_KEYTERM_CHARACTERS;
+  return [...combined.values()].filter((value) => {
+    if (value.length > remainingCharacters) {
+      return false;
+    }
+    remainingCharacters -= value.length;
+    return true;
+  });
 }
 
 export function boundedChoiceKeyterms(options: string[] = []): string[] {
@@ -630,21 +682,31 @@ export function isNameFieldMetadata(
   return /\b(?:name|surname|forename)\b/.test(metadata);
 }
 
-export function recognitionKeyterms(
+export function recognitionKeyterms(): string[] {
+  return boundedKeyterms(CONTROL_KEYTERMS);
+}
+
+export function recognitionTiming(
   field: VoiceRecognitionField | null,
-): string[] {
-  if (!field) {
-    return [];
+  hasPendingProposal = false,
+): RecognitionTiming {
+  if (hasPendingProposal) {
+    return CHOICE_RECOGNITION_TIMING;
   }
-  const metadata = fieldMetadata(field);
-  return boundedKeyterms([
-    /\bsurname\b/.test(metadata) ? "surname" : "",
-    /\bforename\b/.test(metadata) ? "forename" : "",
-    /\bdate\s+of\s+birth\b/.test(metadata) ? "date of birth" : "",
-    /\bpostcode\b/.test(metadata) ? "postcode" : "",
-    /\baddress\b/.test(metadata) ? "address" : "",
-    /\breference\s+number\b/.test(metadata) ? "reference number" : "",
-  ]);
+  if (!field) {
+    return DEFAULT_RECOGNITION_TIMING;
+  }
+  if (CHOICE_FIELD_TYPES.has(field.type) || (field.options?.length ?? 0) > 0) {
+    return CHOICE_RECOGNITION_TIMING;
+  }
+  if (
+    field.type === "textarea" ||
+    isNameFieldMetadata(field) ||
+    ADDRESS_FIELD_METADATA.test(fieldMetadata(field))
+  ) {
+    return LONG_ANSWER_RECOGNITION_TIMING;
+  }
+  return DEFAULT_RECOGNITION_TIMING;
 }
 
 export function recognitionChoiceKeyterms(
@@ -718,28 +780,13 @@ function browserDependencies(): DeepgramRecognitionDependencies {
     getUserMedia: (constraints) =>
       navigator.mediaDevices.getUserMedia(constraints),
     createWebSocket: (url, protocols) => new WebSocket(url, protocols),
-    createMediaRecorder: (stream, options) =>
-      new MediaRecorder(stream, options),
-    isMediaTypeSupported: (mimeType) =>
-      MediaRecorder.isTypeSupported(mimeType),
+    startPcmCapture: (stream) => startPcmCapture(stream),
     now: () => window.performance.now(),
     setTimeout: window.setTimeout.bind(window),
     clearTimeout: window.clearTimeout.bind(window),
     setInterval: window.setInterval.bind(window),
     clearInterval: window.clearInterval.bind(window),
   };
-}
-
-function selectAudioType(
-  isSupported: (mimeType: string) => boolean,
-): string {
-  const selected = AUDIO_TYPES.find(isSupported);
-  if (!selected) {
-    throw new Error(
-      "This browser does not provide a supported streaming audio format.",
-    );
-  }
-  return selected;
 }
 
 function recognitionStartError(error: unknown): string {

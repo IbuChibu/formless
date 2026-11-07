@@ -81,8 +81,13 @@ assert.match(
 );
 assert.match(
   interviewSource,
-  /startInterruptionDetection\(\(stream\)[\s\S]*beginListening\(stream\)/,
-  "barge-in must transfer the live microphone stream into recognition",
+  /startInterruptionDetection\(\(capture\)[\s\S]*beginListening\(capture\)/,
+  "barge-in must transfer the live microphone capture into recognition",
+);
+assert.match(
+  interviewSource,
+  /const timing = recognitionTiming\(\s*current\.activeField,\s*current\.hasPendingProposal,\s*\)[\s\S]*choiceKeyterms,\s*timing,\s*\);/,
+  "end-of-speech timing must follow the field and pending proposal into each turn",
 );
 assert.match(
   interviewSource,
@@ -90,7 +95,7 @@ assert.match(
   "stale callbacks must not dispatch a duplicate utterance",
 );
 for (const control of ["Mute", "Pause", "End"]) {
-  assert.match(panelSource, new RegExp(`>${control}<|\\n\\s*${control}\\n`));
+  assert.match(panelSource, new RegExp(`>${control}<|\\n\\s*${control}\\r?\\n`));
 }
 assert.match(panelSource, /automatically listens again after each/);
 

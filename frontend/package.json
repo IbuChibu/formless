@@ -13,6 +13,7 @@
     "test:workspace-layout": "node scripts/test-workspace-layout.mjs",
     "test:fixed-workspace": "node scripts/test-fixed-workspace.mjs",
     "test:voice-interruption": "node scripts/test-voice-interruption.mjs",
+    "test:voice-audio-capture": "node scripts/test-voice-audio-capture.mjs",
     "test:continuous-voice": "node scripts/test-continuous-voice-session.mjs",
     "test:deepgram-speech": "node scripts/test-deepgram-speech.mjs",
     "test:milestone9-reliability": "node scripts/test-milestone9-reliability.mjs",

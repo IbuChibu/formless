@@ -12,14 +12,15 @@ const interviewSource = await readFile(
   new URL("../src/useVoiceInterview.ts", import.meta.url),
   "utf8",
 );
-const compiled = ts.transpileModule(source, {
-  compilerOptions: {
-    module: ts.ModuleKind.ES2020,
-    target: ts.ScriptTarget.ES2022,
-  },
-  fileName: sourceUrl.pathname,
-}).outputText;
-const moduleUrl = `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`;
+const captureUrl = new URL("../src/voiceAudioCapture.ts", import.meta.url);
+const captureModuleUrl = compileToDataUrl(
+  await readFile(captureUrl, "utf8"),
+  captureUrl,
+);
+const { MICROPHONE_AUDIO_CONSTRAINTS } = await import(captureModuleUrl);
+const moduleUrl = compileToDataUrl(source, sourceUrl, {
+  "./voiceAudioCapture": captureModuleUrl,
+});
 const {
   DeepgramSpeechRecognizer,
   buildDeepgramStreamingUrl,
@@ -30,6 +31,7 @@ const {
   parseDeepgramMessage,
   recognitionChoiceKeyterms,
   recognitionKeyterms,
+  recognitionTiming,
 } = await import(moduleUrl);
 
 assert.doesNotMatch(
@@ -78,35 +80,39 @@ class FakeSocket {
   }
 }
 
-class FakeRecorder {
-  state = "inactive";
-  ondataavailable = null;
-  onerror = null;
-  startTimeslice = null;
+class FakeCapture {
+  sampleRate = 16000;
+  listener = null;
   stopCount = 0;
 
-  start(timeslice) {
-    this.state = "recording";
-    this.startTimeslice = timeslice;
+  constructor(onStop, preRoll = []) {
+    this.onStop = onStop;
+    this.preRoll = preRoll;
+  }
+
+  setChunkListener(listener) {
+    this.listener = listener;
+    this.preRoll.forEach((chunk) => listener(chunk));
+    this.preRoll = [];
   }
 
   stop() {
     this.stopCount += 1;
-    this.state = "inactive";
+    this.onStop();
   }
 
-  emit(data) {
-    this.ondataavailable?.({ data });
+  emit(chunk) {
+    this.listener?.(chunk);
   }
 }
 
 {
   const url = new URL(
-    buildDeepgramStreamingUrl([
-      "surname",
+    buildDeepgramStreamingUrl(16000, [
+      "skip",
       "Secret Person",
-      "postcode",
-      "surname",
+      "repeat",
+      "skip",
     ]),
   );
   assert.equal(url.origin, "wss://api.deepgram.com");
@@ -114,13 +120,12 @@ class FakeRecorder {
   assert.equal(url.searchParams.get("model"), "nova-3");
   assert.equal(url.searchParams.get("language"), "en-GB");
   assert.equal(url.searchParams.get("interim_results"), "true");
-  assert.equal(url.searchParams.get("endpointing"), "700");
-  assert.equal(url.searchParams.get("utterance_end_ms"), "1500");
+  assert.equal(url.searchParams.get("encoding"), "linear16");
+  assert.equal(url.searchParams.get("sample_rate"), "16000");
+  assert.equal(url.searchParams.get("endpointing"), "1000");
+  assert.equal(url.searchParams.get("utterance_end_ms"), "2000");
   assert.equal(url.searchParams.get("mip_opt_out"), "true");
-  assert.deepEqual(url.searchParams.getAll("keyterm"), [
-    "surname",
-    "postcode",
-  ]);
+  assert.deepEqual(url.searchParams.getAll("keyterm"), ["skip", "repeat"]);
   assert.deepEqual(boundedKeyterms(["Unknown Person"]), []);
   assert.deepEqual(
     boundedChoiceKeyterms([
@@ -134,15 +139,130 @@ class FakeRecorder {
   );
   const choiceUrl = new URL(
     buildDeepgramStreamingUrl(
-      ["surname"],
+      16000,
+      ["skip"],
       ["Sole tenant", "Owner-occupier", "person@example.com"],
     ),
   );
   assert.deepEqual(choiceUrl.searchParams.getAll("keyterm"), [
-    "surname",
+    "skip",
     "Sole tenant",
     "Owner-occupier",
   ]);
+}
+
+{
+  const controlWords = [
+    "skip",
+    "repeat",
+    "go back",
+    "I don't know",
+    "that's correct",
+  ];
+  assert.deepEqual(recognitionKeyterms(), controlWords);
+  assert.deepEqual(boundedKeyterms(["I DON'T KNOW", "Go Back"]), [
+    "I don't know",
+    "go back",
+  ]);
+  assert.deepEqual(
+    boundedKeyterms(["surname", "postcode", "date of birth", "yes", "no"]),
+    [],
+    "field labels and bare yes/no must not be boosted as control words",
+  );
+
+  const yesNoField = {
+    id: "agree",
+    label: "Do you agree?",
+    type: "dropdown",
+    options: ["Yes", "No"],
+  };
+  const optionUrl = new URL(
+    buildDeepgramStreamingUrl(
+      16000,
+      recognitionKeyterms(),
+      [...recognitionChoiceKeyterms(yesNoField), "Skip"],
+    ),
+  );
+  assert.deepEqual(
+    optionUrl.searchParams.getAll("keyterm"),
+    ["Skip", "repeat", "go back", "I don't know", "that's correct", "Yes", "No"],
+    "options stay boosted and must not send a control word twice",
+  );
+
+  const manyOptions = Array.from(
+    { length: 200 },
+    (_, index) => `Option ${index}`,
+  );
+  const cappedTerms = new URL(
+    buildDeepgramStreamingUrl(16000, controlWords, manyOptions),
+  ).searchParams.getAll("keyterm");
+  assert.equal(cappedTerms.length, 40);
+  assert.ok(controlWords.every((term) => cappedTerms.includes(term)));
+
+  const longOptions = Array.from(
+    { length: 200 },
+    (_, index) => `Very long option label number ${index} with extra words`,
+  );
+  const budgetedTerms = new URL(
+    buildDeepgramStreamingUrl(16000, controlWords, longOptions),
+  ).searchParams.getAll("keyterm");
+  assert.ok(
+    budgetedTerms.join("").length <= 800,
+    "long labels must stay well under Deepgram's 500 keyterm token limit",
+  );
+  assert.ok(controlWords.every((term) => budgetedTerms.includes(term)));
+}
+
+{
+  const choice = { endpointingMs: 500, utteranceEndMs: 1200, settleMs: 600 };
+  const standard = { endpointingMs: 1000, utteranceEndMs: 2000, settleMs: 1000 };
+  const long = { endpointingMs: 1500, utteranceEndMs: 2500, settleMs: 1200 };
+  for (const [field, expected] of [
+    [{ id: "agree", label: "I agree", type: "checkbox" }, choice],
+    [{ id: "home", label: "Housing", type: "dropdown", options: ["Owner"] }, choice],
+    [{ id: "title", label: "Title", type: "radio" }, choice],
+    [{ id: "name_of_pet", label: "Pet", type: "text", options: ["Cat"] }, choice],
+    [{ id: "job", label: "Occupation", type: "text" }, standard],
+    [{ id: "dob", label: "Date of birth", type: "text" }, standard],
+    [{ id: "count", label: "People", type: "number" }, standard],
+    [null, standard],
+    [{ id: "surname", label: "Family name", type: "text" }, long],
+    [{ id: "home", label: "Home address", type: "text" }, long],
+    [{ id: "pc", label: "Where", question: "What is your postcode?", type: "text" }, long],
+    [{ id: "notes", label: "Notes", type: "textarea" }, long],
+  ]) {
+    assert.deepEqual(recognitionTiming(field), expected, JSON.stringify(field));
+    assert.deepEqual(
+      recognitionTiming(field, true),
+      choice,
+      "a pending proposal must use short timing for every field type",
+    );
+  }
+
+  const url = new URL(buildDeepgramStreamingUrl(16000, [], [], long));
+  assert.equal(url.searchParams.get("endpointing"), "1500");
+  assert.equal(url.searchParams.get("utterance_end_ms"), "2500");
+
+  const harness = createHarness();
+  const recognizer = new DeepgramSpeechRecognizer(
+    { tokenUrl: "/voice/deepgram/token", timing: long },
+    callbacks([]),
+    harness.dependencies,
+  );
+  await recognizer.start();
+  assert.equal(
+    new URL(harness.socket.url).searchParams.get("endpointing"),
+    "1500",
+  );
+  harness.socket.open();
+  harness.socket.message(
+    resultMessage("Akhoon", { isFinal: true, speechFinal: true }),
+  );
+  assert.ok(
+    harness.timeoutDelays.includes(1200),
+    "the settle delay must come from the active field's timing",
+  );
+  recognizer.cancel();
 }
 
 {
@@ -209,7 +329,6 @@ class FakeRecorder {
     provider: "deepgram",
     finalTranscriptLatencyMs: 420,
   };
-  assert.deepEqual(recognitionKeyterms(nameField), ["surname"]);
   assert.deepEqual(
     recognitionChoiceKeyterms({
       id: "housing",
@@ -257,7 +376,7 @@ class FakeRecorder {
   const recognizer = new DeepgramSpeechRecognizer(
     {
       tokenUrl: "http://localhost:8000/voice/deepgram/token",
-      keyterms: ["surname"],
+      keyterms: ["skip"],
     },
     callbacks(events),
     harness.dependencies,
@@ -265,22 +384,22 @@ class FakeRecorder {
 
   await recognizer.start();
   assert.deepEqual(harness.requestedConstraints, {
-    audio: {
-      autoGainControl: true,
-      channelCount: { ideal: 1 },
-      echoCancellation: true,
-      noiseSuppression: true,
-    },
+    audio: MICROPHONE_AUDIO_CONSTRAINTS,
+  });
+  assert.deepEqual(MICROPHONE_AUDIO_CONSTRAINTS, {
+    autoGainControl: true,
+    channelCount: { ideal: 1 },
+    echoCancellation: true,
+    noiseSuppression: true,
   });
   assert.equal(harness.fetchCount, 1);
   assert.deepEqual(harness.socket.protocols, ["bearer", "temporary-jwt"]);
-  assert.equal(
-    harness.recorder.startTimeslice,
-    250,
+  assert.ok(
+    harness.capture.listener,
     "capture must begin before the Deepgram socket opens",
   );
-  const bufferedAudio = new Blob(["answer beginning"]);
-  harness.recorder.emit(bufferedAudio);
+  const bufferedAudio = new ArrayBuffer(8);
+  harness.capture.emit(bufferedAudio);
   assert.equal(harness.socket.sent.length, 0);
   harness.socket.open();
   assert.equal(
@@ -331,7 +450,7 @@ class FakeRecorder {
   assert.equal(completions[0].utterance.transcript, "Ibrahim Akhoon");
   assert.equal(completions[0].utterance.words.length, 2);
   assert.equal(harness.trackStops, 1);
-  assert.equal(harness.recorder.stopCount, 1);
+  assert.equal(harness.capture.stopCount, 1);
   assert.equal(harness.socket.closeCount, 1);
   assert.ok(
     harness.socket.sent.some((message) =>
@@ -353,7 +472,7 @@ class FakeRecorder {
   recognizer.cancel();
   recognizer.cancel();
   assert.equal(harness.trackStops, 1);
-  assert.equal(harness.recorder.stopCount, 1);
+  assert.equal(harness.capture.stopCount, 1);
   assert.equal(harness.socket.closeCount, 1);
   assert.equal(events.some((event) => event.type === "complete"), false);
   assert.equal(events.some((event) => event.type === "error"), false);
@@ -429,24 +548,124 @@ class FakeRecorder {
 
 {
   const harness = createHarness();
-  const events = [];
+  const preRollOne = new ArrayBuffer(2);
+  const preRollTwo = new ArrayBuffer(4);
+  const connecting = new ArrayBuffer(6);
+  const live = new ArrayBuffer(8);
+  const capture = new FakeCapture(() => undefined, [preRollOne, preRollTwo]);
   const recognizer = new DeepgramSpeechRecognizer(
     {
       tokenUrl: "/voice/deepgram/token",
-      initialStream: harness.stream,
+      initialCapture: capture,
     },
-    callbacks(events),
+    callbacks([]),
     harness.dependencies,
   );
   await recognizer.start();
   assert.equal(
     harness.requestedConstraints,
     null,
-    "barge-in must transfer its live microphone stream without reopening it",
+    "barge-in must transfer its live capture without reopening the microphone",
+  );
+  capture.emit(connecting);
+  assert.equal(harness.socket.sent.length, 0);
+  assert.equal(
+    new URL(harness.socket.url).searchParams.get("sample_rate"),
+    "16000",
   );
   harness.socket.open();
+  capture.emit(live);
+  assert.deepEqual(
+    harness.socket.sent,
+    [preRollOne, preRollTwo, connecting, live],
+    "pre-roll must reach Deepgram first, followed by later audio in order",
+  );
+  assert.equal(harness.socket.sent[0], preRollOne);
   recognizer.cancel();
-  assert.equal(harness.trackStops, 1);
+  assert.equal(capture.stopCount, 1);
+}
+
+{
+  const harness = createHarness();
+  const saved = [];
+  const preRoll = new ArrayBuffer(2);
+  const live = new ArrayBuffer(4);
+  const capture = new FakeCapture(() => undefined, [preRoll]);
+  const recognizer = new DeepgramSpeechRecognizer(
+    {
+      tokenUrl: "/voice/deepgram/token",
+      initialCapture: capture,
+      onTurnAudio: (audio) => saved.push(audio),
+    },
+    callbacks([]),
+    harness.dependencies,
+  );
+  await recognizer.start();
+  harness.socket.open();
+  capture.emit(live);
+  assert.equal(saved.length, 0);
+  harness.socket.message(resultMessage("hello", { isFinal: true }));
+  harness.socket.message(JSON.stringify({ type: "UtteranceEnd" }));
+  assert.equal(saved.length, 1, "a finished turn must be saved exactly once");
+  assert.equal(saved[0].chunks[0], preRoll);
+  assert.equal(saved[0].chunks[1], live);
+  assert.equal(saved[0].sampleRate, 16000);
+
+  for (const end of ["cancel", "error"]) {
+    const endHarness = createHarness();
+    const notSaved = [];
+    const endRecognizer = new DeepgramSpeechRecognizer(
+      {
+        tokenUrl: "/voice/deepgram/token",
+        onTurnAudio: (audio) => notSaved.push(audio),
+      },
+      callbacks([]),
+      endHarness.dependencies,
+    );
+    await endRecognizer.start();
+    endHarness.socket.open();
+    endHarness.capture.emit(new ArrayBuffer(2));
+    if (end === "cancel") {
+      endRecognizer.cancel();
+    } else {
+      endHarness.socket.error();
+    }
+    assert.equal(notSaved.length, 0, `a ${end} turn must not be saved`);
+  }
+
+  const offHarness = createHarness();
+  const offRecognizer = new DeepgramSpeechRecognizer(
+    { tokenUrl: "/voice/deepgram/token" },
+    callbacks([]),
+    offHarness.dependencies,
+  );
+  await offRecognizer.start();
+  offHarness.capture.emit(new ArrayBuffer(2));
+  assert.equal(
+    offRecognizer.turnAudio.length,
+    0,
+    "audio must not be retained unless saving was explicitly enabled",
+  );
+  offRecognizer.cancel();
+}
+
+{
+  const harness = createHarness({ captureError: true });
+  const events = [];
+  const recognizer = new DeepgramSpeechRecognizer(
+    { tokenUrl: "/voice/deepgram/token" },
+    callbacks(events),
+    harness.dependencies,
+  );
+  await recognizer.start();
+  assert.equal(events.at(-1).type, "error");
+  assert.match(events.at(-1).message, /compatible microphone capture/);
+  assert.equal(
+    harness.trackStops,
+    1,
+    "a failed capture must release the microphone",
+  );
+  assert.equal(harness.fetchCount, 0);
 }
 
 {
@@ -508,6 +727,20 @@ class FakeRecorder {
 
 console.log("Deepgram streaming speech checks passed");
 
+function compileToDataUrl(moduleSource, url, importMap = {}) {
+  let compiledSource = ts.transpileModule(moduleSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2020,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: url.pathname,
+  }).outputText;
+  for (const [specifier, target] of Object.entries(importMap)) {
+    compiledSource = compiledSource.replace(`"${specifier}"`, `"${target}"`);
+  }
+  return `data:text/javascript;base64,${Buffer.from(compiledSource).toString("base64")}`;
+}
+
 function callbacks(events) {
   return {
     onConnected: () => events.push({ type: "connected" }),
@@ -551,12 +784,17 @@ function word(value, confidence) {
   return { word: value, start: 0, end: 0.5, confidence };
 }
 
-function createHarness({ tokenStatus = 200, permissionError = false } = {}) {
+function createHarness({
+  tokenStatus = 200,
+  permissionError = false,
+  captureError = false,
+} = {}) {
   let trackStops = 0;
   let fetchCount = 0;
   let requestedConstraints = null;
   let nextTimer = 1;
   const timeouts = new Map();
+  const timeoutDelays = [];
   const intervals = new Map();
   const stream = {
     getTracks: () => [
@@ -568,7 +806,9 @@ function createHarness({ tokenStatus = 200, permissionError = false } = {}) {
     ],
   };
   const socket = new FakeSocket();
-  const recorder = new FakeRecorder();
+  const capture = new FakeCapture(() => {
+    stream.getTracks().forEach((track) => track.stop());
+  });
   const dependencies = {
     fetch: async () => {
       fetchCount += 1;
@@ -596,12 +836,19 @@ function createHarness({ tokenStatus = 200, permissionError = false } = {}) {
       socket.protocols = protocols;
       return socket;
     },
-    createMediaRecorder: () => recorder,
-    isMediaTypeSupported: (mimeType) => mimeType.includes("webm"),
+    startPcmCapture: async () => {
+      if (captureError) {
+        throw new Error(
+          "This browser could not start compatible microphone capture. Keep typing instead.",
+        );
+      }
+      return capture;
+    },
     now: () => 2000,
-    setTimeout: (callback) => {
+    setTimeout: (callback, delay) => {
       const id = nextTimer++;
       timeouts.set(id, callback);
+      timeoutDelays.push(delay);
       return id;
     },
     clearTimeout: (id) => timeouts.delete(id),
@@ -616,7 +863,8 @@ function createHarness({ tokenStatus = 200, permissionError = false } = {}) {
     dependencies,
     stream,
     socket,
-    recorder,
+    capture,
+    timeoutDelays,
     get fetchCount() {
       return fetchCount;
     },

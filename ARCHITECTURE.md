@@ -42,9 +42,10 @@ Responsible for:
 - speaking the same already-visible assistant message, then automatically
   opening consecutive bounded Deepgram turns until the user mutes, pauses,
   ends, changes form, backgrounds the page, or reaches a blocking failure
-- monitoring only transient local microphone levels while that spoken response
-  is active, so sustained user speech can stop it and open the same bounded
-  listening turn
+- monitoring transient local microphone levels and holding about one second of
+  in-memory pre-roll audio while that spoken response is active, so sustained
+  user speech can stop it and open the same bounded listening turn without
+  losing the first word
 - keeping the latest recognized speech visible and correctable while sending a
   completed utterance through the same Form Agent message path as typed text
 - mapping only a small exact set of spoken decisions to existing explicit
@@ -145,18 +146,19 @@ The browser voice layer has two focused responsibilities. `useVoiceAssistant`
 owns provider-neutral one-turn input state, editable transcript state, browser
 speech synthesis, cancellation, unsupported capability, and stale-callback
 guards. `deepgramSpeechRecognition` owns the Nova-3 WebSocket transport,
-temporary credential request, microphone recorder, interim/final event parsing,
-word-confidence evidence, endpointing, deduplication, and resource cleanup. Its
-small `voiceInterruptionDetector` dependency uses Web Audio only while assistant
-speech is active: it calibrates to local noise, requires sustained activity,
-and transfers the already-open microphone stream to recognition after a real
-barge-in. `useVoiceInterview`
+temporary credential request, interim/final event parsing, word-confidence
+evidence, endpointing, deduplication, and resource cleanup. `voiceAudioCapture`
+owns the shared microphone constraints, AudioWorklet PCM capture, resampling,
+and the pre-roll ring buffer. The small `voiceInterruptionDetector` dependency
+uses Web Audio only while assistant speech is active: it calibrates to local
+noise, requires sustained activity, and transfers the running capture, including
+its pre-roll, to recognition after a real barge-in. `useVoiceInterview`
 owns the frontend-only turn loop:
 
 ```text
 explicit start
     -> visible assistant response is spoken and local interruption arms
-    -> user speech may stop the response and transfer the live microphone
+    -> user speech may stop the response and transfer the live capture and pre-roll
     -> backend issues a short-lived Deepgram bearer token
     -> one Nova-3 listening turn with visible interim text
     -> one deduplicated completed transcript
@@ -188,18 +190,36 @@ interpretation and cannot mutate the form by lexical similarity alone.
 
 The long-lived `DEEPGRAM_API_KEY` is loaded only by FastAPI. The browser asks
 `POST /voice/deepgram/token` for a temporary credential immediately before a
-connection. Microphone recording begins as soon as capture is available; a
-small active-turn-only queue holds audio produced during the credential and
-WebSocket handshake, then flushes it in order when Deepgram connects. This
-prevents the beginning of a natural hands-free answer from being discarded.
-The queue is cleared on completion, cancellation, or failure. Audio then
-streams directly to Deepgram; neither audio nor the temporary credential passes
-through the Form Agent or PDF Service. Streaming uses Nova-3, one fixed English
-locale, bounded non-personal schema and finite-choice keyterms,
-`mip_opt_out=true`, visible interim results, and a guarded utterance boundary.
-Only the finalized transcript enters the existing typed message path exactly
-once. Word confidence and timing exist only for the active turn and are cleared
-with the session.
+connection. Microphone capture begins as soon as it is available; a small
+active-turn-only queue holds audio produced during the credential and WebSocket
+handshake, then flushes it in order when Deepgram connects. This prevents the
+beginning of a natural hands-free answer from being discarded. The queue is
+cleared on completion, cancellation, or failure. Audio then streams directly to
+Deepgram; neither audio nor the temporary credential passes through the Form
+Agent or PDF Service.
+
+Capture uses one path for every turn. An AudioWorklet applies an anti-aliasing
+filter, resamples to 16 kHz mono whatever the device rate, and emits 100 ms
+linear16 chunks, so the stream has no container header and any chunk can be
+sent first. Streaming uses Nova-3, one fixed English locale,
+`encoding=linear16`, `sample_rate=16000`, `mip_opt_out=true`, visible interim
+results, and a guarded utterance boundary. Only the finalized transcript enters
+the existing typed message path exactly once. Word confidence and timing exist
+only for the active turn and are cleared with the session.
+
+Keyterms are limited to five non-personal conversation-control phrases (`skip`,
+`repeat`, `go back`, `I don't know`, `that's correct`) and up to 35 schema-owned
+finite-choice options. A character budget keeps long option labels below
+Deepgram's keyterm token limit, which would otherwise fail the connection.
+
+End-of-speech timing is selected for each turn by `recognitionTiming`:
+
+| Turn | `endpointing` | `utterance_end_ms` | Settle |
+|---|---|---|---|
+| Pending proposal awaiting confirmation, any field | 500 | 1200 | 600 |
+| Choice or yes/no field | 500 | 1200 | 600 |
+| Default text, including dates | 1000 | 2000 | 1000 |
+| Name, address, or textarea field | 1500 | 2500 | 1200 |
 
 Name-field recognition is selected from deterministic field metadata. A
 low-confidence name token stops before Form Agent dispatch and asks the user to
@@ -209,28 +229,36 @@ review, and the existing explicit-confirmation effect. Explicit runs of three
 or more spoken letters may be joined deterministically, while spelling and
 letter order are never guessed.
 
-The activity detector is not a recognizer: it observes no words, buffers no
-audio, and dispatches no form action. At the start of each spoken response it
+The activity detector is not a recognizer: it observes no words and dispatches
+no form action. While it listens, the shared capture keeps the latest second of
+audio in a memory-only ring buffer. Older audio is discarded continuously, and
+nothing leaves the browser unless a barge-in is detected; the buffer is then
+sent to Deepgram first so the opening word is not lost. Because that second is
+recorded during assistant speech, it can contain playback leakage, which is why
+the buffer is kept short. At the start of each spoken response the detector
 briefly calibrates against ambient sound and speaker-to-microphone leakage. The
-browser is asked to apply echo cancellation and noise suppression without
-automatic gain control. The gate arms only after calibration and requires
-sustained, varying speech-like activity above both the ambient threshold and
-the calibrated playback ceiling. Conservative misses remain recoverable through
-the permanent `Answer now` and typed controls.
+gate arms only after calibration and requires sustained, varying speech-like
+activity above both the ambient threshold and the calibrated playback ceiling.
+Conservative misses remain recoverable through the permanent `Answer now` and
+typed controls.
 
-Recognition capture is configured separately from that playback detector. It
-requests echo cancellation, noise suppression, mono input where available, and
-automatic gain control so quieter direct answers are not penalized by the
-leakage-resistant interruption settings.
+The detector and recognition use one shared microphone configuration: echo
+cancellation, noise suppression, mono input where available, and automatic gain
+control, so barge-in speech reaches Deepgram at the same level as a direct
+answer. Automatic gain control can also raise playback leakage, so its effect
+on false interruptions needs checking on real speakers.
 
-The detector stops or transfers stream ownership on speech completion, manual
+The detector stops or transfers capture ownership on speech completion, manual
 interruption, recognition start, pause, mute, end, error, form change, page
 backgrounding, or unmount. The interview loop stops on pause, mute, end,
 non-recoverable microphone/provider failure, or form change. Formless never
-stores audio or speech metadata. Deepgram
-receives active-turn audio directly and is asked not to retain it for model
-improvement; provider request metadata and usage logs remain subject to
-Deepgram's service policy. Typed conversation, `Answer now`, proposal buttons,
+stores audio or speech metadata in normal operation. The one exception is a
+development-only option, off by default: with `VITE_SAVE_VOICE_TURNS=true` on the
+Vite dev server, the browser downloads a WAV of each finished voice turn to the
+developer's machine for building a test set. Production builds do not contain
+this code, whatever the flag is set to. Deepgram receives active-turn audio
+directly and is asked not to retain it for model improvement; provider request
+metadata and usage logs remain subject to Deepgram's service policy. Typed conversation, `Answer now`, proposal buttons,
 and the manual drawer remain available throughout and operate on the same
 state.
 
