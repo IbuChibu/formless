@@ -57,17 +57,7 @@ unavailable.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    U["User: voice, text or direct edit"] --> F["React + TypeScript workspace"]
-    F -->|"PDF and closed conversation requests"| A["FastAPI"]
-    A --> C["Conversation V2"]
-    C --> N["Nemotron via Nebius"]
-    C --> T["Tavily guidance"]
-    F -->|"Temporary credential + audio"| D["Deepgram Nova-3"]
-    A --> P["PDF Service"]
-    P -->|"Filled PDF bytes"| F
-```
+![Formless system architecture and data flow](docs/assets/formless-architecture.png)
 
 The frontend owns the ephemeral conversation, review UI and canonical field
 state. FastAPI exposes the application boundary and validates closed effects.
