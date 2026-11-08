@@ -5916,6 +5916,18 @@ Completion evidence (2026-11-05):
 - 510 backend tests, all frontend workflow checks, and the production build
   pass; the retained engine and `/agent/respond` remain available as fallback
 
+Post-completion reliability repair (2026-11-07):
+- reproduced a pending-name proposal loop where standalone `Yeah`, `Yes`, and
+  `Correct` could be returned to Nemotron and cause the same proposal to be
+  repeated instead of confirmed
+- exact standalone confirmations now resolve the already-visible pending value
+  as a closed deterministic effect without another provider call; qualified or
+  ambiguous replies still go through semantic interpretation
+- regression coverage verifies `Yeah`, `Yes`, `Correct`, and repeated
+  `Confirm`, preserves the next-question transition, and proves that `Yes, but
+  change the spelling` does not silently confirm
+- the complete backend regression suite passes with 513 tests
+
 Do not implement:
 - direct model PDF writes, silent confirmation, arbitrary effects, duplicate
   canonical state, an agent framework, authentication, persistence, deployment,

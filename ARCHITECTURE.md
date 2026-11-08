@@ -337,6 +337,14 @@ A narrowly triggered Nemotron self-audit rechecks `none` decisions against the
 same bounded context; it is not another agent and has no independent state,
 tools, or PDF access.
 
+While a proposal is visibly pending, a deliberately small exact set of
+standalone review confirmations can resolve that proposal without a model
+round-trip. This includes ordinary speech variants such as `yes`, `yeah`,
+`yep`, `correct`, and `confirm`. The match covers the complete utterance, not a
+keyword inside a longer sentence: qualified replies such as `yes, but change
+the spelling` continue through Nemotron. The transition can apply only the
+existing pending value and therefore cannot create, replace, or infer a fact.
+
 The frontend canonical state remains authoritative. V2 effects are translated
 into the established proposal and confirmation contract, and the PDF Service
 is unchanged. After the fixed live suite passed and the same-digest blind

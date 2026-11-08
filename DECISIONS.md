@@ -903,3 +903,9 @@ deterministic failures, and zero confirmation-boundary failures. A blinded
 same-digest review then preferred V2 in all five scenarios with no safety
 concerns. The reversible cutover therefore satisfies the documented promotion
 gate without coupling the model to PDF mutation or removing the known fallback.
+
+Post-release clarification (2026-11-07): exact standalone confirmations of a
+visible V2 proposal use the same closed, provider-independent review boundary
+already established for release reliability. This prevents model variability
+from repeating a proposal after `yes` or `yeah`. Only the existing pending
+value can be applied; qualified and ambiguous language remains model-led.
