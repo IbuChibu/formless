@@ -4,9 +4,11 @@ import {
   nameConfidenceConcern,
   recognitionChoiceKeyterms,
   recognitionKeyterms,
+  recognitionTiming,
   type VoiceRecognitionField,
 } from "./deepgramSpeechRecognition";
 import type { VoiceAssistantControls } from "./useVoiceAssistant";
+import type { PcmCapture } from "./voiceAudioCapture";
 import {
   isRecoverableVoiceInputError,
   nextAutomaticRecoveryAttempt,
@@ -98,7 +100,7 @@ export default function useVoiceInterview(
   const sessionModeRef = useRef<VoiceSessionMode>("inactive");
   const lastHandledAssistantIdRef = useRef<number | null>(null);
   const submitTranscriptRef = useRef<(transcript: string) => void>(() => {});
-  const beginListeningRef = useRef<(stream?: MediaStream) => void>(() => {});
+  const beginListeningRef = useRef<(capture?: PcmCapture) => void>(() => {});
   const assistantSpeechSessionRef = useRef(0);
   const listeningTurnRef = useRef(0);
   const recoveryAttemptsRef = useRef(0);
@@ -178,18 +180,18 @@ export default function useVoiceInterview(
   );
 
   const beginListening = useCallback(
-    (initialStream?: MediaStream) => {
+    (initialCapture?: PcmCapture) => {
       const current = optionsRef.current;
       if (
         sessionModeRef.current !== "active" ||
         current.agentIsBusy ||
         !current.canSendMessage
       ) {
-        initialStream?.getTracks().forEach((track) => track.stop());
+        initialCapture?.stop();
         return;
       }
       if (!current.voice.inputSupported) {
-        initialStream?.getTracks().forEach((track) => track.stop());
+        initialCapture?.stop();
         setBaseStatus("unsupported");
         return;
       }
@@ -198,14 +200,18 @@ export default function useVoiceInterview(
       listeningTurnRef.current += 1;
       const listeningTurn = listeningTurnRef.current;
       setBaseStatus(
-        initialStream
+        initialCapture
           ? "interrupted"
           : current.hasPendingProposal
             ? "awaiting_confirmation"
             : "starting",
       );
-      const keyterms = recognitionKeyterms(current.activeField);
+      const keyterms = recognitionKeyterms();
       const choiceKeyterms = recognitionChoiceKeyterms(current.activeField);
+      const timing = recognitionTiming(
+        current.activeField,
+        current.hasPendingProposal,
+      );
       current.voice.startListening(
         (utterance) => {
           if (
@@ -259,8 +265,9 @@ export default function useVoiceInterview(
           consecutiveSilencesRef.current += 1;
           scheduleListening(delay);
         },
-        initialStream,
+        initialCapture,
         choiceKeyterms,
+        timing,
       );
     },
     [clearRecoveryTimer, scheduleListening],
@@ -306,18 +313,18 @@ export default function useVoiceInterview(
         finishSpeechTurn();
         return;
       }
-      voice.startInterruptionDetection((stream) => {
+      voice.startInterruptionDetection((capture) => {
         if (
           sessionModeRef.current !== "active" ||
           assistantSpeechSessionRef.current !== assistantSpeechSession
         ) {
-          stream.getTracks().forEach((track) => track.stop());
+          capture.stop();
           return;
         }
         assistantSpeechSessionRef.current += 1;
         setBaseStatus("interrupted");
         voice.stopSpeaking();
-        beginListening(stream);
+        beginListening(capture);
       });
     },
     [beginListening, continueAfterSpeech],

@@ -5,7 +5,9 @@ import {
   browserSupportsDeepgramSpeech,
   DeepgramSpeechRecognizer,
   type DeepgramUtterance,
+  type RecognitionTiming,
 } from "./deepgramSpeechRecognition";
+import { downloadVoiceTurnAudio, type PcmCapture } from "./voiceAudioCapture";
 import {
   browserSupportsVoiceInterruption,
   startVoiceInterruptionDetector,
@@ -44,8 +46,9 @@ export type VoiceAssistantControls = {
     onComplete?: (utterance: DeepgramUtterance) => void,
     keyterms?: string[],
     onNoSpeech?: () => void,
-    initialStream?: MediaStream,
+    initialCapture?: PcmCapture,
     choiceKeyterms?: string[],
+    timing?: RecognitionTiming,
   ) => void;
   stopListening: () => void;
   cancelListening: () => void;
@@ -60,7 +63,7 @@ export type VoiceAssistantControls = {
   interruptionStatus: VoiceInterruptionStatus;
   interruptionError: string | null;
   startInterruptionDetection: (
-    onInterrupt: (stream: MediaStream) => void,
+    onInterrupt: (capture: PcmCapture) => void,
   ) => void;
   stopInterruptionDetection: () => void;
   speakAssistantMessage: (
@@ -74,6 +77,10 @@ export type VoiceAssistantControls = {
   stopSpeaking: () => void;
   resetVoiceSession: () => void;
 };
+
+// Development only: a production build can never save a user's speech.
+const SAVE_VOICE_TURNS =
+  import.meta.env.DEV && import.meta.env.VITE_SAVE_VOICE_TURNS === "true";
 
 function browserSupportsVoiceOutput(): boolean {
   return (
@@ -138,7 +145,7 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
   }, [interruptionSupported]);
 
   const startInterruptionDetection = useCallback(
-    (onInterrupt: (stream: MediaStream) => void) => {
+    (onInterrupt: (capture: PcmCapture) => void) => {
       interruptionSessionRef.current += 1;
       const interruptionSession = interruptionSessionRef.current;
       interruptionDetectorRef.current?.stop();
@@ -157,15 +164,15 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
             setInterruptionStatus("armed");
           }
         },
-        onVoice: (stream) => {
+        onVoice: (capture) => {
           if (interruptionSessionRef.current !== interruptionSession) {
-            stream.getTracks().forEach((track) => track.stop());
+            capture.stop();
             return;
           }
           interruptionSessionRef.current += 1;
           interruptionDetectorRef.current = null;
           setInterruptionStatus("idle");
-          onInterrupt(stream);
+          onInterrupt(capture);
         },
         onError: (message) => {
           if (interruptionSessionRef.current !== interruptionSession) {
@@ -272,11 +279,12 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
       onComplete?: (utterance: DeepgramUtterance) => void,
       keyterms: string[] = [],
       onNoSpeech?: () => void,
-      initialStream?: MediaStream,
+      initialCapture?: PcmCapture,
       choiceKeyterms: string[] = [],
+      timing?: RecognitionTiming,
     ) => {
       if (!inputSupported) {
-        initialStream?.getTracks().forEach((track) => track.stop());
+        initialCapture?.stop();
         setInputStatus("unsupported");
         return;
       }
@@ -296,7 +304,9 @@ export default function useVoiceAssistant(): VoiceAssistantControls {
           tokenUrl: `${apiBaseUrl}/voice/deepgram/token`,
           keyterms,
           choiceKeyterms,
-          initialStream,
+          timing,
+          initialCapture,
+          onTurnAudio: SAVE_VOICE_TURNS ? downloadVoiceTurnAudio : undefined,
         },
         {
           onConnected: () => {
