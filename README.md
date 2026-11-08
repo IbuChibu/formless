@@ -1,28 +1,165 @@
 # Formless
 
-Formless is a conversation-first assistant for understanding and completing
-fillable PDF forms. The React frontend keeps the PDF and confirmed field state;
-the FastAPI backend keeps PDF manipulation separate from the Nemotron-powered
-Form Agent.
+> A voice-first AI assistant that helps people understand and complete confusing
+> fillable PDF forms.
+
+Formless behaves like a patient helper sitting beside the user. It explains
+official wording, asks one question at a time, listens to answers in ordinary
+language, and prepares values for the form. Every AI-proposed value remains
+reviewable and must be confirmed before it changes the PDF.
+
+> **Prototype status:** Formless is a hackathon prototype for supported
+> fillable AcroForm PDFs. It is not a legal-advice service. Use synthetic
+> information when evaluating the public project.
+
+## The problem
+
+Official forms often assume that people understand bureaucratic language, know
+how their information maps to particular boxes, and can manage a long sequence
+of questions without help. This can be especially difficult for people facing
+an unfamiliar bureaucracy, limited English, dyslexia, ADHD, low confidence,
+physical access needs, or the stress of a high-stakes application.
+
+A human helper would explain an unfamiliar phrase, listen to the answer, ask a
+follow-up question when necessary, and check the result before writing it down.
+Formless explores how an AI assistant can provide that kind of support while
+keeping the user in control of every factual answer.
+
+## What Formless does
+
+- Extracts text fields, dropdowns, checkboxes and available options from a
+  fillable PDF.
+- Displays the document in a custom page-by-page PDF workspace.
+- Guides the user through the form by voice or text.
+- Uses NVIDIA Nemotron through Nebius Token Factory to explain questions and
+  interpret natural-language answers.
+- Uses Deepgram Nova-3 for streaming speech recognition and hands-free turns.
+- Can request bounded live guidance through Tavily when the user asks for it.
+- Shows the original answer and prepared value for review before applying it.
+- Keeps AI conversation logic separate from PDF extraction and filling.
+- Supports direct PDF-field editing and a manual editor as reliable fallbacks.
+- Generates a new completed PDF without overwriting the uploaded file.
+
+## Demo flow
+
+1. Upload a supported fillable PDF.
+2. Start the guided conversation and answer by voice or text.
+3. Ask Formless to explain or simplify a confusing question.
+4. Review the structured field value prepared from the user's answer.
+5. Confirm, edit, reject or skip the proposal. Unconfirmed AI output never
+   changes the form.
+6. Watch confirmed answers update the PDF preview, or click a PDF field to edit
+   it directly.
+7. Review completed and unanswered fields, then download the filled PDF.
+
+Typing and direct editing remain available if voice or an external provider is
+unavailable.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U["User: voice, text or direct edit"] --> F["React + TypeScript workspace"]
+    F -->|"PDF and closed conversation requests"| A["FastAPI"]
+    A --> C["Conversation V2"]
+    C --> N["Nemotron via Nebius"]
+    C --> T["Tavily guidance"]
+    F -->|"Temporary credential + audio"| D["Deepgram Nova-3"]
+    A --> P["PDF Service"]
+    P -->|"Filled PDF bytes"| F
+```
+
+The frontend owns the ephemeral conversation, review UI and canonical field
+state. FastAPI exposes the application boundary and validates closed effects.
+The conversation service may explain, interpret and propose, but it cannot edit
+PDF bytes or silently change confirmed form state. Only confirmed values reach
+the independent PDF service.
+
+### Technology stack
+
+| Area | Technology |
+| --- | --- |
+| Frontend | React, TypeScript, Vite, PDF.js |
+| Backend | Python, FastAPI, Pydantic |
+| AI | NVIDIA Nemotron through Nebius Token Factory |
+| Speech recognition | Deepgram Nova-3 streaming |
+| Optional web guidance | Tavily Search API |
+| PDF processing | pypdf and PyMuPDF |
+| Testing | pytest and focused Node.js workflow checks |
+
+## Safety model
+
+- The user is the source of personal facts.
+- Model output is limited to a small set of typed effects.
+- Field IDs, primitive types and finite-choice options are validated by code.
+- A proposal never changes canonical form state.
+- Confirmation is required before an AI-proposed value reaches the PDF.
+- Replacing a confirmed answer also requires review and confirmation.
+- PDF manipulation remains independent from AI and voice services.
+- Typed and manual editing remain available during provider failures.
+
+## Supported scope
+
+Formless currently supports tested AcroForm PDFs with text, dropdown and
+checkbox fields. The repository includes synthetic fixtures and compatibility
+coverage for more complex real-world AcroForms.
+
+The current prototype does not promise universal PDF support. In particular,
+it does not provide OCR for flat scanned documents, XFA-form execution,
+electronic signatures, authentication, account storage or long-term document
+persistence. AI interpretation and speech recognition can still be wrong, so
+the visible review boundary and manual fallback are essential parts of the
+product.
 
 ## Run locally
 
-Backend, from the repository root:
+### Prerequisites
+
+- Python 3.9 or newer
+- Node.js `^20.19.0` or `>=22.12.0`
+- A modern browser; microphone access requires `localhost` or HTTPS
+
+### 1. Start the backend
+
+From the repository root on macOS or Linux:
 
 ```bash
 cd backend
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
+cp .env.example .env
+```
+
+Run the `cp` command only when creating `backend/.env` for the first time. Add
+the server-side credentials needed for the features you want to use:
+
+| Variable | Enables |
+| --- | --- |
+| `NEBIUS_API_KEY` | Nemotron explanations and guided conversation |
+| `DEEPGRAM_API_KEY` | Streaming voice recognition |
+| `TAVILY_API_KEY` | Optional live form guidance |
+
+Never commit `backend/.env` or place these values in a `VITE_` variable.
+
+Load the environment and start FastAPI:
+
+```bash
 set -a
 source .env
 set +a
 uvicorn app.main:app --reload
 ```
 
-Copy `backend/.env.example` to `backend/.env` first if needed, then add your
-server-side credentials. Do not commit `backend/.env`.
+The API runs at `http://127.0.0.1:8000`. Check it with:
 
-Frontend, in a second terminal from the repository root:
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+### 2. Start the frontend
+
+In a second terminal from the repository root:
 
 ```bash
 cd frontend
@@ -30,93 +167,36 @@ npm install
 npm run dev
 ```
 
-The simpler Nemotron-led V2 conversation core is the default. It posts to
-`/agent/v2/respond` and keeps the retained engine available as a reversible
-fallback. To run the retained engine explicitly, start the frontend with:
+Open `http://localhost:5173` and upload a supported fillable PDF. PDF upload,
+manual editing, filling and download remain available without external-provider
+credentials.
 
-```bash
-cd frontend
-VITE_CONVERSATION_ENGINE=legacy npm run dev
-```
+## Tests and evaluation
 
-When configured,
-`NEBIUS_CONVERSATION_MODEL` selects its model; otherwise it falls back to
-`NEBIUS_CANDIDATE_MODEL`, then `NEBIUS_MODEL`. All values remain server-side.
-V2 uses the same visible proposal, explicit confirmation, canonical form
-state, PDF preview, and PDF filling service.
-
-Open `http://localhost:5173`. The header reports only whether the FastAPI
-backend is reachable. A successful `GET /health` response does not prove that
-Nebius Token Factory, Tavily, or Deepgram is configured; provider configuration
-is checked when the corresponding assistant feature is used. Manual PDF
-extraction, editing, filling, and download remain available if a provider is
-unavailable.
-
-For voice input, add a Deepgram key with Member permission to `backend/.env`:
-
-```env
-DEEPGRAM_API_KEY=your_server_side_key
-DEEPGRAM_BASE_URL=https://api.deepgram.com/v1
-```
-
-Never put this key in a `VITE_` variable. FastAPI exchanges it for a temporary
-browser credential only when a user explicitly starts listening.
-
-Voice input uses Deepgram Nova-3 streaming and requires a browser with
-`getUserMedia`, `MediaRecorder`, and WebSocket support on `localhost` or HTTPS.
-After uploading a form, select **Start conversation** once. The assistant reads
-the visible question and temporarily analyses local microphone levels while
-speaking. Start talking to interrupt it hands-free, or use **Answer now**;
-either route opens the same bounded recognizer. After each response, listening
-reopens automatically. Capture begins while the short-lived credential and
-Deepgram connection are being prepared, with only a bounded in-memory opening
-buffer, so speaking naturally after the assistant stops does not discard the
-start of the answer. Silence sends nothing and reopens listening with bounded
-backoff; one transient provider failure is retried automatically. Interim words
-remain visibly labelled, and only one finalized utterance enters the same Form
-Agent path as typed text. `window.SpeechRecognition` is not required.
-
-Formless does not retain audio, temporary tokens, or word-confidence metadata.
-Streaming requests set `mip_opt_out=true`; according to Deepgram's
-[data-handling documentation](https://developers.deepgram.com/trust-security/your-data),
-opted-out audio and transcripts are retained only as needed to process the
-request, while non-content request metadata and usage logs are still recorded.
-A proposal still changes nothing until explicitly confirmed. **Mute**,
-**Pause**, and **End** release microphone and socket resources without changing
-the form.
-Typing and visible proposal controls remain available when voice is
-unconfigured, unsupported, denied, disconnected, or uncertain.
-
-With a PDF loaded, Formless uses a fixed document-and-assistant workspace. The
-PDF page and conversation history scroll independently. The assistant keeps a
-compact recording status, current-question line, pending answer review, and
-typed composer visible around the full conversation. While listening, a pinned
-**What I hear** strip displays Deepgram's live transcript and keeps the final
-recognized wording available for correction. Use **Question**, **Adjust help**,
-**Edit fields**, or **Review** to open occasional controls from the right
-without losing the transcript. On narrow screens, use the **Assistant** and
-**Form** switch; both panes stay mounted so the current page, transcript,
-proposal, and answers are preserved.
-
-## Checks
+Run the backend regression suite:
 
 ```bash
 cd backend
 source .venv/bin/activate
 python -m pytest -q
-python -m evaluations.form_agent_transcript_evaluation
+```
 
-cd ../frontend
+Run the focused frontend checks and production build:
+
+```bash
+cd frontend
+npm run test:pdf-workflow
 npm run test:workspace-layout
-npm run test:fixed-workspace
+npm run test:voice-audio-capture
 npm run test:voice-interruption
 npm run test:deepgram-speech
 npm run test:continuous-voice
 npm run build
 ```
 
-The optional live conversation-quality evaluation uses the credentials loaded
-from `backend/.env`:
+The evaluation harness replays synthetic multi-turn interviews through the
+same conversation boundary used by the application. With the provider
+credentials loaded, run the V2 human-helper suite with:
 
 ```bash
 cd backend
@@ -124,158 +204,56 @@ source .venv/bin/activate
 set -a
 source .env
 set +a
-python -m evaluations.form_agent_conversation_quality
-```
-
-Milestone 6.14 compares the configured primary model with one stronger
-Token Factory candidate using the same fixed scenarios. Add an available model
-ID to `NEBIUS_CANDIDATE_MODEL` in `backend/.env`, then run:
-
-```bash
-cd backend
-source .venv/bin/activate
-set -a
-source .env
-set +a
-python -m evaluations.form_agent_model_selection
-```
-
-The models are evaluated sequentially. The JSON report contains no credentials
-and includes both metric sets, side-by-side scenario messages, latency, model
-calls, metric deltas, and a deterministic recommendation. This command does not
-change the production model; `NEBIUS_MODEL` remains the single runtime model.
-
-The recorded Milestone 6.14 comparison used
-`nvidia/Nemotron-3-Ultra-550b-a55b` as the candidate and retained Lightning: the
-candidate regressed guided conversation-repair metrics and was 4.419 times
-slower on the fixed live scenarios.
-
-## Conversation evaluation harness
-
-Milestone 7.2 adds an evaluation-only lab for realistic complete interviews.
-Eight fixed synthetic personas exercise bundled answers, corrections,
-ambiguity, field questions, interruptions, skips, frustration, and returning to
-earlier fields. The simulator uses schemas extracted from the checked-in PDF
-fixtures and calls the same Form Agent application boundary as the UI.
-
-Run the full live suite and add the optional Nemotron qualitative rubric:
-
-```bash
-cd backend
-source .venv/bin/activate
-set -a
-source .env
-set +a
-python -m evaluations.conversation_harness run --label baseline --judge
-```
-
-Use `--engine v2` to run the identical suite against the parallel conversation
-core. Omitting the flag evaluates the retained engine:
-
-```bash
 python -m evaluations.conversation_harness run \
   --engine v2 \
-  --label simple-core-candidate \
+  --label portfolio-review \
   --scenarios evaluations/scenarios/human_helper_experience_v2.json \
   --judge
 ```
 
-The command prints summary metrics and writes a full JSON report plus a readable
-Markdown transcript to `backend/evaluations/results/`. Generated reports are
-ignored by Git. They include no credentials and use synthetic personal
-information only.
+Generated reports use synthetic information, contain no credentials and are
+written under the ignored `backend/evaluations/results/` directory. The harness
+combines deterministic form-state checks with qualitative conversation scores;
+natural wording cannot compensate for an incorrect canonical state.
 
-To exercise the exact HTTP interface instead, start FastAPI and run:
+## Engineering highlights
 
-```bash
-cd backend
-source .venv/bin/activate
-python -m evaluations.conversation_harness run \
-  --label api-baseline \
-  --target http \
-  --base-url http://127.0.0.1:8000
+- A closed-effect conversation architecture prevents the model from writing
+  directly to form state or PDF bytes.
+- A canonical field model keeps voice, typing, direct PDF edits and the manual
+  editor synchronized.
+- The voice pipeline uses temporary browser credentials, raw 16 kHz PCM,
+  bounded pre-roll and conservative interruption detection.
+- PDF filling creates new bytes and preserves the uploaded source document.
+- Versioned transcript scenarios measure context retention, clarification,
+  repetition, recovery, invention and exact final form state.
+- Provider failures preserve user state and leave non-AI workflows available.
+
+Detailed implementation history and acceptance evidence live in
+[`PROJECT_PLAN.md`](PROJECT_PLAN.md), [`ARCHITECTURE.md`](ARCHITECTURE.md),
+[`DECISIONS.md`](DECISIONS.md) and [`docs/`](docs/).
+
+## Repository structure
+
+```text
+frontend/                 React application and focused browser checks
+backend/app/              FastAPI routes and production services
+backend/app/services/     Conversation, PDF, Nemotron, Tavily and Deepgram code
+backend/tests/            Backend regression tests and PDF fixtures
+backend/evaluations/      Synthetic conversation scenarios and evaluation tools
+docs/                     Milestone evidence and design references
 ```
 
-After a targeted change, rerun with a new label and compare the two printed JSON
-paths:
+## Privacy and limitations
 
-```bash
-cd backend
-source .venv/bin/activate
-python -m evaluations.conversation_harness compare \
-  evaluations/results/BASELINE_REPORT.json \
-  evaluations/results/CANDIDATE_REPORT.json \
-  --output evaluations/results/comparison.json
-```
+Formless does not implement accounts or database persistence. Conversation and
+form state are held in the browser for the active session. External AI, search
+and speech providers receive only the bounded data needed for their feature.
+Do not use the public prototype with real sensitive or high-stakes information.
 
-Comparison requires the same scenario-suite digest. It reports metric deltas
-and stable fixed, new, and unchanged deterministic failures so changing
-qualitative wording does not disguise a form-state regression. The checked
-Milestone 7.2 baseline and its largest observed weaknesses are summarized in
-[`docs/milestone-7.2-conversation-evaluation-baseline.md`](docs/milestone-7.2-conversation-evaluation-baseline.md).
-The accepted Milestone 7.3 comparison and its one conservative residual format
-difference are summarized in
-[`docs/milestone-7.3-conversation-reliability-result.md`](docs/milestone-7.3-conversation-reliability-result.md).
-
-Milestone 7.4 adds a smaller voice-like reliability suite with deterministic
-checks for the newest short answer, contradictory response wording, safe
-finite-choice near matches, unsupported date advice, and edited-confirmation
-visibility. Run it with:
-
-```bash
-cd backend
-source .venv/bin/activate
-set -a
-source .env
-set +a
-python -m evaluations.conversation_harness run \
-  --label voice-reliability \
-  --scenarios evaluations/scenarios/voice_interview_reliability.json \
-  --judge
-```
-
-The accepted same-digest result is summarized in
-[`docs/milestone-7.4-voice-conversation-reliability-result.md`](docs/milestone-7.4-voice-conversation-reliability-result.md).
-
-Milestone 9.2.2 adds a focused context-rich conversation and natural proposal
-review suite. It covers conversational confirmation, rejection, read-back,
-speech near-matches, housing-option ambiguity, date order, and mixed
-spoken/spelled names. Run the same file before and after a conversational change
-so the reports keep an identical suite digest:
-
-```bash
-cd backend
-source .venv/bin/activate
-set -a
-source .env
-set +a
-python -m evaluations.conversation_harness run \
-  --label context-rich-review \
-  --scenarios evaluations/scenarios/context_rich_natural_review.json \
-  --judge
-```
-
-Milestone 9.2.5 adds the release-gate `human-helper-experience-v2` suite based
-on observed voice and typed failures. It checks first-request explanations,
-progressive simplification, ambiguous dates, housing-option safety, proposal
-read-back, near-match review speech, skip/reopen, correction, and a fourteen-
-turn low-effort interview against real extracted fixture schemas:
-
-```bash
-cd backend
-source .venv/bin/activate
-set -a
-source .env
-set +a
-python -m evaluations.conversation_harness run \
-  --label human-helper-release-gate \
-  --scenarios evaluations/scenarios/human_helper_experience_v2.json \
-  --judge
-```
-
-The accepted local live run uses synthetic data only and must pass both the
-hard canonical-state gate and the human-helper gate. Generated transcripts stay
-under the ignored `backend/evaluations/results/` directory.
+The current build is intended to demonstrate the product direction and
+engineering approach. It should not be relied on to determine eligibility,
+provide legal or financial advice, or submit a form without human review.
 
 ## License
 
