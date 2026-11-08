@@ -35,6 +35,7 @@ from .models import (
     SkipFieldEffect,
     UpdateAssistanceEffect,
 )
+from .review_commands import is_explicit_confirmation
 
 
 def validated_action(
@@ -101,7 +102,7 @@ def validated_action(
     if isinstance(effect, ConfirmProposalEffect):
         if pending is None:
             raise FormAgentError("Conversation Core confirmed without a pending proposal")
-        if not _is_explicit_confirmation(request_message(request)):
+        if not is_explicit_confirmation(request_message(request)):
             raise FormAgentError(
                 "Conversation Core cannot confirm from ambiguous review language"
             )
@@ -207,27 +208,6 @@ def validated_action(
         )
 
     raise FormAgentError("Conversation Core returned an unsupported effect")
-
-
-def _is_explicit_confirmation(message: str) -> bool:
-    normalized = re.sub(r"[^a-z0-9']+", " ", message.casefold()).strip()
-    return normalized in {
-        "confirm",
-        "confirm confirm",
-        "confirm that",
-        "yes",
-        "yes confirm",
-        "yes confirm that",
-        "yes that's right",
-        "yes that is right",
-        "yes that's correct",
-        "yes that is correct",
-        "that's right",
-        "that is right",
-        "that's correct",
-        "that is correct",
-        "correct",
-    }
 
 
 def validate_reply_effect_consistency(

@@ -30,7 +30,10 @@ from app.services.form_agent.navigation_policy import (
     build_next_field_question,
     next_unanswered_action,
 )
-from app.services.form_agent.state_machine import response_for_action
+from app.services.form_agent.state_machine import (
+    next_unanswered_field,
+    response_for_action,
+)
 from app.services.form_agent.orchestrator import record_turn_route_diagnostic
 from app.services.form_agent.value_normalizer import validate_field_value
 from app.services.nemotron_service import NemotronService
@@ -38,6 +41,7 @@ from app.services.nemotron_service import NemotronService
 from .context import build_conversation_context
 from .effect_validator import validate_reply_effect_consistency, validated_action
 from .models import ConversationV2Decision, NoEffect
+from .review_commands import is_explicit_confirmation
 
 
 SYSTEM_PROMPT = """You are Formless, a calm person sitting beside the user and helping them complete one PDF form.
@@ -248,6 +252,33 @@ class ConversationV2Service:
     def _direct_ui_action(request: FormAgentRequest):
         event = request.event
         pending = request.conversation_state.pending_proposal
+        if (
+            isinstance(event, MessageEvent)
+            and pending is not None
+            and is_explicit_confirmation(event.content)
+        ):
+            next_field = next_unanswered_field(
+                request.fields,
+                resolved_field_id=pending.field_id,
+            )
+            display_value = (
+                "Yes"
+                if pending.value is True
+                else "No"
+                if pending.value is False
+                else pending.value
+            )
+            message = f'Thanks — I’ve added "{display_value}".'
+            if next_field is not None:
+                message = f"{message} Next, {build_next_field_question(next_field)}"
+            else:
+                message = f"{message} All supported fields have been reviewed."
+            return ConfirmedAction(
+                action="confirmed",
+                message=message,
+                field_id=pending.field_id,
+                value=pending.value,
+            )
         if isinstance(event, AdvanceEvent):
             return next_unanswered_action(request.fields)
         if isinstance(event, FocusFieldEvent):

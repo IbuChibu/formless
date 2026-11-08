@@ -285,6 +285,67 @@ def test_natural_confirmation_applies_only_the_pending_value() -> None:
     }
 
 
+def test_clear_spoken_confirmations_resolve_without_a_model_retry() -> None:
+    fields = [
+        field("full_name", "Full legal name"),
+        field("preferred_name", "Preferred name"),
+    ]
+    for phrase in ("Yeah.", "Yes.", "Correct.", "Confirm. Confirm."):
+        response, model = respond(
+            {"reply": "This model response must not be used.", "effect": {"type": "none"}},
+            request(
+                phrase,
+                fields=fields,
+                phase="awaiting_confirmation",
+                pending={"field_id": "full_name", "value": "Ebrahim Akhoon"},
+            ),
+        )
+
+        assert response.effect.model_dump() == {
+            "effect": "confirmed",
+            "field_id": "full_name",
+            "value": "Ebrahim Akhoon",
+        }
+        assert response.conversation_state.phase == "awaiting_answer"
+        assert response.conversation_state.active_field_id == "preferred_name"
+        assert "Preferred name" in response.assistant_message
+        assert model.calls == []
+
+
+def test_qualified_yes_still_uses_semantic_interpretation() -> None:
+    response, model = respond(
+        {
+            "reply": "No problem — what should I use instead?",
+            "effect": {"type": "reject_proposal"},
+        },
+        request(
+            "Yes, but change the spelling.",
+            phase="awaiting_confirmation",
+            pending={"field_id": "full_name", "value": "Ebrahim Akhoon"},
+        ),
+    )
+
+    assert response.effect.effect == "rejected"
+    assert len(model.calls) == 1
+
+
+def test_spoken_confirmation_reads_back_a_checkbox_naturally() -> None:
+    response, model = respond(
+        {"reply": "This model response must not be used.", "effect": {"type": "none"}},
+        request(
+            "Yes.",
+            fields=[field("accept_terms", "Accept terms", field_type="checkbox")],
+            active_field_id="accept_terms",
+            phase="awaiting_confirmation",
+            pending={"field_id": "accept_terms", "value": True},
+        ),
+    )
+
+    assert response.effect.value is True
+    assert '"Yes"' in response.assistant_message
+    assert model.calls == []
+
+
 def test_near_match_cannot_confirm_even_if_model_requests_it() -> None:
     response, _ = respond(
         [
