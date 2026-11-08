@@ -276,3 +276,7 @@ python -m evaluations.conversation_harness run \
 The accepted local live run uses synthetic data only and must pass both the
 hard canonical-state gate and the human-helper gate. Generated transcripts stay
 under the ignored `backend/evaluations/results/` directory.
+
+## License
+
+Formless is open-source software licensed under the [MIT License](LICENSE).
